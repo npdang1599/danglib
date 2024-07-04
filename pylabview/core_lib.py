@@ -8,6 +8,7 @@ import numpy as np
 from pymongo import MongoClient
 from vnstock3 import Vnstock
 from numba import njit
+from danglib.pylabview.src import Fns
 
 if "ACCEPT_TC" not in os.environ:
     os.environ["ACCEPT_TC"] = "tôi đồng ý"
@@ -21,7 +22,7 @@ class Adapters:
     @staticmethod
     def load_stocks_data_from_pickle():
         """Load stocks data from pickle file"""
-        return pd.read_pickle("/home/ubuntu/Dang/pylab_tview/map_income_df2.pickle")
+        return pd.read_pickle(Fns.pickle_stocks_data)
 
     @staticmethod
     def map_net_income(df: pd.DataFrame, symbol: str):
@@ -282,7 +283,7 @@ class Adapters:
             stocks (list): stocks list,
             stocks_groups_map (dict): map stock with beta group
         """
-        path = "/home/ubuntu/Dang/pylab_tview/All Ticker_Beta_May2024.xlsx"
+        path = Fns.stock_beta_group
         df = pd.read_excel(path, sheet_name="Sheet3")
         stocks = df["Ticker"].tolist()
 
