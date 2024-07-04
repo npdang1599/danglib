@@ -6,6 +6,14 @@ from danglib.pylabview.core_lib import pd, np, Ta, Utils, Adapters, Math
 from numba import njit
 from pymongo import MongoClient
 import logging
+import warnings
+
+pd.options.mode.chained_assignment = None
+
+
+# Tắt tất cả các FutureWarning
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
 
 class Globs:
     """Class of objects for global using purposes"""
@@ -23,7 +31,6 @@ class Globs:
         self.function_map = {
             "stock_scanner": Scanner.scan_multiple_stocks,
             "price_change": Conds.price_change,
-            "price_change_vs_hl": Conds.price_change_vs_hl,
             "price_comp_ma": Conds.price_comp_ma,
             "price_gap": Conds.price_gap,
             "price_highest_lowest": Conds.PriceAction.price_highest_lowest,
@@ -263,7 +270,7 @@ class Conds:
             ma_dir (str): "crossover", "crossunder", "above", "below"
 
         Returns:
-             pd.Series[bool]: True or False if use_flag is True else None
+             pd.Series[bool]: True or False
         """
         if use_flag:
             src = df["close"]
@@ -283,19 +290,6 @@ class Conds:
 
         return None
     
-    # usePriceHL = input.bool(defval = false, title = 'Price increase / decrease (so với high / low)', group = 'Price conditions')
-    # PriceHL_Direction = input.string(defval = 'Increase', options = ['Increase','Decrease'], title = '', inline = 'pricehl1', group = 'Price conditions')
-    # PriceHL_NBars = input.int(defval = 10, title = 'N Bars', inline = 'pricehl1', group = 'Price conditions')
-    # PriceHL_LowRange = input.float(defval = 5, title = 'Low Range', inline = 'pricehl', group = 'Price conditions')
-    # PriceHL_HighRange = input.float(defval = 100, title = 'High Range', inline = 'pricehl', group = 'Price conditions')
-    
-    # decrease = (ta.highest(high, PriceHL_NBars) / close - 1) * 100
-    # increase = (close / ta.lowest(low, PriceHL_NBars) - 1) * 100
-    
-    # increase_cond = PriceHL_Direction == 'Increase' and f_inrange(increase, PriceHL_LowRange, PriceHL_HighRange)
-    # decrease_cond = PriceHL_Direction == 'Decrease' and f_inrange(decrease, PriceHL_LowRange, PriceHL_HighRange)
-
-    # price_hl_cond = not usePriceHL or (increase_cond or decrease_cond)
     @staticmethod
     def price_change_vs_hl(
         df: pd.DataFrame,
@@ -337,7 +331,6 @@ class Conds:
             return Utils.in_range(pct_change, low_range, high_range, equal=False)
 
         return None
-        
 
     @staticmethod
     def price_gap(df: pd.DataFrame, gap_dir="Use Gap Up", use_flag: bool = True):
@@ -769,7 +762,7 @@ class Conds:
 
                 df_ni["pctChange"] = (
                     Math.pct_change(df_ni["rollSum"], pct_change_periods) * 100
-                )
+                ).round(6)
 
                 df_ni["matched"] = (
                     df_ni["pctChange"] > percentage
@@ -810,14 +803,11 @@ class Conds:
                 if(func_name not in glob_obj.function_map): 
                     continue
                 func = glob_obj.function_map[func_name]
-                
                 cond = func(df, **params)
-                
                 if cond is not None:
                     conds.append(cond)
         except Exception as e:
-            conds = []
-            logging.error(f"function `compute_any_conds` error: {e}")
+            logging.error(f"Function `compute_any_conds` met error: {e} when running func: `{func}`", exc_info=True)
 
         if len(conds) > 0:
             return Utils.combine_conditions(conds)
@@ -891,36 +881,40 @@ class Simulator:
     ):
         """Prepare data"""
         df = df.copy()
-        df["entryDay"] = df["day"].copy()
-        df["entryDay"] = df["entryDay"].shift(-1)
-        df["entryType"] = 1 if trade_direction == "Long" else -1
-        df["entryPrice"] = df["open"].shift(-1).copy()
-        df["exitDay"] = df["entryDay"].shift(-holding_periods)
-        df["exitType"] = df["entryType"] * -1
-        df["exitPrice"] = df["entryPrice"].shift(-holding_periods)
+        try:
+            df["entryDay"] = df["day"].copy()
+            df["entryDay"] = df["entryDay"].shift(-1)
+            df["entryType"] = 1 if trade_direction == "Long" else -1
+            df["entryPrice"] = df["open"].shift(-1).copy()
+            df["exitDay"] = df["entryDay"].shift(-holding_periods)
+            df["exitType"] = df["entryType"] * -1
+            df["exitPrice"] = df["entryPrice"].shift(-holding_periods)
 
-        df["priceChange"] = np.where(
-            trade_direction == "Long",
-            df["exitPrice"] - df["entryPrice"],
-            df["entryPrice"] - df["exitPrice"],
-        )
-        df["return"] = df["priceChange"] / df["entryPrice"] * 100
-        df["return1"]  =( (df["entryPrice"].shift(-1)  / df["entryPrice"]) - 1) * 100
-        df["return5"]  =( (df["entryPrice"].shift(-5)  / df["entryPrice"]) - 1) * 100
-        df["return10"] =( (df["entryPrice"].shift(-10) / df["entryPrice"]) - 1) * 100
-        df["return15"] =( (df["entryPrice"].shift(-15) / df["entryPrice"]) - 1) * 100
-        
-        df["downside"] = (
-            df["low"].rolling(holding_periods).min().shift(-holding_periods)
-        )
-        df["downside"] = (
-            df[["downside", "exitPrice"]].min(axis=1) / df["entryPrice"] - 1
-        ) * 100
+            df["priceChange"] = np.where(
+                trade_direction == "Long",
+                df["exitPrice"] - df["entryPrice"],
+                df["entryPrice"] - df["exitPrice"],
+            )
+            df["return"] = df["priceChange"] / df["entryPrice"] * 100
+            df["return1"]  =( (df["entryPrice"].shift(-1)  / df["entryPrice"]) - 1) * 100
+            df["return5"]  =( (df["entryPrice"].shift(-5)  / df["entryPrice"]) - 1) * 100
+            df["return10"] =( (df["entryPrice"].shift(-10) / df["entryPrice"]) - 1) * 100
+            df["return15"] =( (df["entryPrice"].shift(-15) / df["entryPrice"]) - 1) * 100
+            
+            df["downside"] = (
+                df["low"].rolling(holding_periods).min().shift(-holding_periods)
+            )
+            df["downside"] = (
+                df[["downside", "exitPrice"]].min(axis=1) / df["entryPrice"] - 1
+            ) * 100
 
-        df["upside"] = df["high"].rolling(holding_periods).max().shift(-holding_periods)
-        df["upside"] = (
-            df[["upside", "exitPrice"]].max(axis=1) / df["entryPrice"] - 1
-        ) * 100
+            df["upside"] = df["high"].rolling(holding_periods).max().shift(-holding_periods)
+            df["upside"] = (
+                df[["upside", "exitPrice"]].max(axis=1) / df["entryPrice"] - 1
+            ) * 100
+        except Exception as e:
+            logging.error(f"Function `prepare_data_for_backtesting` had met error: {e}")
+            df = None
         return df
 
     @staticmethod
@@ -956,11 +950,9 @@ class Simulator:
         total_return10 = 0.0
         total_return15 = 0.0
         
+        
         total_upside = 0.0
         total_downside = 0.0
-        
-        max_runup = np.NaN
-        max_drawdown = np.NaN
 
         is_trading = False
         entry_idx = 0
@@ -984,9 +976,6 @@ class Simulator:
 
         avg_upside_arr = np.full(len(signals), np.NaN)
         avg_downside_arr = np.full(len(signals), np.NaN)
-        
-        max_runup_arr = np.full(len(signals), np.NaN)
-        max_drawdown_arr = np.full(len(signals), np.NaN)
 
         for index, signal in enumerate(signals):
             if signal and not is_trading:
@@ -1005,20 +994,10 @@ class Simulator:
                     total_return10 += returns10[index]
                     total_return15 += returns15[index]
                     
+                    
                     total_upside += upsides[index]
                     total_downside += downsides[index]
-                    
-                    # max runup, max drawdown
-                    if np.isnan(max_runup):
-                        max_runup = upsides[index]
-                    else:
-                        max_runup = max(max_runup, upsides[index])
-                        
-                    if np.isnan(max_drawdown):
-                        max_drawdown = downsides[index]
-                    else:
-                        max_drawdown = min(max_drawdown, downsides[index])
-                    
+
                     if trade_profit > 0:
                         num_win += 1
                         total_profit += trade_profit
@@ -1047,10 +1026,6 @@ class Simulator:
                     
                     avg_upside_arr[index] = total_upside / num_trades
                     avg_downside_arr[index] = total_downside / num_trades
-                    
-                    max_runup_arr[index] = max_runup
-                    max_drawdown_arr[index] = max_drawdown
-                    
                     profit_factor_arr[index] = (
                         total_profit / (total_loss * -1) if total_loss != 0 else np.NaN
                     )
@@ -1078,13 +1053,11 @@ class Simulator:
             avg_returns15_arr,
             avg_upside_arr,
             avg_downside_arr,
-            max_runup_arr,
-            max_drawdown_arr,
             profit_factor_arr,
             is_entry_arr,
         )
 
-    def run(
+    def run_combine_multi_conds(
         self, trade_direction="Long", compute_start_time="2018_01_01", holding_periods=8
     ):
         df = self.df
@@ -1104,17 +1077,162 @@ class Simulator:
                 holding_periods=holding_periods,
             )
 
+
+        try:
+
+            
+            signals = func(df, params)
+            
+            if signals is None:
+                df["signal"] = Utils.new_1val_series(True, df) 
+            else:
+                df["signal"] = signals
+                
+            df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
+            # print(f"num of nan signals: {df['signal'].isna().sum()}")
+            df["name"] = name
+
+            # Compute trade stats using Numba
+            price_changes = df["priceChange"].values
+            returns = df["return"].values
+            returns1 = df["return1"].values
+            returns5 = df["return5"].values
+            returns10 = df["return10"].values
+            returns15 = df["return15"].values
+            signals = df["signal"].values
+            upsides = df["upside"].values
+            downsides = df["downside"].values
+            (
+                trading_status,
+                num_trades_arr,
+                winrate_arr,
+                winrate1_arr,
+                winrate5_arr,
+                winrate10_arr,
+                winrate15_arr,
+                avg_returns_arr,
+                avg_returns1_arr,
+                avg_returns5_arr,
+                avg_returns10_arr,
+                avg_returns15_arr,
+                avg_upside_arr,
+                avg_downside_arr,
+                profit_factor_arr,
+                is_entry_arr,
+            ) = self.compute_trade_stats(
+                price_changes, 
+                returns, 
+                returns1, 
+                returns5, 
+                returns10, 
+                returns15, 
+                signals, 
+                upsides, 
+                downsides, 
+                holding_periods
+            )
+
+            # Update DataFrame
+            df["numTrade"] = num_trades_arr
+            df["winrate"] = winrate_arr
+            df["winrateT1"] = winrate1_arr
+            df["winrateT5"] = winrate5_arr
+            df["winrateT10"] = winrate10_arr
+            df["winrateT15"] = winrate15_arr
+            df["avgReturn"] = avg_returns_arr
+            df["avgReturnT1"] = avg_returns1_arr
+            df["avgReturnT5"] = avg_returns5_arr
+            df["avgReturnT10"] = avg_returns10_arr
+            df["avgReturnT15"] = avg_returns15_arr
+            df["avgUpside"] = avg_upside_arr
+            df["avgDownside"] = avg_downside_arr
+            df["profitFactor"] = profit_factor_arr
+            df["isEntry"] = is_entry_arr
+            df["isTrading"] = trading_status
+
+            df["matched"] = np.where(df["signal"], 1, np.NaN)
+            df[
+                [
+                    "numTrade",
+                    "winrate",
+                    "winrateT1",
+                    "winrateT5",
+                    "winrateT10",
+                    "winrateT15",
+                    "profitFactor",
+                    "avgReturn",
+                    "avgReturnT1",
+                    "avgReturnT5",
+                    "avgReturnT10",
+                    "avgReturnT15",
+                    "avgUpside",
+                    "avgDownside",
+                ]
+            ] = df[
+                [
+                    "numTrade",
+                    "winrate",
+                    "winrateT1",
+                    "winrateT5",
+                    "winrateT10",
+                    "winrateT15",
+                    "profitFactor",
+                    "avgReturn",
+                    "avgReturnT1",
+                    "avgReturnT5",
+                    "avgReturnT10",
+                    "avgReturnT15",
+                    "avgUpside",
+                    "avgDownside",
+                ]
+            ].ffill().fillna(0)
+            self.df = df
+
+            result = df[
+                [
+                    "name",
+                    "numTrade",
+                    "winrate",
+                    "profitFactor",
+                    "avgReturn",
+                    "avgUpside",
+                    "avgDownside",
+                    "isEntry",
+                    "matched",
+                    "isTrading",
+                ]
+            ].iloc[-1]
+            result.name = self.name
+            self.result = result
+        except Exception as e:
+            logging.error(f"`Simmulation.run_combine_multi_conds` had met error: {e}")
+
         
-        signals = func(df, params)
+    def run_single_cond(
+        self, trade_direction="Long", compute_start_time="2018_01_01", holding_periods=8
+    ):
+        """Run simmulation"""
+        if "return" not in self.df.columns:
+            if Globs.verbosity == 1:
+                logging.warning(
+                    "Input dataframe was not prepared for backtesting,It will be prepared now!"
+                )
+            self.df = self.prepare_data_for_backtesting(
+                self.df,
+                trade_direction=trade_direction,
+                holding_periods=holding_periods,
+            )
+
+        df = self.df
+        signals = self.func(self.df, **self.params)
         
         if signals is None:
             df["signal"] = Utils.new_1val_series(True, df) 
         else:
             df["signal"] = signals
             
-        df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
-        # print(f"num of nan signals: {df['signal'].isna().sum()}")
-        df["name"] = name
+        df["signal"] = np.where(df["day"] < compute_start_time, False, df["signal"])
+        df["name"] = self.name
 
         # Compute trade stats using Numba
         price_changes = df["priceChange"].values
@@ -1141,8 +1259,6 @@ class Simulator:
             avg_returns15_arr,
             avg_upside_arr,
             avg_downside_arr,
-            max_runup_arr,
-            max_drawdown_arr,
             profit_factor_arr,
             is_entry_arr,
         ) = self.compute_trade_stats(
@@ -1172,8 +1288,6 @@ class Simulator:
         df["avgReturnT15"] = avg_returns15_arr
         df["avgUpside"] = avg_upside_arr
         df["avgDownside"] = avg_downside_arr
-        df["maxRunup"] = max_runup_arr
-        df["maxDrawdown"] = max_drawdown_arr
         df["profitFactor"] = profit_factor_arr
         df["isEntry"] = is_entry_arr
         df["isTrading"] = trading_status
@@ -1195,8 +1309,6 @@ class Simulator:
                 "avgReturnT15",
                 "avgUpside",
                 "avgDownside",
-                "maxRunup",
-                "maxDrawdown"
             ]
         ] = df[
             [
@@ -1214,11 +1326,8 @@ class Simulator:
                 "avgReturnT15",
                 "avgUpside",
                 "avgDownside",
-                "maxRunup",
-                "maxDrawdown"
             ]
         ].ffill().fillna(0)
-        self.df = df
 
         result = df[
             [
@@ -1229,8 +1338,6 @@ class Simulator:
                 "avgReturn",
                 "avgUpside",
                 "avgDownside",
-                "maxRunup",
-                "maxDrawdown",
                 "isEntry",
                 "matched",
                 "isTrading",
@@ -1238,6 +1345,9 @@ class Simulator:
         ].iloc[-1]
         result.name = self.name
         self.result = result
+
+
+
 
 class Scanner:
     """Scanner"""
@@ -1279,23 +1389,27 @@ class Scanner:
                 sum_ls.append(bt.result)
                 trades_ls.append(bt.df)
                 
-            
-        res_df = pd.DataFrame(sum_ls)
-        res_df = res_df[
-            [
-                "name",
-                "numTrade",
-                "winrate",
-                "profitFactor",
-                "avgReturn",
-                "avgUpside",
-                "avgDownside",
-            ]
-        ].round(2)
-        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups)
+        if (len(sum_ls) !=0) and (len(trades_ls)!=0):
+            res_df = pd.DataFrame(sum_ls)
+            res_df = res_df[
+                [
+                    "name",
+                    "numTrade",
+                    "winrate",
+                    "profitFactor",
+                    "avgReturn",
+                    "avgUpside",
+                    "avgDownside",
+                ]
+            ].round(2)
+            res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups)
 
-        trades_df = pd.concat(trades_ls)    
-        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
+            trades_df = pd.concat(trades_ls)    
+            trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
+        else:
+            res_df = pd.DataFrame()
+            trades_df = pd.DataFrame()
+
         return res_df, trades_df
     
     @staticmethod
@@ -1315,7 +1429,7 @@ class Scanner:
                     params=params,
                     name=stock,
                 )
-                bt.run(trade_direction, holding_periods=holding_periods)
+                bt.run_combine_multi_conds(trade_direction, holding_periods=holding_periods)
                 res = bt.result
                 df_trades = bt.df
                 df_trades["beta_group"] = glob_obj.dic_groups[stock]
@@ -1382,42 +1496,15 @@ def test():
     res, df_trades = Scanner.scan_multiple_stocks2(Conds.compute_any_conds, params={
         'price_change':{
             'use_flag': True,
-            'lower_thres': 6.7
+            'lower_thres': 5
         },
-    },
-        holding_periods=15
-    )
-    
-    
-    ls0 = [
-        'HOSE:GVR', 'HOSE:HAH', 'HOSE:HCM', 'HOSE:HDC', 'HOSE:HSG', 'HOSE:HTN', 'HNX:HUT', 'HNX:IDJ', 'HOSE:KBC', 'HOSE:KSB', 'HNX:L14', 'HOSE:LCG', 'HNX:MBS', 'HOSE:NKG', 'HOSE:NLG', 'HOSE:NVL', 'HOSE:ORS', 'HOSE:PC1', 'HOSE:PDR'
-    ]
-    ls = [i.split(":")[1] for i in ls0 ]
-    
-    t = df_trades[(df_trades['stock'] == 'DBC') & (df_trades['isEntry']==1)]
-    
-    all = res[(res['name'].isin(ls))].copy()
-    matched = res[(res['winrate'] >= 65) & (res['avgReturn'] >= 0) & (res['name'].isin(ls))].copy()
-    
-    
-    df_super_high = matched[matched['beta_group'] == 'Super High Beta']
-    df_high = matched[matched['beta_group'] == 'High Beta']
-    df_medium = matched[matched['beta_group'] == 'Medium']
-    df_low = matched[matched['beta_group'] == 'Low']
-    len(df_super_high)
-
-    def calc(df):
-        avgWr = (df['winrate'] * df['numTrade']).sum() / df['numTrade'].sum()
-        avgre = (df['avgReturn'] * df['numTrade']).sum() / df['numTrade'].sum()
-        return avgWr, avgre
-    
-    avgwr_all, avgre_all = calc(all)
-    
-    avgwr_sh, avgre_sh = calc(df_super_high)
-    avgwr_hi, avgre_hi = calc(df_high)
-    avgwr_me, avgre_me = calc(df_medium)
-    avgwr_lo, avgre_lo = calc(df_low)
-    
+        'vol_percentile':{
+            'use_flag': True,
+            'ma_length': 1,
+            'ranking_window':128,
+            'high_range': 10
+        }
+    })
     
     res[res['name'] == 'HPG']
 
@@ -1507,6 +1594,5 @@ def test():
         params=params,
         **scan_params
         )
-    df_trades.to_pickle("/home/ubuntu/Dang/pylabview/df_trades_sample.pickle")
     
     

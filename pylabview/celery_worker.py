@@ -3,6 +3,7 @@
 from celery import Celery
 from redis import Redis
 from danglib.pylabview.funcs import Simulator, pd
+import logging
 
 class CELERY_RESOURCES:
     HOST = 'localhost'
@@ -54,9 +55,10 @@ def scan_one_stock(df: pd.DataFrame, func, params, name="", trade_direction='Lon
         name=name,
     )
     try:
-        bt.run(trade_direction=trade_direction, holding_periods=holding_periods)
+        bt.run_combine_multi_conds(trade_direction=trade_direction, holding_periods=holding_periods)
     except Exception as e:
-        print(f"scan error: {e}")
+        logging.error(f"scan error: {e}")
+        bt = None
 
     return bt
     
