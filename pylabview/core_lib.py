@@ -344,6 +344,7 @@ class Adapters:
         df_ni = Adapters.load_quarter_netincome_from_db_VCI(stocks)
         dfres = pd.merge(df_stocks, df_ni, how='left', on=['stock', 'mapYQ'])
         dfres['netIncome'] = dfres['netIncome'].fillna(0)
+        dfres = dfres.drop(['year', 'quarter'], axis=1)
         
         if to_pickle:
             dfres.to_pickle(fn)

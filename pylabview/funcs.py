@@ -69,8 +69,8 @@ class Globs:
             "VNINDEX", from_day=self.data_from_day
         )
 
-    def gen_stocks_data(self):
-        Adapters.prepare_stocks_data(self.stocks, fn=Fns.pickle_stocks_data, to_pickle=True)
+    def gen_stocks_data(self, fn=Fns.pickle_stocks_data):
+        Adapters.prepare_stocks_data(self.stocks, fn=fn, to_pickle=True)
 
     @staticmethod
     def get_saved_params():
