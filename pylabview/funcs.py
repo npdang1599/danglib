@@ -2,7 +2,7 @@
 
 import pprint
 import logging
-from danglib.pylabview.core_lib import pd, np, Ta, Utils, Adapters, Math
+from danglib.pylabview.core_lib import pd, np, Ta, Utils, Adapters, Math, Fns
 from numba import njit
 from pymongo import MongoClient
 import logging
@@ -68,6 +68,9 @@ class Globs:
         self.df_vnindex: pd.DataFrame = Adapters.get_stock_from_vnstock(
             "VNINDEX", from_day=self.data_from_day
         )
+
+    def gen_stocks_data(self):
+        Adapters.prepare_stocks_data(self.stocks, fn=Fns.pickle_stocks_data, to_pickle=True)
 
     @staticmethod
     def get_saved_params():

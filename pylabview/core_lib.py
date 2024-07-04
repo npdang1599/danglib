@@ -294,11 +294,61 @@ class Adapters:
         return stocks, stocks_groups_map
     
     @staticmethod
-    def load_income_statement_quarter_VCI_from_db():
+    def load_quarter_netincome_from_db_VCI(symbols: list):
         db = MongoClient("ws", 27022)["stockdata"]
         col = db['VCI_income_statement_quarter']
-        df = pd.DataFrame(list(col.find({},{"_id":0})))
+        df = pd.DataFrame(
+            list(
+                col.find(
+                    {'ticker':{"$in":symbols}},
+                    {
+                        "_id":0, 
+                        "ticker":1,
+                        "yearreport":1,
+                        "lengthreport":1,
+                        "net_profitloss_before_tax":1
+                    }
+                )
+            )
+        )
+        df.columns = ["stock", "year", "quarter", "netIncome"]
+        df['netIncome'] = df['netIncome'].fillna(0)
+        df["mapYQ"] = df["year"] * 10 + df["quarter"]
+        df["mapYQ"] = np.where(df["quarter"] == 4, df["mapYQ"] + 7, df["mapYQ"] + 1)
         return df
+    
+    @staticmethod
+    def prepare_stocks_data_old(stocks, start_day='2017_01_01', fn="stocks_data.pickle", to_pickle=False):
+        df_stocks: pd.DataFrame = Adapters.get_stocks_from_db_ssi2(stocks=stocks, from_day=start_day)
+        ls = []
+        for symbol, df in df_stocks.groupby("stock"):
+            try:
+                dft = Adapters.map_net_income(df, symbol)
+                ls.append(dft)
+            except Exception as e:
+                logging.error(f"While running function `prepare_all_stocks_data`, encountered an error: {e}")
+
+        dfres = pd.concat(ls)
+        dfres['netIncome'] = dfres['netIncome'].fillna(0)
+
+        if to_pickle:
+            dfres.to_pickle(fn)
+        
+        return dfres
+    
+    @staticmethod
+    def prepare_stocks_data(stocks, fn="stocks_data.pickle", start_day='2017_01_01', to_pickle=False):
+        df_stocks: pd.DataFrame = Adapters.get_stocks_from_db_ssi2(stocks=stocks, from_day=start_day)
+        df_stocks = Utils.compute_quarter_day_map(df_stocks)
+        
+        df_ni = Adapters.load_quarter_netincome_from_db_VCI(stocks)
+        dfres = pd.merge(df_stocks, df_ni, how='left', on=['stock', 'mapYQ'])
+        dfres['netIncome'] = dfres['netIncome'].fillna(0)
+        
+        if to_pickle:
+            dfres.to_pickle(fn)
+
+        return dfres
 
     @staticmethod
     def get_stocks():
@@ -1061,10 +1111,22 @@ class Utils:
         df[["y", "m", "d"]] = df["day"].str.split("_", expand=True)
         df["Q"] = np.ceil(df["m"].astype(int) / 3)
         df["mapYQ"] = df["y"].astype(int) * 10 + df["Q"].astype(int)
+        df = df.sort_values(['stock', 'day'])
         df["mapYQ"] = df.groupby('stock')["mapYQ"].shift(-1).ffill()
         df = df.drop(["y", "m", "d", "Q"], axis=1)
-
+        df = df.reset_index(drop=True)
         return df
+    
+    @staticmethod
+    def compute_quarter_lastday_map(df: pd.DataFrame):
+        """From dataframe stocks data, extract net Income map with last quarter date for each stock"""
+        df[df.isna().any(axis=1)]
+        df['dif'] = df['mapYQ'].diff()
+        t = df[(df['dif'] != 0) & (~df['dif'].isna())].copy()
+        t['netIncome'] = t['netIncome'].fillna(0)
+        t[t.isna().any(axis=1)]
+        dfres = t[['day', 'stock', 'netIncome']].copy()
+        return dfres
     
     @staticmethod
     def combine_conditions(conditions: list[pd.Series]):
