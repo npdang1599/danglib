@@ -291,6 +291,13 @@ class Adapters:
         df["group_name"] = df["Group"].map(group_name_map)
         stocks_groups_map = dict(zip(df["Ticker"], df["group_name"]))
         return stocks, stocks_groups_map
+    
+    @staticmethod
+    def load_income_statement_quarter_VCI_from_db():
+        db = MongoClient("ws", 27022)["stockdata"]
+        col = db['VCI_income_statement_quarter']
+        df = pd.DataFrame(list(col.find({},{"_id":0})))
+        return df
 
     @staticmethod
     def get_stocks():
@@ -822,48 +829,6 @@ class Ta:
         return macd, signal
 
     @staticmethod
-    def macd3(
-        df: pd.DataFrame,
-        src_name: str = "close",
-        r2_period: int = 20,
-        fast: int = 10,
-        slow: int = 20,
-        signal_length: int = 9
-    ):
-        """Calculate MACD"""
-        src = df[src_name]
-        bar_index = np.arange(len(src))
-
-        a1 = 2 / (fast + 1)
-        a2 = 2 / (slow + 1)
-
-        correlation = src.rolling(r2_period).corr(pd.Series(bar_index))
-        r2 = 0.5 * correlation**2 + 0.5
-        K = r2 * ((1 - a1) * (1 - a2)) + (1 - r2) * ((1 - a1) / (1 - a2))
-
-
-        nan_mask = abs(K / K)
-
-        # @njit
-        def calc_np_macd(src, a1, a2, K):
-            np_macd = np.zeros(len(src))
-            
-            for i in range(2, len(src)):
-                np_macd[i] = (
-                    (src[i] - src[i - 1]) * (a1 - a2)
-                    + (-a2 - a1 + 2) * nz(np_macd[i - 1])
-                    - K[i] * (nz(np_macd[i - 2]))
-                )
-            return np_macd
-        
-        np_macd = calc_np_macd(src.values, a1, a2, K.values)
-        macd = pd.Series(np_macd, index=bar_index)
-        signal = Ta.ema(macd, signal_length)
-
-        return macd, signal
-
-
-    @staticmethod
     def bbwp_old(
         df: pd.DataFrame,
         src_name: str = "close",
@@ -919,10 +884,17 @@ class Ta:
         bbpctb = (src - lower) / (upper - lower) * 100
 
         return bbpctb
+    
+class VTa:
+    """TA functions used for vector calculations"""
 
+    @staticmethod
+    def min(src1:pd.DataFrame, src2:pd.DataFrame):
+        return pd.DataFrame(np.minimum(src1.values, src2.values), columns=src1.columns, index=src1.index)
 
-# class Fa:
-#     """Fundamental analysis"""
+    @staticmethod
+    def max(src1:pd.DataFrame, src2:pd.DataFrame):
+        return pd.DataFrame(np.maximum(src1.values, src2.values), columns=src1.columns, index=src1.index            )
 
 
 class Math:
@@ -1088,8 +1060,9 @@ class Utils:
         df[["y", "m", "d"]] = df["day"].str.split("_", expand=True)
         df["Q"] = np.ceil(df["m"].astype(int) / 3)
         df["mapYQ"] = df["y"].astype(int) * 10 + df["Q"].astype(int)
-        df["mapYQ"] = df["mapYQ"].shift(-1).ffill()
+        df["mapYQ"] = df.groupby('stock')["mapYQ"].shift(-1).ffill()
         df = df.drop(["y", "m", "d", "Q"], axis=1)
+
         return df
     
     @staticmethod

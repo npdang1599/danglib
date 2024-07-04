@@ -3,6 +3,7 @@
 from celery import Celery
 from redis import Redis
 from danglib.pylabview.funcs import Simulator, pd
+import logging
 
 class CELERY_RESOURCES:
     HOST = 'localhost'

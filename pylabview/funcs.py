@@ -6,6 +6,14 @@ from danglib.pylabview.core_lib import pd, np, Ta, Utils, Adapters, Math
 from numba import njit
 from pymongo import MongoClient
 import logging
+import warnings
+
+pd.options.mode.chained_assignment = None
+
+
+# Tắt tất cả các FutureWarning
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
 
 class Globs:
     """Class of objects for global using purposes"""
@@ -283,19 +291,6 @@ class Conds:
 
         return None
     
-    # usePriceHL = input.bool(defval = false, title = 'Price increase / decrease (so với high / low)', group = 'Price conditions')
-    # PriceHL_Direction = input.string(defval = 'Increase', options = ['Increase','Decrease'], title = '', inline = 'pricehl1', group = 'Price conditions')
-    # PriceHL_NBars = input.int(defval = 10, title = 'N Bars', inline = 'pricehl1', group = 'Price conditions')
-    # PriceHL_LowRange = input.float(defval = 5, title = 'Low Range', inline = 'pricehl', group = 'Price conditions')
-    # PriceHL_HighRange = input.float(defval = 100, title = 'High Range', inline = 'pricehl', group = 'Price conditions')
-    
-    # decrease = (ta.highest(high, PriceHL_NBars) / close - 1) * 100
-    # increase = (close / ta.lowest(low, PriceHL_NBars) - 1) * 100
-    
-    # increase_cond = PriceHL_Direction == 'Increase' and f_inrange(increase, PriceHL_LowRange, PriceHL_HighRange)
-    # decrease_cond = PriceHL_Direction == 'Decrease' and f_inrange(decrease, PriceHL_LowRange, PriceHL_HighRange)
-
-    # price_hl_cond = not usePriceHL or (increase_cond or decrease_cond)
     @staticmethod
     def price_change_vs_hl(
         df: pd.DataFrame,
@@ -337,7 +332,6 @@ class Conds:
             return Utils.in_range(pct_change, low_range, high_range, equal=False)
 
         return None
-        
 
     @staticmethod
     def price_gap(df: pd.DataFrame, gap_dir="Use Gap Up", use_flag: bool = True):
@@ -769,7 +763,7 @@ class Conds:
 
                 df_ni["pctChange"] = (
                     Math.pct_change(df_ni["rollSum"], pct_change_periods) * 100
-                )
+                ).round(6)
 
                 df_ni["matched"] = (
                     df_ni["pctChange"] > percentage
@@ -810,9 +804,7 @@ class Conds:
                 if(func_name not in glob_obj.function_map): 
                     continue
                 func = glob_obj.function_map[func_name]
-                
                 cond = func(df, **params)
-                
                 if cond is not None:
                     conds.append(cond)
         except Exception as e:
@@ -891,36 +883,40 @@ class Simulator:
     ):
         """Prepare data"""
         df = df.copy()
-        df["entryDay"] = df["day"].copy()
-        df["entryDay"] = df["entryDay"].shift(-1)
-        df["entryType"] = 1 if trade_direction == "Long" else -1
-        df["entryPrice"] = df["open"].shift(-1).copy()
-        df["exitDay"] = df["entryDay"].shift(-holding_periods)
-        df["exitType"] = df["entryType"] * -1
-        df["exitPrice"] = df["entryPrice"].shift(-holding_periods)
+        try:
+            df["entryDay"] = df["day"].copy()
+            df["entryDay"] = df["entryDay"].shift(-1)
+            df["entryType"] = 1 if trade_direction == "Long" else -1
+            df["entryPrice"] = df["open"].shift(-1).copy()
+            df["exitDay"] = df["entryDay"].shift(-holding_periods)
+            df["exitType"] = df["entryType"] * -1
+            df["exitPrice"] = df["entryPrice"].shift(-holding_periods)
 
-        df["priceChange"] = np.where(
-            trade_direction == "Long",
-            df["exitPrice"] - df["entryPrice"],
-            df["entryPrice"] - df["exitPrice"],
-        )
-        df["return"] = df["priceChange"] / df["entryPrice"] * 100
-        df["return1"]  =( (df["entryPrice"].shift(-1)  / df["entryPrice"]) - 1) * 100
-        df["return5"]  =( (df["entryPrice"].shift(-5)  / df["entryPrice"]) - 1) * 100
-        df["return10"] =( (df["entryPrice"].shift(-10) / df["entryPrice"]) - 1) * 100
-        df["return15"] =( (df["entryPrice"].shift(-15) / df["entryPrice"]) - 1) * 100
-        
-        df["downside"] = (
-            df["low"].rolling(holding_periods).min().shift(-holding_periods)
-        )
-        df["downside"] = (
-            df[["downside", "exitPrice"]].min(axis=1) / df["entryPrice"] - 1
-        ) * 100
+            df["priceChange"] = np.where(
+                trade_direction == "Long",
+                df["exitPrice"] - df["entryPrice"],
+                df["entryPrice"] - df["exitPrice"],
+            )
+            df["return"] = df["priceChange"] / df["entryPrice"] * 100
+            df["return1"]  =( (df["entryPrice"].shift(-1)  / df["entryPrice"]) - 1) * 100
+            df["return5"]  =( (df["entryPrice"].shift(-5)  / df["entryPrice"]) - 1) * 100
+            df["return10"] =( (df["entryPrice"].shift(-10) / df["entryPrice"]) - 1) * 100
+            df["return15"] =( (df["entryPrice"].shift(-15) / df["entryPrice"]) - 1) * 100
+            
+            df["downside"] = (
+                df["low"].rolling(holding_periods).min().shift(-holding_periods)
+            )
+            df["downside"] = (
+                df[["downside", "exitPrice"]].min(axis=1) / df["entryPrice"] - 1
+            ) * 100
 
-        df["upside"] = df["high"].rolling(holding_periods).max().shift(-holding_periods)
-        df["upside"] = (
-            df[["upside", "exitPrice"]].max(axis=1) / df["entryPrice"] - 1
-        ) * 100
+            df["upside"] = df["high"].rolling(holding_periods).max().shift(-holding_periods)
+            df["upside"] = (
+                df[["upside", "exitPrice"]].max(axis=1) / df["entryPrice"] - 1
+            ) * 100
+        except Exception as e:
+            logging.error(f"Function `prepare_data_for_backtesting` had met error: {e}")
+            df = None
         return df
 
     @staticmethod
@@ -955,6 +951,7 @@ class Simulator:
         total_return5 = 0.0
         total_return10 = 0.0
         total_return15 = 0.0
+        
         
         total_upside = 0.0
         total_downside = 0.0
@@ -1382,42 +1379,15 @@ def test():
     res, df_trades = Scanner.scan_multiple_stocks2(Conds.compute_any_conds, params={
         'price_change':{
             'use_flag': True,
-            'lower_thres': 6.7
+            'lower_thres': 5
         },
-    },
-        holding_periods=15
-    )
-    
-    
-    ls0 = [
-        'HOSE:GVR', 'HOSE:HAH', 'HOSE:HCM', 'HOSE:HDC', 'HOSE:HSG', 'HOSE:HTN', 'HNX:HUT', 'HNX:IDJ', 'HOSE:KBC', 'HOSE:KSB', 'HNX:L14', 'HOSE:LCG', 'HNX:MBS', 'HOSE:NKG', 'HOSE:NLG', 'HOSE:NVL', 'HOSE:ORS', 'HOSE:PC1', 'HOSE:PDR'
-    ]
-    ls = [i.split(":")[1] for i in ls0 ]
-    
-    t = df_trades[(df_trades['stock'] == 'DBC') & (df_trades['isEntry']==1)]
-    
-    all = res[(res['name'].isin(ls))].copy()
-    matched = res[(res['winrate'] >= 65) & (res['avgReturn'] >= 0) & (res['name'].isin(ls))].copy()
-    
-    
-    df_super_high = matched[matched['beta_group'] == 'Super High Beta']
-    df_high = matched[matched['beta_group'] == 'High Beta']
-    df_medium = matched[matched['beta_group'] == 'Medium']
-    df_low = matched[matched['beta_group'] == 'Low']
-    len(df_super_high)
-
-    def calc(df):
-        avgWr = (df['winrate'] * df['numTrade']).sum() / df['numTrade'].sum()
-        avgre = (df['avgReturn'] * df['numTrade']).sum() / df['numTrade'].sum()
-        return avgWr, avgre
-    
-    avgwr_all, avgre_all = calc(all)
-    
-    avgwr_sh, avgre_sh = calc(df_super_high)
-    avgwr_hi, avgre_hi = calc(df_high)
-    avgwr_me, avgre_me = calc(df_medium)
-    avgwr_lo, avgre_lo = calc(df_low)
-    
+        'vol_percentile':{
+            'use_flag': True,
+            'ma_length': 1,
+            'ranking_window':128,
+            'high_range': 10
+        }
+    })
     
     res[res['name'] == 'HPG']
 
