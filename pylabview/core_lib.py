@@ -276,6 +276,46 @@ class Adapters:
         return df
 
     @staticmethod
+    def get_stocks_data_from_db_fiinpro(stocks: list, from_day: str = '2017_01_01'):
+        db = MongoClient("ws", 27022)["stockdata"]
+        col_fiinpro = db['price_fiinpro_data']
+
+        df = pd.DataFrame(
+            list(
+                col_fiinpro.find(
+                    {"Ticker": {"$in": stocks}, "TradingDate": {"$gte": from_day.replace('_','-')}}, 
+                    {
+                        "_id":0,
+                        'TradingDate':1,
+                        'Ticker':1,
+                        'OpenPriceAdjusted' : 1,
+                        'ClosePriceAdjusted' : 1,
+                        'HighestPriceAdjusted' : 1,
+                        'LowestPriceAdjusted' : 1,
+                        'TotalMatchValue':1,
+                    }
+                )
+            )
+        )
+
+        df = df.rename(
+            columns = { 
+                'TradingDate':'day',
+                'Ticker' : 'stock', 
+                'OpenPriceAdjusted' : 'open',
+                'ClosePriceAdjusted' : 'close',
+                'HighestPriceAdjusted' : 'high',
+                'LowestPriceAdjusted' : 'low',
+                'TotalMatchValue':'volume',
+            }
+        )
+    
+        df['day'] = df['day'].str.replace('-','_')
+        df = df[df['volume']>0].copy()
+        
+        return df
+
+    @staticmethod
     def get_stocks_beta_group():
         """Get stocks list and group by Beta from excel file
 
@@ -338,7 +378,7 @@ class Adapters:
     
     @staticmethod
     def prepare_stocks_data(stocks, fn="stocks_data.pickle", start_day='2017_01_01', to_pickle=False):
-        df_stocks: pd.DataFrame = Adapters.get_stocks_from_db_ssi2(stocks=stocks, from_day=start_day)
+        df_stocks: pd.DataFrame = Adapters.get_stocks_data_from_db_fiinpro(stocks=stocks, from_day=start_day)
         df_stocks = Utils.compute_quarter_day_map(df_stocks)
         
         df_ni = Adapters.load_quarter_netincome_from_db_VCI(stocks)
