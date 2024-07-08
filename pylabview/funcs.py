@@ -47,6 +47,7 @@ class Globs:
             "index_cond": Conds.index_cond,
             "lookback_cond": Conds.lookback_cond,
         }
+        self.sectors = {}
 
     def load_stocks_data(self):
         """run to load stocks data"""
@@ -78,13 +79,6 @@ class Globs:
         col = db['strategies']
         df = pd.DataFrame(list(col.find({}, {"_id":0, "name":1})))
         df.rename(columns={'name':'strategies'})
-        return df
-    
-    @staticmethod
-    def load_params_old(name):
-        db = MongoClient(host="localhost", port = 27022)["dang_scanned"]
-        col = db['strategies']
-        df = pd.DataFrame(list(col.find({'name':name},{"_id":0, 'configs':1}))[0]['configs'])
         return df
     
     @staticmethod
@@ -134,36 +128,9 @@ class Globs:
         params['lookback_cond'] = lkbk_params
         
         return scan_params, params
-    
-    @staticmethod
-    def process_scan_params_old(params_map_df: pd.DataFrame, scan_index=True):
-        master_params_dic = {}
 
-        df_scan_params = params_map_df[params_map_df["function"] == "stock_scanner"]
-        scan_params = dict(zip(df_scan_params["param_name"], df_scan_params["value"]))
-
-        for master_name, df_master in params_map_df.groupby("master_name"):
-            params_func_dict = {}
-            for func_name, df in df_master.groupby("function"):
-                name_val_map = {}
-                if df["param_parent"].notna().any():
-                    for parent_param, df_child in df.groupby("param_parent"):
-                        name_val_map[parent_param] = dict(
-                            zip(df_child["param_name"], df_child["value"])
-                        )
-
-                df_no_parent = df[df["param_parent"].isna()]
-
-                if df_no_parent is not None:
-                    name_val_map.update(
-                        dict(zip(df_no_parent["param_name"], df_no_parent["value"]))
-                    )
-
-                params_func_dict[func_name] = name_val_map
-
-            master_params_dic[master_name] = params_func_dict
-
-        return scan_params, master_params_dic
+    def load_sectors_data(self):
+        self.sectors = Adapters.load_sectors_data()
 
 class Conds:
     """Custom condition funcitions"""
@@ -220,6 +187,47 @@ class Conds:
             )
             res = Utils.combine_conditions([pos_cond, range_cond])
             return res
+        
+        @staticmethod
+        def two_ma_lines(
+            df: pd.DataFrame,
+            src_name: str,
+            ma_len1=5,
+            ma_len2=15,
+            ma_type="EMA",
+            ma_dir="above",
+            use_flag: bool = True,
+        ):
+            """Check if the two moving averages (MA) of the price
+            crossover, crossunder, are above, or below each other.
+
+            Args:
+                df (pd.DataFrame): ohlcv dataframe
+                ma_len1 (int): MA1 length
+                ma_len2 (int): MA2 length
+                ma_type (str): "EMA", "SMA"
+                ma_dir (str): "crossover", "crossunder", "above", "below"
+
+            Returns:
+                pd.Series[bool]: True or False if use_flag is True else None
+            """
+            if use_flag:
+                src = df[src_name]
+                ma1 = Ta.ma(src, ma_len1, ma_type)
+                ma2 = Ta.ma(src, ma_len2, ma_type)
+
+                if ma_dir == "crossover":
+                    price_ma_cond = Ta.crossover(ma1, ma2)
+                if ma_dir == "crossunder":
+                    price_ma_cond = Ta.crossunder(ma1, ma2)
+                if ma_dir == "above":
+                    price_ma_cond = ma1 > ma2
+                if ma_dir == "below":
+                    price_ma_cond = ma1 < ma2
+
+                return price_ma_cond
+
+            return None
 
     @staticmethod
     def price_change(
@@ -794,6 +802,49 @@ class Conds:
                 return matched
 
             return None
+        
+    # ACF1_MA_useMA  = input.bool(defval = false, title = 'Coking Coal MA combination', group = 'Coking Coal')
+    # ACF1_MA_MAType = input.string(defval = 'EMA', title = 'Method', inline = 'MA1', options = ['EMA', 'SMA'], group = 'Coking Coal')
+    # ACF1_MA_MALen1 = input.int(defval = 5, title = 'MA1', inline = 'MA1', group = 'Coking Coal')
+    # ACF1_MA_MALen2 = input.int(defval = 15, title = 'MA2', inline = 'MA1', group = 'Coking Coal')
+    # ACF1_MA_useEntryCond = input.bool(defval = false, title = '', inline = 'MA7', group= 'Coking Coal')
+    # ACF1_MA_EntryCond = input.string(defval = 'crossover', title = 'Entry Conditions',options = ['crossover', 'crossunder', 'above', 'below'],inline = 'MA7', group = 'Coking Coal')
+
+    # ACF1_hlUseCond = input.bool(false, title = 'Increase/Decrease over N bars', group = 'Coking Coal', tooltip = 'Trong vòng n bars, so sánh giá close với low nếu chọn Increase (high nếu chọn Decrease), phần trăm thay đổi phải nằm trong range thì vào lệnh')
+    # ACF1_hl_nbars = input.int(5, title = 'nBars', group = 'Coking Coal')
+    # ACF1_hl_dir = input.string('increase', options = ['increase', 'decrease'], title = 'Direction', group = 'Coking Coal')
+    # ACF1_hl_lower = input.float(-999, title = 'lower', inline = 'range', group = 'Coking Coal')
+    # ACF1_hl_upper = input.float(999, title = 'upper', inline = 'range', group = 'Coking Coal')
+
+    class Sectors:
+        @staticmethod
+        def coking_coal(
+            df: pd.DataFrame, 
+            ma_use_flag: bool = False, # Coking Coal MA combination
+            ma_type = 'EMA', # Method
+            ma_len1 = 5, # MA1
+            ma_len2 = 15, # MA2
+            ma_dir = 'crossover', # Direction
+            hl_use_flag: bool = False, # Increase/Decrease over N bars
+            hl_nbars = 5, # N Bars
+            hl_dir = 'increase', # Direction
+            hl_lower = -999, # Lower
+            hl_upper = 999 # Upper
+        ):
+            df_steel = glob_obj.sectors['steel']['io_data']
+            ma_cond = Conds.Standards.two_ma_lines(
+                df_steel,
+                src_name='Aus Coal',
+                ma_len1=ma_len1,
+                ma_len2=ma_len2,
+                ma_type=ma_type,
+                ma_dir = ma_dir,
+                use_flag=ma_use_flag
+            )
+
+            
+
+
 
     @staticmethod
     def compute_any_conds(df: pd.DataFrame, functions_params_dic: dict):
@@ -1243,13 +1294,19 @@ class Scanner:
     """Scanner"""
 
     @staticmethod
-    def scan_multiple_stocks(func, params, trade_direction="Long", holding_periods=60):
+    def scan_multiple_stocks(func, params, stocks=None, trade_direction="Long", holding_periods=60):
         """Backtest on multiple stocks"""
         from danglib.pylabview.celery_worker import scan_one_stock, clean_redis
 
+        df_all_stocks = glob_obj.df_stocks
+        if stocks is None:
+            stocks = glob_obj.df_stocks
+        else:
+            df_all_stocks= df_all_stocks[df_all_stocks['stock'].isin(stocks)]
+
         clean_redis()
         
-        df_all_stocks = glob_obj.df_stocks
+        
         
         sum_ls = []
         trades_ls = []
@@ -1354,6 +1411,7 @@ class Scanner:
 glob_obj = Globs()
 glob_obj.load_stocks_data_pickle()
 glob_obj.load_vnindex()
+glob_obj.load_sectors_data()
 
 def test():
     """Test functions"""

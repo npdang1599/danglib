@@ -8,7 +8,7 @@ import numpy as np
 from pymongo import MongoClient
 from vnstock3 import Vnstock
 from numba import njit
-from danglib.pylabview.src import Fns
+from danglib.pylabview.src import Fns, sectors_paths
 
 if "ACCEPT_TC" not in os.environ:
     os.environ["ACCEPT_TC"] = "tôi đồng ý"
@@ -385,6 +385,7 @@ class Adapters:
         dfres = pd.merge(df_stocks, df_ni, how='left', on=['stock', 'mapYQ'])
         dfres['netIncome'] = dfres['netIncome'].fillna(0)
         dfres = dfres.drop(['year', 'quarter'], axis=1)
+        dfres = dfres.sort_values(['stock', 'day'])
         
         if to_pickle:
             dfres.to_pickle(fn)
@@ -591,6 +592,49 @@ class Adapters:
         stocks = [i.split(":")[1] for i in stocks]
         return list(set(stocks))
 
+    @staticmethod
+    def load_sectors_data():
+
+        def load_excel_sheet(path, sheet_name, header=0):
+            df: pd.DataFrame = pd.read_excel(path, sheet_name=sheet_name, header=header)
+            return df
+        
+        def load_io_data(path, sheet_name, header=0):
+            df: pd.DataFrame = load_excel_sheet(path, sheet_name, header)
+            df = df.rename(columns={'Dates': 'day'})
+            df['day'] = df['day'].astype(str).str.replace("-", "_")
+            df = df.sort_values('day')
+            return df
+        
+
+        file_info_cached = {}
+        res = {}
+
+        for name, data in sectors_paths.items():
+            cate_info = data['categories']
+            io_data = data['io_data']
+
+            cate_cached_name = cate_info['path'] + cate_info.get('sheet_name', 'Sheet1')
+            if cate_cached_name not in file_info_cached:
+                file_info_cached[cate_cached_name] = load_excel_sheet(**cate_info)
+
+            df_cate: pd.DataFrame = file_info_cached[cate_cached_name]
+
+            io_cached_name = io_data['path'] + io_data.get('sheet_name', 'Sheet1')
+            if io_cached_name not in file_info_cached:
+                file_info_cached[io_cached_name] = load_io_data(**io_data)
+
+            df_io: pd.DataFrame = file_info_cached[io_cached_name]
+
+            df_cate['available'] = df_cate['Name'].isin(df_io.columns)
+            df_cate.columns = ['name', 'categories', 'available']
+
+            res[name] = {
+                'categories': df_cate,
+                'io_data': df_io
+            }
+
+        return res
 
 class Ta:
     """Technical analysis"""
@@ -1180,6 +1224,15 @@ class Utils:
                 else:
                     res = res & cond 
         return res
+    
+    @staticmethod
+    def merge_condition(df: pd.DataFrame, day_mapped_cond: pd.Series):
+        if day_mapped_cond is not None:
+            df['cond'] = df['day'].map(day_mapped_cond)
+            df['cond'] = df['cond'].fillna(False)
+            return df["cond"]
+
+
 
 
 RUN = False
