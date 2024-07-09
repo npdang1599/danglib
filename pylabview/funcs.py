@@ -7,6 +7,8 @@ from numba import njit
 from pymongo import MongoClient
 import logging
 import warnings
+import argparse
+from danglib.chatbots.viberbot import F5bot
 
 pd.options.mode.chained_assignment = None
 
@@ -46,14 +48,19 @@ class Globs:
             "net_income": Conds.Fa.net_income,
             "index_cond": Conds.index_cond,
             "lookback_cond": Conds.lookback_cond,
+            "steel_ma_and_hl": Conds.Sectors.steel_ma_and_hl,
+            "iron_ore": Conds.Sectors.iron_ore,
+            "china_hrc": Conds.Sectors.china_hrc,
+            "coking_coal": Conds.Sectors.coking_coal,
+            "china_longsteel": Conds.Sectors.china_longsteel,
+            "steel_scrap": Conds.Sectors.steel_scrap,
+            "hpg_margin": Conds.Sectors.hpg_margin
         }
         self.sectors = {}
 
     def load_stocks_data(self):
         """run to load stocks data"""
-        self.df_stocks = Adapters.get_stocks_from_db_ssi(
-            stocks=glob_obj.stocks, from_day=self.data_from_day
-        )
+        self.df_stocks = Adapters.load_stocks_data_from_main_db()
 
     def load_stocks_data_pickle(self):
         """Load data from pickle"""
@@ -70,8 +77,22 @@ class Globs:
             "VNINDEX", from_day=self.data_from_day
         )
 
-    def gen_stocks_data(self, fn=Fns.pickle_stocks_data):
-        Adapters.prepare_stocks_data(self.stocks, fn=fn, to_pickle=True)
+    def gen_stocks_data(self, fn=Fns.pickle_stocks_data, collection=None, send_viber=False):
+        try:
+            stocks = self.stocks
+            Adapters.prepare_stocks_data(stocks, fn=fn, db_collection=collection, to_pickle=False, to_mongo=True)
+
+            df = Adapters.load_stocks_data_from_main_db()
+            latest_day = df['day'].max()
+            
+            msg = f"Stocks data update for Pylabview has been completed! Latest day: {latest_day}"
+
+        except Exception as e:
+            msg = f"Failed to update data for Pylabview, error: {e}"
+            logging.error(msg)
+
+        if send_viber:
+            F5bot.send_viber(msg)        
 
     @staticmethod
     def get_saved_params():
@@ -131,6 +152,32 @@ class Globs:
 
     def load_sectors_data(self):
         self.sectors = Adapters.load_sectors_data()
+
+    def get_sectors_stocks(self):
+        sectors = {
+            'Steel': ['HPG', 'NKG', 'HSG'],
+            'Hog': ['DBC','BAF','MML'],
+            'Fish': ['VHC','ANV','IDI'], 
+            'Textile': ['TNG','MSH','STK'], 
+            'Homebuilder':['PTB','VCS','GDT'], 
+            'Chemicals1': ['DGC','DPM','DCM'],
+            'Chemicals2': ['CSV','LAS','BFC']
+        }
+
+        data_list = []
+        for sector, stocks in sectors.items():
+            for stock in stocks:
+                data_list.append({'stock': stock, 'sector': sector})
+
+        df = pd.DataFrame(data_list)
+
+        for stock in self.stocks:
+            if stock not in df['stock']:
+                data_list.append({'stock':stock, 'sector':'other'})
+
+        df = pd.DataFrame(data_list)
+
+        return df
 
 class Conds:
     """Custom condition funcitions"""
@@ -228,6 +275,8 @@ class Conds:
                 return price_ma_cond
 
             return None
+        
+        
 
     @staticmethod
     def price_change(
@@ -305,6 +354,7 @@ class Conds:
     @staticmethod
     def price_change_vs_hl(
         df: pd.DataFrame,
+        src_name = 'close',
         use_flag: bool = False, 
         direction: str = "Increase",
         nbars: int = 10,
@@ -332,7 +382,7 @@ class Conds:
             pd.Series[bool]: True or False if use_flag is True else None
         """
         
-        close = df['close']
+        close = df[src_name]
         comp_src = Ta.lowest(df['low'], nbars) if direction == 'Increase' else Ta.highest(df['high'], nbars)
         
         if use_flag:
@@ -818,9 +868,10 @@ class Conds:
 
     class Sectors:
         @staticmethod
-        def coking_coal(
+        def steel_ma_and_hl(
             df: pd.DataFrame, 
-            ma_use_flag: bool = False, # Coking Coal MA combination
+            steel_src,
+            ma_use_flag: bool = True, # Coking Coal MA combination
             ma_type = 'EMA', # Method
             ma_len1 = 5, # MA1
             ma_len2 = 15, # MA2
@@ -831,10 +882,25 @@ class Conds:
             hl_lower = -999, # Lower
             hl_upper = 999 # Upper
         ):
-            df_steel = glob_obj.sectors['steel']['io_data']
+            
+            # steel_src='Aus Coal'
+            # ma_use_flag: bool = False # Coking Coal MA combination
+            # ma_type = 'EMA' # Method
+            # ma_len1 = 5 # MA1
+            # ma_len2 = 15 # MA2
+            # ma_dir = 'crossover' # Direction
+            # hl_use_flag: bool = False # Increase/Decrease over N bars
+            # hl_nbars = 5 # N Bars
+            # hl_dir = 'increase' # Direction
+            # hl_lower = -999 # Lower
+            # hl_upper = 999 # Upper
+            # df = glob_obj.get_one_stock_data("HPG")
+        
+            df_steel = glob_obj.sectors['steel']['io_data'].copy()
+            df_steel['high'] = df_steel['low'] = df_steel[steel_src].copy()
             ma_cond = Conds.Standards.two_ma_lines(
                 df_steel,
-                src_name='Aus Coal',
+                src_name=steel_src,
                 ma_len1=ma_len1,
                 ma_len2=ma_len2,
                 ma_type=ma_type,
@@ -842,8 +908,196 @@ class Conds:
                 use_flag=ma_use_flag
             )
 
-            
+            hl_cond = Conds.price_change_vs_hl(
+                df_steel,
+                src_name=steel_src,
+                use_flag=hl_use_flag,
+                direction=hl_dir,
+                nbars=hl_nbars,
+                low_range=hl_lower,
+                high_range=hl_upper
+            )
 
+            steel_cond = Utils.combine_conditions([ma_cond, hl_cond])
+            if steel_cond is not None:
+                df_steel['cond'] = steel_cond
+                return Utils.merge_condition(df, dict(zip(df_steel['day'], df_steel['cond'])))
+
+            return None
+        
+        @staticmethod
+        def coking_coal(
+            df: pd.DataFrame, 
+            ma_use_flag: bool = True, # Coking Coal MA combination
+            ma_type = 'EMA', # Method
+            ma_len1 = 5, # MA1
+            ma_len2 = 15, # MA2
+            ma_dir = 'crossover', # Direction
+            hl_use_flag: bool = False, # Increase/Decrease over N bars
+            hl_nbars = 5, # N Bars
+            hl_dir = 'increase', # Direction
+            hl_lower = -999, # Lower
+            hl_upper = 999 # Upper
+        ):
+            return Conds.Sectors.steel_ma_and_hl(
+                df = df,
+                steel_src='Aus Coal',
+                ma_use_flag = ma_use_flag,
+                ma_type = ma_type,
+                ma_len1 = ma_len1,
+                ma_len2 = ma_len2,
+                ma_dir = ma_dir,
+                hl_use_flag = hl_use_flag,
+                hl_nbars = hl_nbars,
+                hl_dir = hl_dir,
+                hl_lower = hl_lower,
+                hl_upper = hl_upper,
+            )
+        
+        @staticmethod
+        def iron_ore(
+            df: pd.DataFrame, 
+            ma_use_flag: bool = True, # Coking Coal MA combination
+            ma_type = 'EMA', # Method
+            ma_len1 = 5, # MA1
+            ma_len2 = 15, # MA2
+            ma_dir = 'crossover', # Direction
+            hl_use_flag: bool = False, # Increase/Decrease over N bars
+            hl_nbars = 5, # N Bars
+            hl_dir = 'increase', # Direction
+            hl_lower = -999, # Lower
+            hl_upper = 999 # Upper
+        ):
+            return Conds.Sectors.steel_ma_and_hl(
+                df = df,
+                steel_src='Ore 62',
+                ma_use_flag = ma_use_flag,
+                ma_type = ma_type,
+                ma_len1 = ma_len1,
+                ma_len2 = ma_len2,
+                ma_dir = ma_dir,
+                hl_use_flag = hl_use_flag,
+                hl_nbars = hl_nbars,
+                hl_dir = hl_dir,
+                hl_lower = hl_lower,
+                hl_upper = hl_upper,
+            )
+        
+        @staticmethod
+        def china_hrc(
+            df: pd.DataFrame, 
+            ma_use_flag: bool = True, # Coking Coal MA combination
+            ma_type = 'EMA', # Method
+            ma_len1 = 5, # MA1
+            ma_len2 = 15, # MA2
+            ma_dir = 'crossover', # Direction
+            hl_use_flag: bool = False, # Increase/Decrease over N bars
+            hl_nbars = 5, # N Bars
+            hl_dir = 'increase', # Direction
+            hl_lower = -999, # Lower
+            hl_upper = 999 # Upper
+        ):
+            return Conds.Sectors.steel_ma_and_hl(
+                df = df,
+                steel_src='China HRC',
+                ma_use_flag = ma_use_flag,
+                ma_type = ma_type,
+                ma_len1 = ma_len1,
+                ma_len2 = ma_len2,
+                ma_dir = ma_dir,
+                hl_use_flag = hl_use_flag,
+                hl_nbars = hl_nbars,
+                hl_dir = hl_dir,
+                hl_lower = hl_lower,
+                hl_upper = hl_upper,
+            )
+        
+        @staticmethod
+        def china_longsteel(
+            df: pd.DataFrame, 
+            ma_use_flag: bool = True, # Coking Coal MA combination
+            ma_type = 'EMA', # Method
+            ma_len1 = 5, # MA1
+            ma_len2 = 15, # MA2
+            ma_dir = 'crossover', # Direction
+            hl_use_flag: bool = False, # Increase/Decrease over N bars
+            hl_nbars = 5, # N Bars
+            hl_dir = 'increase', # Direction
+            hl_lower = -999, # Lower
+            hl_upper = 999 # Upper
+        ):
+            return Conds.Sectors.steel_ma_and_hl(
+                df = df,
+                steel_src='China Long steel',
+                ma_use_flag = ma_use_flag,
+                ma_type = ma_type,
+                ma_len1 = ma_len1,
+                ma_len2 = ma_len2,
+                ma_dir = ma_dir,
+                hl_use_flag = hl_use_flag,
+                hl_nbars = hl_nbars,
+                hl_dir = hl_dir,
+                hl_lower = hl_lower,
+                hl_upper = hl_upper,
+            )
+        
+        @staticmethod
+        def steel_scrap(
+            df: pd.DataFrame, 
+            ma_use_flag: bool = True, # Coking Coal MA combination
+            ma_type = 'EMA', # Method
+            ma_len1 = 5, # MA1
+            ma_len2 = 15, # MA2
+            ma_dir = 'crossover', # Direction
+            hl_use_flag: bool = False, # Increase/Decrease over N bars
+            hl_nbars = 5, # N Bars
+            hl_dir = 'increase', # Direction
+            hl_lower = -999, # Lower
+            hl_upper = 999 # Upper
+        ):
+            return Conds.Sectors.steel_ma_and_hl(
+                df = df,
+                steel_src='Scrap',
+                ma_use_flag = ma_use_flag,
+                ma_type = ma_type,
+                ma_len1 = ma_len1,
+                ma_len2 = ma_len2,
+                ma_dir = ma_dir,
+                hl_use_flag = hl_use_flag,
+                hl_nbars = hl_nbars,
+                hl_dir = hl_dir,
+                hl_lower = hl_lower,
+                hl_upper = hl_upper,
+            )
+        
+        @staticmethod
+        def hpg_margin(
+            df: pd.DataFrame, 
+            ma_use_flag: bool = True, # Coking Coal MA combination
+            ma_type = 'EMA', # Method
+            ma_len1 = 5, # MA1
+            ma_len2 = 15, # MA2
+            ma_dir = 'crossover', # Direction
+            hl_use_flag: bool = False, # Increase/Decrease over N bars
+            hl_nbars = 5, # N Bars
+            hl_dir = 'increase', # Direction
+            hl_lower = -999, # Lower
+            hl_upper = 999 # Upper
+        ):
+            return Conds.Sectors.steel_ma_and_hl(
+                df = df,
+                steel_src='Margin',
+                ma_use_flag = ma_use_flag,
+                ma_type = ma_type,
+                ma_len1 = ma_len1,
+                ma_len2 = ma_len2,
+                ma_dir = ma_dir,
+                hl_use_flag = hl_use_flag,
+                hl_nbars = hl_nbars,
+                hl_dir = hl_dir,
+                hl_lower = hl_lower,
+                hl_upper = hl_upper,
+            )
 
 
     @staticmethod
@@ -1306,8 +1560,6 @@ class Scanner:
 
         clean_redis()
         
-        
-        
         sum_ls = []
         trades_ls = []
         err_stocks = {}
@@ -1414,130 +1666,66 @@ glob_obj.load_vnindex()
 glob_obj.load_sectors_data()
 
 def test():
-    """Test functions"""
-    df = glob_obj.get_one_stock_data('HPG')
-    
-    def test_price_change():
-        df['cond'] = Conds.price_change(df, use_flag=True, lower_thres=2) 
-        
-    def test_price_comp_ma():
-        df['cond'] = Conds.price_comp_ma(df, use_flag=True, ma_dir='crossover')
-        
-    # res = df[df['cond']]
-    
-    bt = Simulator(
-        func=Conds.price_change,
-        df_ohlcv=df,
-        params={
-            'use_flag': True,
-            'lower_thres':2
+    df = glob_obj.get_one_stock_data("HPG")
+
+    params = (
+        {'china_hrc': {
+            'ma_use_flag': True,
+            'ma_len1': 5,
+            'ma_len2': 15,
+            'ma_type': 'EMA',
+            'ma_dir': 'crossover',
+            'hl_use_flag': False,
+            'hl_dir': 'Increase',
+            'hl_nbars': 10,
+            'hl_lower': 5,
+            'hl_upper': 100
+            },
+        'coking_coal': {
+            'ma_use_flag': False,
+            'ma_len1': 5,
+            'ma_len2': 15,
+            'ma_type': 'EMA',
+            'ma_dir': 'crossover',
+            'hl_use_flag': False,
+            'hl_dir': 'Increase',
+            'hl_nbars': 10,
+            'hl_lower': 5,
+            'hl_upper': 100
+            },
+        'iron_ore': {
+            'ma_use_flag': False,
+            'ma_len1': 5,
+            'ma_len2': 15,
+            'ma_type': 'EMA',
+            'ma_dir': 'crossover',
+            'hl_use_flag': False,
+            'hl_dir': 'Increase',
+            'hl_nbars': 10,
+            'hl_lower': 5,
+            'hl_upper': 100
+            }
         }
     )
-    bt.run_single_cond()
-    
-    bt.result
-    
-    res, df_trades = Scanner.scan_multiple_stocks2(Conds.compute_any_conds, params={
-        'price_change':{
-            'use_flag': True,
-            'lower_thres': 5
-        },
-        'vol_percentile':{
-            'use_flag': True,
-            'ma_length': 1,
-            'ranking_window':128,
-            'high_range': 10
-        }
-    })
-    
-    res[res['name'] == 'HPG']
+    df['cond1'] = Conds.Sectors.china_hrc(df, ma_use_flag=False)
+    df[df['cond1']]
 
-    params={
-        'price_change':{
-            'use_flag': True,
-            'lower_thres': 5
-        },
-        'vol_percentile':{
-            'use_flag': True,
-            'ma_length': 1,
-            'ranking_window':128,
-            'high_range': 10
-        }
-    }
-
-    df['cond'] = Conds.compute_any_conds(df, functions_params_dic=params)
-    df['cond1'] = Conds.price_change(df, **params['price_change'])
-    df['cond2'] = Conds.vol_percentile(df, **params['vol_percentile'])
-    df['cond3'] = df['cond1'] & df['cond2']
-    df[df['cond3']]
+    cond = Conds.compute_any_conds(df, functions_params_dic=params)
+    df['cond'] = cond
     df[df['cond']]
-    len(df[df['cond1']])
     
-    def get_saved_params():
-        db = MongoClient(host="localhost", port = 27022)["dang_scanned"]
-        col = db['strategies']
-        df = pd.DataFrame(list(col.find({}, {"_id":0, "name":1})))
-        df.rename(columns={'name':'strategies'})
-        return df
-    
-    def load_params(name):
-        func_map_new = {
-            "price_change_cond": "price_change",
-            "price_ma_cond": "price_comp_ma",
-            "price_gap_cond": "price_gap",
-            "price_highest_lowest": "price_highest_lowest",
-            "price_cons_bars": "consecutive_conditional_bars",
-            "vol_comp_ma_cond": "vol_comp_ma",
-            "vol_percentile_cond": "vol_percentile",
-            "consecutive_squeezes_cond": "consecutive_squeezes",
-            "ursi_cond": "ursi",
-            "macd_cond": "macd",
-            "bbwp_cond": "bbwp",
-            "bbpctb_cond": "bbpctb",
-            "net_income": "net_income",
-        }
+if __name__ == "__main__":
+
+    try:
+        # Tạo một đối tượng ArgumentParser
+        parser = argparse.ArgumentParser(description="A program to demonstrate command line arguments.")
+
+        # Thêm các đối số
+        parser.add_argument('--updatedata', action='store_true', help="Update stocks data for Pylabview")
+
+        args = parser.parse_args()
         
-        
-        from pymongo import MongoClient
-        db = MongoClient(host="localhost", port = 27022)["dang_scanned"]
-        col = db['strategies']
-        df_all = pd.DataFrame(list(col.find({}, {"_id":0})))
-        df = pd.DataFrame(df_all[df_all['name'] == name]['configs'].values[0])
-        params = {}
-        
-        df_scan = df[df['function'] == 'stock_scanner']
-        scan_params = dict(zip(df_scan['param_name'], df_scan['value']))
-        
-        df_stock = df[df['master_name'] == 'stock_params']
-        for func, dff in df_stock.groupby('function'):
-            params[func_map_new[func]] = dict(zip(dff['param_name'], dff['value'])) 
-        
-        index_params = {'index_params':{}}
-        df_index = df[df['master_name'] == 'index_params']
-        for func, dff in df_index.groupby('function'):
-            index_params['index_params'][func_map_new[func]] = dict(zip(dff['param_name'], dff['value'])) 
-        params['index_cond'] = index_params
-            
-        lkbk_params = {'lookback_params': {}}
-        df_lookbk = df[df['master_name'] == 'lookback_params']
-        for func, dff in df_lookbk.groupby('function'):
-            if func == 'compute lookback':
-                lkbk_params['n_bars'] = dff['value'].values[0]
-            else:
-                lkbk_params['lookback_params'][func_map_new[func]] = dict(zip(dff['param_name'], dff['value'])) 
-        params['lookback_cond'] = lkbk_params
-        
-        return scan_params, params
-    
-    get_saved_params()
-    
-    scan_params, params = load_params("blank_test")
-    
-    res, df_trades = Scanner.scan_multiple_stocks2(
-        func=Conds.compute_any_conds, 
-        params=params,
-        **scan_params
-        )
-    df_trades.to_pickle("/home/ubuntu/Dang/pylabview/df_trades_sample.pickle")
-    
-    
+        if args.updatedata:
+            glob_obj.gen_stocks_data(send_viber=True)
+    except:
+        pass

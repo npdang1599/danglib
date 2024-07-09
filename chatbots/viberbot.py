@@ -1,4 +1,5 @@
 import requests
+import danglib.configs as confs
 
 # Notify to viber
 class ViberBot:
@@ -29,7 +30,7 @@ class ViberBot:
                         "name":"F5Backup",
                     },
                     "type": "text",
-                    "text": f"rz2: {msg}"
+                    "text": f"{confs.SERVER_NAME}: {msg}"
                 })
         except:
             pass
