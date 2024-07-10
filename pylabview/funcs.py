@@ -30,6 +30,7 @@ class Globs:
         self.strategies = []
         self.stocks, self.dic_groups = Adapters.get_stocks_beta_group()
         self.df_stocks = pd.DataFrame()
+        self._df_stocks = None
         self.function_map = {
             "stock_scanner": Scanner.scan_multiple_stocks,
             "price_change": Conds.price_change,
@@ -58,13 +59,21 @@ class Globs:
         }
         self.sectors = {}
 
+    def __getattribute__(self, name):
+        if name == "df_stocks":
+            if(self._df_stocks is None):
+                self.load_stocks_data()
+            return self._df_stocks
+        else:
+            return super().__getattribute__(name)
+    
     def load_stocks_data(self):
         """run to load stocks data"""
-        self.df_stocks = Adapters.load_stocks_data_from_main_db()
+        self._df_stocks = Adapters.load_stocks_data_from_main_db()
 
     def load_stocks_data_pickle(self):
         """Load data from pickle"""
-        self.df_stocks = Adapters.load_stocks_data_from_pickle()
+        self._df_stocks = Adapters.load_stocks_data_from_pickle()
 
     def get_one_stock_data(self, stock):
         """Get one stock data from df_stocks"""
@@ -853,18 +862,127 @@ class Conds:
 
             return None
         
-    # ACF1_MA_useMA  = input.bool(defval = false, title = 'Coking Coal MA combination', group = 'Coking Coal')
-    # ACF1_MA_MAType = input.string(defval = 'EMA', title = 'Method', inline = 'MA1', options = ['EMA', 'SMA'], group = 'Coking Coal')
-    # ACF1_MA_MALen1 = input.int(defval = 5, title = 'MA1', inline = 'MA1', group = 'Coking Coal')
-    # ACF1_MA_MALen2 = input.int(defval = 15, title = 'MA2', inline = 'MA1', group = 'Coking Coal')
-    # ACF1_MA_useEntryCond = input.bool(defval = false, title = '', inline = 'MA7', group= 'Coking Coal')
-    # ACF1_MA_EntryCond = input.string(defval = 'crossover', title = 'Entry Conditions',options = ['crossover', 'crossunder', 'above', 'below'],inline = 'MA7', group = 'Coking Coal')
+        @staticmethod
+        def revenue(
+            df: pd.DataFrame,
+            calc_type: str = "QoQ",
+            roll_len: int = 1,
+            direction: str = "positive",
+            percentage: float = 0,
+            use_shift: bool = False,
+            n_shift: int = 5,
+            use_flag: bool = False,
+        ):
+            """Net Income based conditions"""
 
-    # ACF1_hlUseCond = input.bool(false, title = 'Increase/Decrease over N bars', group = 'Coking Coal', tooltip = 'Trong vòng n bars, so sánh giá close với low nếu chọn Increase (high nếu chọn Decrease), phần trăm thay đổi phải nằm trong range thì vào lệnh')
-    # ACF1_hl_nbars = input.int(5, title = 'nBars', group = 'Coking Coal')
-    # ACF1_hl_dir = input.string('increase', options = ['increase', 'decrease'], title = 'Direction', group = 'Coking Coal')
-    # ACF1_hl_lower = input.float(-999, title = 'lower', inline = 'range', group = 'Coking Coal')
-    # ACF1_hl_upper = input.float(999, title = 'upper', inline = 'range', group = 'Coking Coal')
+            if use_flag:
+                df_ni = df.groupby("mapYQ")[["revenue"]].max()
+                df_ni["rollSum"] = Math.sum(df_ni["revenue"], roll_len)
+
+                pct_change_periods = 1 if calc_type == "QoQ" else 4
+
+                df_ni["pctChange"] = (
+                    Math.pct_change(df_ni["rollSum"], pct_change_periods) * 100
+                ).round(6)
+
+                df_ni["matched"] = (
+                    df_ni["pctChange"] > percentage
+                    if direction == "positive"
+                    else df_ni["pctChange"] < -percentage
+                )
+                
+                df_ni["matched"] = np.where(
+                    (np.isinf(df_ni["pctChange"])) | (df_ni['rollSum'] == 0),
+                    False,
+                    df_ni["matched"]
+                )
+
+                matched = df["mapYQ"].map(df_ni["matched"])
+
+                if use_shift:
+                    matched = matched.shift(n_shift)
+                    matched = pd.Series(
+                        data=np.where(matched.isna(), False, matched), 
+                        index=matched.index
+                    )
+                    
+                # df['matched'] = matched
+
+                return matched
+
+            return None
+# PE_useRange = input.bool(false, title = 'Range Cond', inline = "PErange", group = 'P/E conditions')
+# PE_highrange = input.float(10, minval =0,title = 'P/E High Range',inline = "PErange", group = 'P/E conditions')
+# PE_lowrange = input.float(0, minval =0 , title = 'P/E Low Range' ,inline = "PErange", group = 'P/E conditions')
+# PE_plot = input.bool(false, title = 'plot P/E')
+
+# PB_useRange = input.bool(false, title = 'Range Cond', inline = "PBrange", group = 'P/B conditions')
+# PB_highrange = input.float(10, minval =0,title = 'P/B High Range',inline = "PBrange", group = 'P/B conditions')
+# PB_lowrange = input.float(0, minval =0 , title = 'P/B Low Range' ,inline = "PBrange", group = 'P/B conditions')
+
+# PB_BB_length = input.int(20, minval=1,title ='P/B MA Length', group = 'P/B conditions')
+# PB_BB_mult = input.float(2.0, minval=0.001, maxval=50, title="P/B StdDev",group = 'P/B conditions')
+# PB_useUpperMethod = input.bool(defval = false, title = '', inline = 'BBUpdir', group = 'P/B conditions')
+# PB_upperMethod = input.string('above', options = ['above', 'below', 'crossover', 'crossunder'], title = 'P/B vs UpperBand',inline = 'BBUpdir', group = 'P/B conditions')
+# PB_useLowerMethod = input.bool(defval = false, title = '', inline = 'BBLowdir',group = 'P/B conditions') 
+# PB_lowerMethod = input.string('below', options = ['above', 'below', 'crossover', 'crossunder'], title = 'P/B vs LowerBand', inline = 'BBLowdir',group = 'P/B conditions')
+# PB_plot = input.bool(false, title = 'plot  P/B', group = 'P/B conditions')
+
+# f_PECond(PriceEarningsRatio) =>
+#     EPSCond = not PE_useRange or dlib.f_inrange(PriceEarningsRatio, PE_lowrange, PE_highrange)
+#     EPSCond
+
+# f_PBCond(PriceBookRatio)=>
+#     PBRangeCond = (not PB_useRange or dlib.f_inrange(PriceBookRatio, PB_lowrange, PB_highrange))
+
+#     PB_basis = ta.sma(PriceBookRatio, PB_BB_length)
+#     PB_dev = PB_BB_mult * ta.stdev(PriceBookRatio, PB_BB_length)
+#     PB_upper = PB_basis + PB_dev
+#     PB_lower = PB_basis - PB_dev
+
+#     PB_upperCond = not PB_useUpperMethod or f_define_2line_cond(PriceBookRatio, PB_upper, PB_upperMethod, true)
+#     PB_lowerCond = not PB_useLowerMethod or f_define_2line_cond(PriceBookRatio, PB_lower, PB_lowerMethod, true)
+
+#     PBBBCond = PB_upperCond and PB_lowerCond // Điều kiện upper lower bollinger Band
+#     PBCond = PBBBCond and PBRangeCond
+
+# f_PEPBCond(PriceEarningsRatio, PriceBookRatio) =>
+#     f_PECond(PriceEarningsRatio) and f_PBCond(PriceBookRatio)
+
+        @staticmethod
+        def pe(
+            df: pd.DataFrame,
+            use_flag = False,
+            lowrange = 0,
+            highrange = 10
+        ):
+            if use_flag:
+                return Utils.in_range(df['PE'], lower_thres=lowrange, upper_thres=highrange)
+            
+            return None
+        
+        @staticmethod
+        def pb(
+            df: pd.DataFrame,
+            range_use_flag = False,
+            range_low = 0,
+            range_high = 10,
+            
+            bb_length = 20,
+            bb_mult = 2.0,
+            bb_upper_use_flag = False,
+            bb_upper_method = 'above', 
+            bb_lower_use_flag = False,
+            bb_lower_method = 'below',
+        ):
+            src = df['PB']
+            
+            range_cond = Utils.in_range(src, lower_thres=range_low, upper_thres=range_high)
+            
+            
+            
+            
+            
 
     class Sectors:
         @staticmethod
@@ -1100,6 +1218,9 @@ class Conds:
             )
 
 
+        
+        
+
     @staticmethod
     def compute_any_conds(df: pd.DataFrame, functions_params_dic: dict):
         """Compute and combine any conditions"""
@@ -1123,6 +1244,7 @@ class Conds:
             return Utils.combine_conditions(conds)
 
         return None
+
 
     @staticmethod
     def index_cond(df: pd.DataFrame, **index_params):
@@ -1172,15 +1294,17 @@ class Simulator:
 
     def __init__(
         self,
-        func,
-        df_ohlcv: pd.DataFrame,
-        params: dict,
+        func=None,
+        df_ohlcv: pd.DataFrame = None,
+        params: dict=None,
+        exit_params: dict=None,
         name: str = "",
-        description: str = "",
+        description: str = ""
     ):
         self.func = func
         self.df = df_ohlcv
         self.params = params
+        self.exit_params = exit_params
         self.name = name
         self.description = description
         self.result = pd.DataFrame()
@@ -1226,6 +1350,478 @@ class Simulator:
             logging.error(f"Function `prepare_data_for_backtesting` had met error: {e}")
             df = None
         return df
+    
+    @staticmethod
+    def compute_trade_stats2(
+        day,
+        open_p, 
+        high_p,
+        low_p,
+        entry_signals,
+        exit_signals,
+        direction,
+        holding_periods
+    ):
+# %%
+        # entry_condition = {
+        #     'price_comp_ma':{
+        #         "ma_len1":5,
+        #         "ma_len2":15,
+        #         "ma_type":"EMA",
+        #         "ma_dir":"crossover",
+        #         "use_flag": True,
+        #     }
+        # }
+
+        # exit_condition = {
+        #     'price_comp_ma':{
+        #         "ma_len1":5,
+        #         "ma_len2":15,
+        #         "ma_type":"EMA",
+        #         "ma_dir":"below",
+        #         "use_flag": True,
+        #     }
+        # }
+
+        # df = df_raw.copy()
+        
+        # day = df['day'].astype(int).values
+        # open_p = df['open'].values
+        # high_p = df['high'].values
+        # low_p = df['low'].values
+        # entry_signals = Conds.compute_any_conds(df, entry_condition)
+        # exit_signals = Conds.compute_any_conds(df, exit_condition)
+        
+        # direction = 1
+        # holding_periods = 15
+        
+        num_trades = 0
+        num_win = 0
+        num_win1 = 0
+        num_win5 = 0
+        num_win10 = 0
+        num_win15 = 0
+        
+        total_return = 0.0
+        total_return1 = 0.0
+        total_return5 = 0.0
+        total_return10 = 0.0
+        total_return15 = 0.0
+        
+        total_upside = 0
+        total_downside = 0
+        
+        
+        total_profit = 0.0
+        total_loss = 0.0
+        
+        
+        max_runup = np.NaN
+        max_drawdown = np.NaN
+
+        is_entry_arr = np.full(len(entry_signals), np.NaN)
+        trading_status = np.full(len(entry_signals), np.NaN)
+        
+        entry_day_arr = np.full(len(entry_signals), np.NaN)
+        entry_price_arr = np.full(len(entry_signals), np.NaN)
+
+        exit_day_arr = np.full(len(entry_signals), np.NaN)
+        exit_price_arr = np.full(len(entry_signals), np.NaN)
+        
+        price_change_arr = np.full(len(entry_signals), np.NaN)
+        num_trades_arr = np.full(len(entry_signals), np.NaN)
+
+        winrate_arr = np.full(len(entry_signals), np.NaN)
+        winrate_arr1 = np.full(len(entry_signals), np.NaN)
+        winrate_arr5 = np.full(len(entry_signals), np.NaN)
+        winrate_arr10 = np.full(len(entry_signals), np.NaN)
+        winrate_arr15 = np.full(len(entry_signals), np.NaN)
+        
+        return_arr = np.full(len(entry_signals), np.NaN)
+        return_arr1 = np.full(len(entry_signals), np.NaN)
+        return_arr5 = np.full(len(entry_signals), np.NaN)
+        return_arr10 = np.full(len(entry_signals), np.NaN)
+        return_arr15 = np.full(len(entry_signals), np.NaN)
+        
+        avg_returns_arr = np.full(len(entry_signals), np.NaN)
+        avg_returns_arr1 = np.full(len(entry_signals), np.NaN)
+        avg_returns_arr5 = np.full(len(entry_signals), np.NaN)
+        avg_returns_arr10 = np.full(len(entry_signals), np.NaN)
+        avg_returns_arr15 = np.full(len(entry_signals), np.NaN)
+        
+        profit_factor_arr = np.full(len(entry_signals), np.NaN)
+        
+        upside_arr = np.full(len(entry_signals), np.NaN)
+        downside_arr = np.full(len(entry_signals), np.NaN)
+        max_runup_arr = np.full(len(entry_signals), np.NaN)
+        max_drawdown_arr = np.full(len(entry_signals), np.NaN)
+        avg_upside_arr = np.full(len(entry_signals), np.NaN)
+        avg_downside_arr = np.full(len(entry_signals), np.NaN)
+        
+        
+        def src_idx(src, index):
+            if index < len(src):
+                return src[index]
+            else:
+                return np.NaN
+        
+        start_bar = 0
+        is_trading = False
+
+        trade_upside = np.NaN
+        trade_downside = np.NaN
+        
+        for bar_index, signal in enumerate(entry_signals):
+            if signal and not is_trading:
+                is_trading = True
+                start_bar = bar_index
+                is_entry_arr[bar_index] = 1
+                
+                num_trades = num_trades + 1
+                num_trades_arr[start_bar] = num_trades
+
+                trade_upside = np.NaN
+                trade_downside = np.NaN
+                
+                entry_price = src_idx(open_p, bar_index+1)
+                entry_price_arr[start_bar] = entry_price
+                entry_day_arr[start_bar] = day[bar_index]
+                
+                trade_return1 =  src_idx(open_p, bar_index+2) - entry_price
+                trade_return5 =  src_idx(open_p, bar_index+6) - entry_price
+                trade_return10 = src_idx(open_p, bar_index+11) - entry_price
+                trade_return15 = src_idx(open_p, bar_index+16) - entry_price
+                
+                total_return1 +=  trade_return1
+                total_return5 +=  trade_return5
+                total_return10 += trade_return10
+                total_return15 += trade_return15
+                    
+                return_arr1[start_bar] = trade_return1
+                return_arr5[start_bar] = trade_return5
+                return_arr10[start_bar] = trade_return10
+                return_arr15[start_bar] = trade_return15
+                
+                num_win1  += 1 if trade_return1  > 0 else 0
+                num_win5  += 1 if trade_return5  > 0 else 0
+                num_win10 += 1 if trade_return10 > 0 else 0
+                num_win15 += 1 if trade_return15 > 0 else 0
+
+                winrate_arr1[start_bar] = num_win1 / num_trades * 100
+                winrate_arr5[start_bar] = num_win5 / num_trades * 100
+                winrate_arr10[start_bar] = num_win10 / num_trades * 100
+                winrate_arr15[start_bar] = num_win15 / num_trades * 100
+                
+                avg_returns_arr1[start_bar] = total_return1 / num_trades
+                avg_returns_arr5[start_bar] = total_return5 / num_trades
+                avg_returns_arr10[start_bar] = total_return10 / num_trades
+                avg_returns_arr15[start_bar] = total_return15 / num_trades
+                
+             
+            if is_trading:
+                if (bar_index - start_bar >= 1):
+                    runup = (high_p[bar_index] - entry_price) / entry_price * 100
+                    drawdown = (low_p[bar_index] - entry_price) / entry_price * 100
+                    
+                    trade_upside = runup if np.isnan(trade_upside) else max(trade_upside, runup)
+                    trade_downside = drawdown if np.isnan(trade_downside) else min(trade_downside, drawdown)
+                trading_status[bar_index] = 1
+                
+            match_exit = (
+                (bar_index - start_bar >= 1) & (exit_signals[bar_index])
+            ) | (
+                (bar_index - start_bar) == holding_periods
+            )
+            
+            if is_trading and match_exit:
+                
+                is_trading = False
+                
+                close_price = src_idx(open_p, bar_index+1)
+
+                price_change = (close_price - entry_price) * direction
+                
+                trade_return = price_change / entry_price * 100
+                
+                if trade_return > 0:
+                    num_win = num_win + 1
+                    total_profit = total_profit + price_change
+ 
+                if trade_return < 0:
+                    total_loss = total_loss + price_change
+                
+                total_return = total_return + trade_return
+                
+                trade_upside =  max(trade_upside, (close_price - entry_price) / entry_price * 100)
+                trade_downside =  min(trade_downside,  (close_price - entry_price) / entry_price * 100)
+            
+                max_runup = trade_upside if np.isnan(max_runup) else max(max_runup, trade_upside)
+                max_drawdown = trade_downside if np.isnan(max_drawdown) else min(max_drawdown, trade_downside)
+
+                winrate_arr[start_bar] = num_win / num_trades * 100
+                avg_returns_arr[start_bar] = total_return / num_trades
+                
+                total_upside += trade_upside
+                total_downside += trade_downside
+                upside_arr[start_bar] = trade_upside
+                downside_arr[start_bar] = trade_downside
+                max_runup_arr[start_bar] = max_runup
+                max_drawdown_arr[start_bar] = max_drawdown
+                avg_upside_arr[start_bar] = total_upside / num_trades
+                avg_downside_arr[start_bar] = total_downside / num_trades
+                
+                profit_factor_arr[start_bar] = (total_profit / (total_loss * -1) if total_loss != 0 else np.NaN)
+
+                exit_price_arr[start_bar] = close_price
+                exit_day_arr[start_bar] = day[bar_index]
+                return_arr[start_bar] = trade_return
+                price_change_arr[start_bar] = price_change
+                
+                
+        return  (
+            entry_price_arr,
+            entry_day_arr,
+            direction,
+            exit_signals,
+            exit_price_arr,
+            exit_day_arr,
+            trading_status,
+            num_trades_arr,
+            return_arr,
+            return_arr1,
+            return_arr5,
+            return_arr10,
+            return_arr15,
+            winrate_arr,
+            winrate_arr1,
+            winrate_arr5,
+            winrate_arr10,
+            winrate_arr15,
+            avg_returns_arr,
+            avg_returns_arr1,
+            avg_returns_arr5,
+            avg_returns_arr10,
+            avg_returns_arr15,
+            profit_factor_arr,
+            upside_arr,
+            downside_arr,
+            avg_upside_arr,
+            avg_downside_arr,
+            max_drawdown_arr,
+            max_runup_arr,
+            max_drawdown_arr,
+            is_entry_arr,
+            price_change_arr,
+        )
+        
+    def run2(self, trade_direction="Long", compute_start_time="2018_01_01", holding_periods=8):
+        
+        df = self.df
+        func = self.func
+        params = self.params
+        exit_params = self.exit_params
+        name = self.name
+        
+# %%
+        # trade_direction="Long"
+        # holding_periods=15
+        # compute_start_time="2018_01_01"
+        # df = df_raw.copy()
+        # func = Conds.compute_any_conds
+        
+        # params = {
+        # 'bbpctb': {
+        #     'src_name': 'close',
+        #     'length': 20,
+        #     'mult': 2,
+        #     'use_flag': True,
+        #     'use_range': False,
+        #     'low_range': 80,
+        #     'high_range': 100,
+        #     'use_cross': False,
+        #     'direction': 'crossover',
+        #     'cross_line': 'Upper band'
+        #     }
+        # }
+        
+        # exit_params = params.pop('exit_cond') if 'exit_cond' in params else {} 
+        # name = 'HPG'
+        
+        
+        signals = func(df, params)
+        
+        df['signal'] = Utils.new_1val_series(True, df) if signals is None else signals
+        df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
+
+        exit_signals = Conds.compute_any_conds(df, exit_params)
+        df["exitSignal"] = Utils.new_1val_series(False, df) if exit_signals is None else exit_signals
+        
+        df["name"] = name
+        
+        (
+            entry_price_arr,
+            entry_day_arr,
+            direction,
+            exit_signals,
+            exit_price_arr,
+            exit_day_arr,
+            trading_status,
+            num_trades_arr,
+            return_arr,
+            return_arr1,
+            return_arr5,
+            return_arr10,
+            return_arr15,
+            winrate_arr,
+            winrate_arr1,
+            winrate_arr5,
+            winrate_arr10,
+            winrate_arr15,
+            avg_returns_arr,
+            avg_returns_arr1,
+            avg_returns_arr5,
+            avg_returns_arr10,
+            avg_returns_arr15,
+            profit_factor_arr,
+            upside_arr,
+            downside_arr,
+            avg_upside_arr,
+            avg_downside_arr,
+            max_drawdown_arr,
+            max_runup_arr,
+            max_drawdown_arr,
+            is_entry_arr,
+            price_change_arr
+        )=Simulator.compute_trade_stats2(
+            day=df['day'].astype(int).values,
+            open_p=df['open'].values, 
+            high_p=df['high'].values,
+            low_p=df['low'].values,
+            entry_signals=df['signal'].values,
+            exit_signals=df['exitSignal'].values,
+            direction = 1 if trade_direction == 'Long' else -1,
+            holding_periods=holding_periods
+        )
+        def strday(x):  
+            y = str(x)
+            return y[:4] +'_'+ y[4:6] +'_'+ y[6:8]
+
+
+
+        df["entryPrice"] =   entry_price_arr
+        df["entryDay"] =     entry_day_arr
+
+        df['entryDay'] = np.where(
+            df['entryDay'].notna(),
+            df['entryDay'].apply(lambda x: strday(x)),
+            np.NaN
+        )
+
+        
+        df["entryType"] =    direction
+        df["exitSignal"] =   exit_signals
+        df["exitPrice"] =    exit_price_arr
+        df["exitDay"] =      exit_day_arr
+        df['exitDay'] = np.where(
+            df['exitDay'].notna(),
+            df['exitDay'].apply(lambda x: strday(x)),
+            np.NaN
+        )
+        
+        df["isTrading"] =    trading_status
+        df["numTrade"] =     num_trades_arr
+        df["return"] =       return_arr
+        df["return1"] =      return_arr1
+        df["return5"] =      return_arr5
+        df["return10"] =     return_arr10
+        df["return15"] =     return_arr15
+        df["winrate"] =      winrate_arr
+        df["winrateT1"] =    winrate_arr1
+        df["winrateT5"] =    winrate_arr5
+        df["winrateT10"] =   winrate_arr10
+        df["winrateT15"] =   winrate_arr15
+        df["avgReturn"] =    avg_returns_arr
+        df["avgReturnT1"] =  avg_returns_arr1
+        df["avgReturnT5"] =  avg_returns_arr5
+        df["avgReturnT10"]=  avg_returns_arr10
+        df["avgReturnT15"]=  avg_returns_arr15
+        df["profitFactor"]=  profit_factor_arr
+        df["upside"] =       upside_arr
+        df["downside"] =     downside_arr
+        df["avgUpside"] =    avg_upside_arr
+        df["avgDownside"] =  avg_downside_arr
+        df["maxDrawdown"] =  max_drawdown_arr
+        df["maxRunup"]    =  max_runup_arr
+        df["maxDrawdown"] =  max_drawdown_arr
+        df["isEntry"]     =  is_entry_arr
+        df["priceChange"] =  price_change_arr
+        df["matched"] =      np.where(df["signal"], 1, np.NaN)
+        
+        df[
+            [
+                "numTrade",
+                "winrate",
+                "winrateT1",
+                "winrateT5",
+                "winrateT10",
+                "winrateT15",
+                "profitFactor",
+                "avgReturn",
+                "avgReturnT1",
+                "avgReturnT5",
+                "avgReturnT10",
+                "avgReturnT15",
+                "avgUpside",
+                "avgDownside",
+                "maxRunup",
+                "maxDrawdown"
+            ]
+        ] = df[
+            [
+                "numTrade",
+                "winrate",
+                "winrateT1",
+                "winrateT5",
+                "winrateT10",
+                "winrateT15",
+                "profitFactor",
+                "avgReturn",
+                "avgReturnT1",
+                "avgReturnT5",
+                "avgReturnT10",
+                "avgReturnT15",
+                "avgUpside",
+                "avgDownside",
+                "maxRunup",
+                "maxDrawdown"
+            ]
+        ].ffill().fillna(0)
+
+
+        result = df[
+            [
+                "name",
+                "numTrade",
+                "winrate",
+                "profitFactor",
+                "avgReturn",
+                "avgUpside",
+                "avgDownside",
+                "maxRunup",
+                "maxDrawdown",
+                "isEntry",
+                "matched",
+                "isTrading",
+            ]
+        ].iloc[-1]
+
+        
+# %%
+        self.df = df    
+        self.result = result
+# %%
+        
+    
 
     @staticmethod
     @njit
@@ -1416,6 +2012,9 @@ class Simulator:
             df["signal"] = Utils.new_1val_series(True, df) 
         else:
             df["signal"] = signals
+        
+
+        
             
         df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
         # print(f"num of nan signals: {df['signal'].isna().sum()}")
@@ -1658,10 +2257,129 @@ class Scanner:
         trades_df = pd.concat(df_ls)
 
         return res_df, trades_df
+    
+    
+    @staticmethod
+    def scan_multiple_stocks3(func, params, stocks=None, trade_direction="Long", holding_periods=60):
+        # %%
+        # func = Conds.compute_any_conds
+        # stocks=None
+        # trade_direction="Long"
+        # holding_periods=15
+        # params = {
+        #     'china_hrc': {
+        #         'ma_use_flag': True,
+        #         'ma_len1': 5,
+        #         'ma_len2': 15,
+        #         'ma_type': 'EMA',
+        #         'ma_dir': 'crossover',
+        #         'hl_use_flag': False,
+        #         'hl_dir': 'Increase',
+        #         'hl_nbars': 10,
+        #         'hl_lower': 5,
+        #         'hl_upper': 100
+        #     },
+        #     'coking_coal': {
+        #         'ma_use_flag': False,
+        #         'ma_len1': 5,
+        #         'ma_len2': 15,
+        #         'ma_type': 'EMA',
+        #         'ma_dir': 'crossover',
+        #         'hl_use_flag': False,
+        #         'hl_dir': 'Increase',
+        #         'hl_nbars': 10,
+        #         'hl_lower': 5,
+        #         'hl_upper': 100
+        #     },
+        #     'iron_ore': {
+        #         'ma_use_flag': False,
+        #         'ma_len1': 5,
+        #         'ma_len2': 15,
+        #         'ma_type': 'EMA',
+        #         'ma_dir': 'crossover',
+        #         'hl_use_flag': False,
+        #         'hl_dir': 'Increase',
+        #         'hl_nbars': 10,
+        #         'hl_lower': 5,
+        #         'hl_upper': 100
+        #     },
+        #     # 'exit_cond':{
+        #     #     'price_comp_ma':{
+        #     #         "ma_len1":5,
+        #     #         "ma_len2":15,
+        #     #         "ma_type":"EMA",
+        #     #         "ma_dir":"crossunder",
+        #     #         "use_flag": True,
+        #     #     }
+        #     # }
+        # }
+        
+        # exit_params = params.pop('exit_cond') if 'exit_cond' in params else {}
+        """Backtest on multiple stocks"""  
+        from danglib.pylabview.celery_worker import scan_one_stock_v2, clean_redis
+
+        df_all_stocks = glob_obj.df_stocks
+    
+        if stocks is None:
+            stocks = glob_obj.df_stocks
+        else:
+            df_all_stocks= df_all_stocks[df_all_stocks['stock'].isin(stocks)]
+
+        clean_redis()
+        
+        sum_ls = []
+        trades_ls = []
+        err_stocks = {}
+        task_dic = {}
+        
+        for stock, df_stock in df_all_stocks.groupby("stock"):
+            df_stock = df_stock.reset_index(drop=True)
+
+            task = scan_one_stock_v2.delay(
+                df_stock, 
+                func, 
+                params=params,
+                name=stock,
+                trade_direction=trade_direction,
+                holding_periods=holding_periods
+            )
+            
+            task_dic[stock] = task
+            
+        while any(t.status!='SUCCESS' for t in task_dic.values()):
+            pass
+
+        for k, v in task_dic.items():
+            bt = v.result
+            if bt is not None:
+                sum_ls.append(bt.result)
+                trades_ls.append(bt.df)
+                
+            
+        res_df = pd.DataFrame(sum_ls)
+        res_df = res_df[
+            [
+                "name",
+                "numTrade",
+                "winrate",
+                "profitFactor",
+                "avgReturn",
+                "avgUpside",
+                "avgDownside",
+            ]
+        ].round(2)
+        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups)
+
+        trades_df = pd.concat(trades_ls)    
+        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
+
+# %%
+
+        return res_df, trades_df
 
 
 glob_obj = Globs()
-glob_obj.load_stocks_data_pickle()
+# glob_obj.load_stocks_data()
 glob_obj.load_vnindex()
 glob_obj.load_sectors_data()
 
@@ -1707,15 +2425,10 @@ def test():
             }
         }
     )
-    df['cond1'] = Conds.Sectors.china_hrc(df, ma_use_flag=False)
-    df[df['cond1']]
-
-    cond = Conds.compute_any_conds(df, functions_params_dic=params)
-    df['cond'] = cond
-    df[df['cond']]
     
 if __name__ == "__main__":
 
+    df_raw = glob_obj.get_one_stock_data("HPG")
     try:
         # Tạo một đối tượng ArgumentParser
         parser = argparse.ArgumentParser(description="A program to demonstrate command line arguments.")

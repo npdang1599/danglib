@@ -294,7 +294,41 @@ class Adapters:
     def get_stocks_data_from_db_fiinpro(stocks: list, from_day: str = '2017_01_01'):
         db = MongoClient("ws", 27022)["stockdata"]
         col_fiinpro = db['price_fiinpro_data']
-
+        
+        dft = pd.DataFrame(list(
+            col_fiinpro.find({},{"_id":0}).limit(5)
+        ))
+        ['HoseStockId', 'OrganCode', 'Ticker', 'TradingDate', 
+         'StockType', 'CeilingPrice', 'FloorPrice', 'ReferencePrice', 
+         'ReferenceDate', 'OpenPrice', 'ClosePrice', 'MatchPrice', 
+         'PriceChange', 'PercentPriceChange', 'HighestPrice', 
+         'LowestPrice', 'AveragePrice', 'MatchVolume', 'MatchValue', 
+         'DealVolume', 'DealValue', 'TotalMatchVolume', 'TotalMatchValue', 
+         'TotalDealVolume', 'TotalDealValue', 'TotalVolume', 'TotalValue', 
+         'ForeignBuyValueMatched', 'ForeignBuyVolumeMatched', 'ForeignSellValueMatched', 
+         'ForeignSellVolumeMatched', 'ForeignBuyValueDeal', 'ForeignBuyVolumeDeal', 
+         'ForeignSellValueDeal', 'ForeignSellVolumeDeal', 'ForeignBuyValueTotal', 
+         'ForeignBuyVolumeTotal', 'ForeignSellValueTotal', 'ForeignSellVolumeTotal', 
+         'ForeignTotalRoom', 'ForeignCurrentRoom', 'ParValue', 'Suspension',
+         'Delist', 'HaltResumeFlag', 'Split', 'Benefit', 'Meeting', 'Notice', 
+         'IssueDate', 'INav', 'IIndex', 'TotalTrade', 'TotalBuyTrade', 'TotalBuyTradeVolume', 
+         'TotalSellTrade', 'TotalSellTradeVolume', 'ReferencePriceAdjusted', 'OpenPriceAdjusted', 
+         'ClosePriceAdjusted', 'PriceChangeAdjusted', 'PercentPriceChangeAdjusted',
+         'HighestPriceAdjusted', 'LowestPriceAdjusted', 'RateAdjusted', 'Status',
+         'CreateDate', 'UpdateDate', 'Best1OfferPrice', 'Best2OfferPrice', 
+         'Best3OfferPrice', 'Best1OfferVolume', 'Best2OfferVolume', 'Best3OfferVolume', 
+         'Best1BidPrice', 'Best2BidPrice', 'Best3BidPrice', 'Best1BidVolume', 
+         'Best2BidVolume', 'Best3BidVolume', 'CreateBy', 'UpdateBy', 'ShareIssue', 
+         'TotalVolumeBuyUp', 'TotalVolumeSellDown', 'TotalMatchVolumeOdd', 
+         'TotalMatchValueOdd', 'TotalDealVolumeOdd', 'TotalDealValueOdd', 
+         'ForeignBuyValueMatchedOdd', 'ForeignBuyVolumeMatchedOdd', 'ForeignSellValueMatchedOdd', 
+         'ForeignSellVolumeMatchedOdd', 'ForeignBuyValueDealOdd', 'ForeignBuyVolumeDealOdd', 
+         'ForeignSellValueDealOdd', 'ForeignSellVolumeDealOdd', 'TotalBidCountOdd', 
+         'TotalOfferCountOdd', 'TotalBidVolumeOdd', 'TotalOfferVolumeOdd', 
+         'ForeignBuyVolumeMatchedEven', 'ForeignBuyValueMatchedEven', 'ForeignSellVolumeMatchedEven', 
+         'ForeignSellValueMatchedEven', 'ForeignBuyVolumeDealEven', 'ForeignBuyValueDealEven', 
+         'ForeignSellVolumeDealEven', 'ForeignSellValueDealEven', 'TotalBidCountEven', 
+         'TotalOfferCountEven', 'TotalBidVolumeEven', 'TotalOfferVolumeEven']
         df = pd.DataFrame(
             list(
                 col_fiinpro.find(
@@ -361,16 +395,43 @@ class Adapters:
                         "ticker":1,
                         "yearreport":1,
                         "lengthreport":1,
-                        "net_profitloss_before_tax":1
+                        "net_profitloss_before_tax":1,
+                        "revenue_bn_vnd":1
                     }
                 )
             )
         )
-        df.columns = ["stock", "year", "quarter", "netIncome"]
+        df.columns = ["stock", "year", "quarter", "netIncome", "revenue"]
         df['netIncome'] = df['netIncome'].fillna(0)
+        df['revenue'] = df['revenue'].fillna(0)
         df["mapYQ"] = df["year"] * 10 + df["quarter"]
         df["mapYQ"] = np.where(df["quarter"] == 4, df["mapYQ"] + 7, df["mapYQ"] + 1)
         return df
+    
+    @staticmethod
+    def load_fiinpro_PE_PB_ttm_daily(stocks):
+        db = MongoClient("ws", 27022)["stockdata"]
+        col = db['fiinpro_ratio_ttm_daily']
+        
+        df = pd.DataFrame(list(col.find(
+                    {
+                        'Ticker': {"$in":stocks},
+                        "TradingDate": {"$gte":"2016-01-01"},
+                    },
+                    {
+                        "_id":0,
+                        'Ticker':1,
+                        'TradingDate':1,
+                        "RTD21":1,
+                        "RTD25":1
+                    }
+                )
+            )
+        )
+        df.columns = ['stock', 'day', 'PE', 'PB']
+        df['day'] = df['day'].str.replace('-', '_')
+        return df
+        
     
 
     @staticmethod
@@ -380,9 +441,14 @@ class Adapters:
         
         df_ni = Adapters.load_quarter_netincome_from_db_VCI(stocks)
         dfres = pd.merge(df_stocks, df_ni, how='left', on=['stock', 'mapYQ'])
-        dfres['netIncome'] = dfres['netIncome'].fillna(0)
+        dfres = dfres.fillna(0)
         dfres = dfres.drop(['year', 'quarter'], axis=1)
         dfres = dfres.sort_values(['stock', 'day'])
+        
+        df_pepb = Adapters.load_fiinpro_PE_PB_ttm_daily(stocks)
+        
+        dfres = pd.merge(dfres, df_pepb, how='left', on=['stock', 'day'])
+        dfres[['PE', 'PB']] = dfres[['PE', 'PB']].ffill()
         
         if to_pickle:
             dfres.to_pickle(fn)
@@ -394,6 +460,9 @@ class Adapters:
             db_collection.insert_many(dfres.to_dict("records"))
 
         return dfres
+    
+    
+
 
     @staticmethod
     def get_stocks():

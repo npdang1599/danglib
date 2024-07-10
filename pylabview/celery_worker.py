@@ -45,6 +45,7 @@ app = app_factory(CELERY_RESOURCES.HOST)
 
 class TaskName:
     SCAN_STOCK = 'scan_one_stock'
+    SCAN_STOCK_V2 = 'scan_one_stock_v2'
     
 @app.task(name=TaskName.SCAN_STOCK)
 def scan_one_stock(df: pd.DataFrame, func, params, name="", trade_direction='Long', holding_periods=15):
@@ -60,7 +61,25 @@ def scan_one_stock(df: pd.DataFrame, func, params, name="", trade_direction='Lon
         print(f"scan error: {e}")
 
     return bt
+
+@app.task(name=TaskName.SCAN_STOCK_V2)
+def scan_one_stock_v2(df: pd.DataFrame, func, params: dict, name="", trade_direction='Long', holding_periods=15):
     
+    exit_params = params.pop('exit_cond') if 'exit_cond' in params else {}
     
+    bt = Simulator(
+        func,
+        df_ohlcv=df,
+        params=params,
+        exit_params=exit_params,
+        name=name,
+    )
+
+    try:
+        bt.run2(trade_direction, holding_periods=holding_periods)
+    except Exception as e:
+        print(f"scan error: {e}")
+
+    return bt
     
 # celery -A celery_worker worker --concurrency=10 --loglevel=INFO -n celery_worker@pylabview
