@@ -1383,6 +1383,10 @@ class Simulator:
         high_p,
         low_p,
         close_p,
+        open_i,
+        high_i,
+        low_i,
+        close_i,
         entry_signals,
         exit_signals,
         direction=1,
@@ -1431,23 +1435,29 @@ class Simulator:
         num_win5 = 0
         num_win10 = 0
         num_win15 = 0
+        num_win_i = 0
         
         total_return = 0.0
         total_return1 = 0.0
         total_return5 = 0.0
         total_return10 = 0.0
         total_return15 = 0.0
+        total_return_i = 0.0
         
         total_upside = 0
         total_downside = 0
-        
+        total_upside_i = 0
+        total_downside_i = 0
         
         total_profit = 0.0
         total_loss = 0.0
-        
+        total_profit_i = 0.0
+        total_loss_i = 0.0
         
         max_runup = np.NaN
         max_drawdown = np.NaN
+        max_runup_i = np.NaN
+        max_drawdown_i = np.NaN
 
         is_entry_arr = np.full(len(entry_signals), np.NaN)
         trading_status = np.full(len(entry_signals), np.NaN)
@@ -1466,6 +1476,7 @@ class Simulator:
         winrate_arr5 = np.full(len(entry_signals), np.NaN)
         winrate_arr10 = np.full(len(entry_signals), np.NaN)
         winrate_arr15 = np.full(len(entry_signals), np.NaN)
+
         
         return_arr = np.full(len(entry_signals), np.NaN)
         return_arr1 = np.full(len(entry_signals), np.NaN)
@@ -1478,15 +1489,29 @@ class Simulator:
         avg_returns_arr5 = np.full(len(entry_signals), np.NaN)
         avg_returns_arr10 = np.full(len(entry_signals), np.NaN)
         avg_returns_arr15 = np.full(len(entry_signals), np.NaN)
+
         
         profit_factor_arr = np.full(len(entry_signals), np.NaN)
-        
+
         upside_arr = np.full(len(entry_signals), np.NaN)
         downside_arr = np.full(len(entry_signals), np.NaN)
         max_runup_arr = np.full(len(entry_signals), np.NaN)
         max_drawdown_arr = np.full(len(entry_signals), np.NaN)
         avg_upside_arr = np.full(len(entry_signals), np.NaN)
         avg_downside_arr = np.full(len(entry_signals), np.NaN)
+        
+        winrate_arr_i = np.full(len(entry_signals), np.NaN)
+        avg_returns_arr_i = np.full(len(entry_signals), np.NaN)
+        profit_factor_arr_i = np.full(len(entry_signals), np.NaN)
+        
+        return_arr_i = np.full(len(entry_signals), np.NaN)
+        upside_arr_i = np.full(len(entry_signals), np.NaN)
+        downside_arr_i = np.full(len(entry_signals), np.NaN)
+        max_runup_arr_i = np.full(len(entry_signals), np.NaN)
+        max_drawdown_arr_i = np.full(len(entry_signals), np.NaN)
+        avg_upside_arr_i = np.full(len(entry_signals), np.NaN)
+        avg_downside_arr_i = np.full(len(entry_signals), np.NaN)
+        
         
         
         def src_idx(src, index):
@@ -1502,6 +1527,10 @@ class Simulator:
         trade_downside = np.NaN
         entry_price = np.NaN
         
+        trade_upside_i = np.NaN
+        trade_downside_i = np.NaN
+        entry_price_i = np.NaN
+        
         for bar_index, signal in enumerate(entry_signals):
             if signal and not is_trading:
                 is_trading = True
@@ -1513,10 +1542,13 @@ class Simulator:
 
                 trade_upside = np.NaN
                 trade_downside = np.NaN
+                trade_upside_i = np.NaN
+                trade_downside_i = np.NaN
                 
                 entry_price = src_idx(open_p, bar_index+1)
                 entry_price_arr[start_bar] = entry_price
                 entry_day_arr[start_bar] = day[bar_index]
+                entry_price_i = src_idx(open_i, bar_index+1)
                 
                 trade_return1 =  src_idx(open_p, bar_index+2) - entry_price
                 trade_return5 =  src_idx(open_p, bar_index+6) - entry_price
@@ -1553,9 +1585,14 @@ class Simulator:
                 if (bar_index - start_bar >= 1):
                     runup = (high_p[bar_index] - entry_price) / entry_price * 100
                     drawdown = (low_p[bar_index] - entry_price) / entry_price * 100
-                    
                     trade_upside = runup if np.isnan(trade_upside) else max(trade_upside, runup)
                     trade_downside = drawdown if np.isnan(trade_downside) else min(trade_downside, drawdown)
+                    
+                    runup_i = (high_i[bar_index] - entry_price_i) / entry_price_i * 100
+                    drawdown_i = (low_i[bar_index] - entry_price_i) / entry_price_i * 100
+                    trade_upside_i = runup_i if np.isnan(trade_upside_i) else max(trade_upside_i, runup_i)
+                    trade_downside_i = drawdown_i if np.isnan(trade_downside_i) else min(trade_downside_i, drawdown_i)
+                    
                 trading_status[bar_index] = 1
                 
             # match_exit = (
@@ -1579,10 +1616,14 @@ class Simulator:
                 is_trading = False
                 
                 close_price = src_idx(open_p, bar_index+1)
+                close_price_i = src_idx(open_i, bar_index+1)
 
                 price_change = (close_price - entry_price) * direction
+                price_change_i = (close_price_i - entry_price_i) * direction
                 
                 trade_return = price_change / entry_price * 100
+                trade_return_i = price_change_i / entry_price_i * 100
+
                 
                 if trade_return > 0:
                     num_win = num_win + 1
@@ -1590,14 +1631,26 @@ class Simulator:
  
                 if trade_return < 0:
                     total_loss = total_loss + price_change
+                    
+                if trade_return_i > 0:
+                    num_win_i = num_win_i + 1
+                    total_profit_i = total_profit_i + price_change_i
+ 
+                if trade_return_i < 0:
+                    total_loss_i = total_loss_i + price_change_i
                 
                 total_return = total_return + trade_return
+                total_return_i = total_return_i + trade_return_i
                 
                 trade_upside =  max(trade_upside, (close_price - entry_price) / entry_price * 100)
                 trade_downside =  min(trade_downside,  (close_price - entry_price) / entry_price * 100)
+                trade_upside_i =  max(trade_upside_i, (close_price_i - entry_price_i) / entry_price_i * 100)
+                trade_downside_i =  min(trade_downside_i,  (close_price_i - entry_price_i) / entry_price_i * 100)
             
                 max_runup = trade_upside if np.isnan(max_runup) else max(max_runup, trade_upside)
                 max_drawdown = trade_downside if np.isnan(max_drawdown) else min(max_drawdown, trade_downside)
+                max_runup_i = trade_upside_i if np.isnan(max_runup_i) else max(max_runup_i, trade_upside_i)
+                max_drawdown_i = trade_downside_i if np.isnan(max_drawdown_i) else min(max_drawdown_i, trade_downside_i)
 
                 winrate_arr[start_bar] = num_win / num_trades * 100
                 avg_returns_arr[start_bar] = total_return / num_trades
@@ -1618,6 +1671,20 @@ class Simulator:
                 return_arr[start_bar] = trade_return
                 price_change_arr[start_bar] = price_change
                 
+                return_arr_i[start_bar] = trade_return_i
+                winrate_arr_i[start_bar] = num_win_i / num_trades * 100
+                avg_returns_arr_i[start_bar] = total_return_i / num_trades
+                
+                total_upside_i += trade_upside_i
+                total_downside_i += trade_downside_i
+                upside_arr_i[start_bar] = trade_upside_i
+                downside_arr_i[start_bar] = trade_downside_i
+                max_runup_arr_i[start_bar] = max_runup_i
+                max_drawdown_arr_i[start_bar] = max_drawdown_i
+                avg_upside_arr_i[start_bar] = total_upside_i / num_trades
+                avg_downside_arr_i[start_bar] = total_downside_i / num_trades
+                
+                profit_factor_arr_i[start_bar] = (total_profit_i / (total_loss_i * -1) if total_loss_i != 0 else np.NaN)                
                 
         return  (
             entry_price_arr,
@@ -1653,7 +1720,30 @@ class Simulator:
             max_drawdown_arr,
             is_entry_arr,
             price_change_arr,
+            winrate_arr_i,
+            avg_returns_arr_i,
+            profit_factor_arr_i,
+            return_arr_i,
+            upside_arr_i,
+            downside_arr_i,
+            max_runup_arr_i,
+            max_drawdown_arr_i,
+            avg_upside_arr_i,
+            avg_downside_arr_i,
         )
+        
+        
+        # winrate_arr_i = np.full(len(entry_signals), np.NaN)
+        # avg_returns_arr_i = np.full(len(entry_signals), np.NaN)
+        # profit_factor_arr_i = np.full(len(entry_signals), np.NaN)
+        # return_arr_i = np.full(len(entry_signals), np.NaN)
+        # upside_arr_i = np.full(len(entry_signals), np.NaN)
+        # downside_arr_i = np.full(len(entry_signals), np.NaN)
+        # max_runup_arr_i = np.full(len(entry_signals), np.NaN)
+        # max_drawdown_arr_i = np.full(len(entry_signals), np.NaN)
+        # avg_upside_arr_i = np.full(len(entry_signals), np.NaN)
+        # avg_downside_arr_i = np.full(len(entry_signals), np.NaN)
+        
         
     def run2(self, 
             trade_direction="Long", 
@@ -1672,33 +1762,36 @@ class Simulator:
         name = self.name
         
 # %%
-        # trade_direction="Long"
-        # use_holding_periods = True
-        # holding_periods=15
-        # profit_thres=5,
-        # loss_thres=5
-        # use_takeprofit_cutloss = False
-        # compute_start_time="2018_01_01"
-        # df = df_raw.copy()
-        # func = Conds.compute_any_conds
+        def test_params():
+            trade_direction="Long"
+            use_holding_periods = True
+            holding_periods=15
+            profit_thres=5,
+            loss_thres=5
+            use_takeprofit_cutloss = False
+            compute_start_time="2018_01_01"
+            df = df_raw.copy()
+            func = Conds.compute_any_conds
+            
+            params = {
+            'bbpctb': {
+                'src_name': 'close',
+                'length': 20,
+                'mult': 2,
+                'use_flag': True,
+                'use_range': False,
+                'low_range': 80,
+                'high_range': 100,
+                'use_cross': False,
+                'direction': 'crossover',
+                'cross_line': 'Upper band'
+                }
+            }
+            
+            exit_params = params.pop('exit_cond') if 'exit_cond' in params else {} 
+            name = 'HPG'
         
-        # params = {
-        # 'bbpctb': {
-        #     'src_name': 'close',
-        #     'length': 20,
-        #     'mult': 2,
-        #     'use_flag': True,
-        #     'use_range': False,
-        #     'low_range': 80,
-        #     'high_range': 100,
-        #     'use_cross': False,
-        #     'direction': 'crossover',
-        #     'cross_line': 'Upper band'
-        #     }
-        # }
-        
-        # exit_params = params.pop('exit_cond') if 'exit_cond' in params else {} 
-        # name = 'HPG'
+# %%
         
         
         signals = func(df, params)
@@ -1710,6 +1803,16 @@ class Simulator:
         df["exitSignal"] = Utils.new_1val_series(False, df) if exit_signals is None else exit_signals
         
         df["name"] = name
+        
+        dfi = glob_obj.df_vnindex[['day', 'open', 'high', 'low', 'close']]
+        dfi.columns = ['day', 'iopen', 'ihigh', 'ilow', 'iclose']
+        df = pd.merge(df, dfi, how='left', on='day')
+        
+        df['iclose'] = df['iclose'].ffill()
+        df['iopen'] = df['iopen'].fillna(df['iclose'])
+        df['ihigh'] = df['ihigh'].fillna(df['iclose'])
+        df['ilow'] = df['ilow'].fillna(df['iclose'])
+
         
         (
             entry_price_arr,
@@ -1744,13 +1847,27 @@ class Simulator:
             max_runup_arr,
             max_drawdown_arr,
             is_entry_arr,
-            price_change_arr
+            price_change_arr,
+            winrate_arr_i,
+            avg_returns_arr_i,
+            profit_factor_arr_i,
+            return_arr_i,
+            upside_arr_i,
+            downside_arr_i,
+            max_runup_arr_i,
+            max_drawdown_arr_i,
+            avg_upside_arr_i,
+            avg_downside_arr_i,
         )=Simulator.compute_trade_stats2(
             day=df['day'].astype(int).values,
             open_p=df['open'].values, 
             high_p=df['high'].values,
             low_p=df['low'].values,
             close_p=df['close'].values,
+            open_i=df['iopen'].values,
+            high_i=df['ihigh'].values,
+            low_i=df['ilow'].values,
+            close_i=df['iclose'].values,
             entry_signals=df['signal'].values,
             exit_signals=df['exitSignal'].values,
             direction = 1 if trade_direction == 'Long' else -1,
@@ -1814,6 +1931,16 @@ class Simulator:
         df["isEntry"]     =  is_entry_arr
         df["priceChange"] =  price_change_arr
         df["matched"] =      np.where(df["signal"], 1, np.NaN)
+        df["winrateIdx"] = winrate_arr_i
+        df["avgReturnsIdx"] = avg_returns_arr_i
+        df["profitFactorIdx"] = profit_factor_arr_i
+        df["returnIdx"] = return_arr_i
+        df["upsideIdx"] = upside_arr_i
+        df["downsideIdx"] = downside_arr_i
+        df["maxRunupIdx"] = max_runup_arr_i
+        df["maxDrawdownIdx"] = max_drawdown_arr_i
+        df["avgUpsideIdx"] = avg_upside_arr_i
+        df["avgDownsideIdx"] = avg_downside_arr_i
         
         df[
             [
@@ -1832,7 +1959,14 @@ class Simulator:
                 "avgUpside",
                 "avgDownside",
                 "maxRunup",
-                "maxDrawdown"
+                "maxDrawdown",
+                "winrateIdx",
+                "avgReturnsIdx",
+                "profitFactorIdx",
+                "maxRunupIdx",
+                "maxDrawdownIdx",
+                "avgUpsideIdx",
+                "avgDownsideIdx",
             ]
         ] = df[
             [
@@ -1851,7 +1985,14 @@ class Simulator:
                 "avgUpside",
                 "avgDownside",
                 "maxRunup",
-                "maxDrawdown"
+                "maxDrawdown",
+                "winrateIdx",
+                "avgReturnsIdx",
+                "profitFactorIdx",
+                "maxRunupIdx",
+                "maxDrawdownIdx",
+                "avgUpsideIdx",
+                "avgDownsideIdx",
             ]
         ].ffill().fillna(0)
 
@@ -1870,6 +2011,13 @@ class Simulator:
                 "isEntry",
                 "matched",
                 "isTrading",
+                "winrateIdx",
+                "avgReturnsIdx",
+                "profitFactorIdx",
+                "maxRunupIdx",
+                "maxDrawdownIdx",
+                "avgUpsideIdx",
+                "avgDownsideIdx",
             ]
         ].iloc[-1]
 
@@ -2436,6 +2584,15 @@ class Scanner:
                 "avgReturn",
                 "avgUpside",
                 "avgDownside",
+                "maxRunup",
+                "maxDrawdown",
+                "winrateIdx",
+                "avgReturnsIdx",
+                "profitFactorIdx",
+                "maxRunupIdx",
+                "maxDrawdownIdx",
+                "avgUpsideIdx",
+                "avgDownsideIdx"
             ]
         ].round(2)
         res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups)
