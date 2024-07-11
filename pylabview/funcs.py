@@ -1567,12 +1567,12 @@ class Simulator:
             exit_by_signals = (bar_index - start_bar >= 1) & (exit_signals[bar_index])
             exit_by_periods = use_holding_periods and ((bar_index - start_bar) == holding_periods)
             
-            exit_by_periods = False
+            exit_by_profloss = False
             if (bar_index - start_bar >= 1):
                 pc = Utils.calc_percentage_change(entry_price, close_p[bar_index])
-                exit_by_periods = use_takeprofit_cutloss and ((pc >= profit_thres) or (pc <= -loss_thres))
+                exit_by_profloss = use_takeprofit_cutloss and ((pc >= profit_thres) or (pc <= -loss_thres))
 
-            match_exit = exit_by_signals or exit_by_periods or exit_by_periods
+            match_exit = exit_by_signals or exit_by_periods or exit_by_profloss
             
             if is_trading and match_exit:
                 
@@ -1673,7 +1673,11 @@ class Simulator:
         
 # %%
         # trade_direction="Long"
+        # use_holding_periods = True
         # holding_periods=15
+        # profit_thres=5,
+        # loss_thres=5
+        # use_takeprofit_cutloss = False
         # compute_start_time="2018_01_01"
         # df = df_raw.copy()
         # func = Conds.compute_any_conds
