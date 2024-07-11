@@ -77,8 +77,10 @@ class Globs:
             "VNINDEX", from_day=self.data_from_day
         )
 
-    def gen_stocks_data(self, fn=Fns.pickle_stocks_data, collection=None, send_viber=False):
+    def gen_stocks_data(self, fn=None, collection=None, send_viber=False):
         try:
+            if fn is None:
+                fn = Fns.pickle_stocks_data
             stocks = self.stocks
             Adapters.prepare_stocks_data(stocks, fn=fn, db_collection=collection, to_pickle=False, to_mongo=True)
 
@@ -1661,7 +1663,7 @@ class Scanner:
 
 
 glob_obj = Globs()
-glob_obj.load_stocks_data_pickle()
+glob_obj.load_stocks_data()
 glob_obj.load_vnindex()
 glob_obj.load_sectors_data()
 
