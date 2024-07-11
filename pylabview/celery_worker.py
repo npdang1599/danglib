@@ -63,7 +63,17 @@ def scan_one_stock(df: pd.DataFrame, func, params, name="", trade_direction='Lon
     return bt
 
 @app.task(name=TaskName.SCAN_STOCK_V2)
-def scan_one_stock_v2(df: pd.DataFrame, func, params: dict, name="", trade_direction='Long', holding_periods=15):
+def scan_one_stock_v2(
+        df: pd.DataFrame, 
+        func, params: dict, 
+        name="", 
+        trade_direction='Long',
+        use_holding_periods = True, 
+        holding_periods=15,
+        use_takeprofit_cutloss=False,
+        profit_thres=5,
+        loss_thres=5
+    ):
     
     exit_params = params.pop('exit_cond') if 'exit_cond' in params else {}
     
@@ -76,7 +86,15 @@ def scan_one_stock_v2(df: pd.DataFrame, func, params: dict, name="", trade_direc
     )
 
     try:
-        bt.run2(trade_direction, holding_periods=holding_periods)
+        bt.run2(
+            trade_direction, 
+            use_holding_periods=use_holding_periods,
+            holding_periods=holding_periods,
+            use_takeprofit_cutloss=use_takeprofit_cutloss,
+            profit_thres=profit_thres,
+            loss_thres=loss_thres
+            
+            )
     except Exception as e:
         print(f"scan error: {e}")
 

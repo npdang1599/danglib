@@ -47,13 +47,16 @@ class Globs:
             "bbwp": Conds.bbwp,
             "bbpctb": Conds.bbpctb,
             "net_income": Conds.Fa.net_income,
+            "revenue": Conds.Fa.revenue,
+            "PE": Conds.Fa.PE,
+            "PB": Conds.Fa.PB,
             "index_cond": Conds.index_cond,
             "lookback_cond": Conds.lookback_cond,
             "steel_ma_and_hl": Conds.Sectors.steel_ma_and_hl,
             "iron_ore": Conds.Sectors.iron_ore,
             "china_hrc": Conds.Sectors.china_hrc,
             "coking_coal": Conds.Sectors.coking_coal,
-            "china_longsteel": Conds.Sectors.china_longsteel,
+            "china_rebar": Conds.Sectors.china_rebar,
             "steel_scrap": Conds.Sectors.steel_scrap,
             "hpg_margin": Conds.Sectors.hpg_margin
         }
@@ -199,6 +202,7 @@ class Conds:
             line1: pd.Series,
             line2: pd.Series,
             direction: str = "crossover",
+            equal: bool = False,
             use_flag: bool = False,
         ):
             """Two line position condition"""
@@ -209,9 +213,9 @@ class Conds:
                 elif direction == "crossunder":
                     res = Ta.crossunder(line1, line2)
                 elif direction == "above":
-                    res = line1 > line2
+                    res = line1 >= line2 if equal else line1 > line2
                 elif direction == "below":
-                    res = line1 < line2
+                    res = line1 <= line2 if equal else line1 < line2
 
             return res
 
@@ -950,40 +954,63 @@ class Conds:
 #     f_PECond(PriceEarningsRatio) and f_PBCond(PriceBookRatio)
 
         @staticmethod
-        def pe(
+        def PE(
             df: pd.DataFrame,
             use_flag = False,
             lowrange = 0,
             highrange = 10
         ):
-            if use_flag:
-                return Utils.in_range(df['PE'], lower_thres=lowrange, upper_thres=highrange)
-            
-            return None
+            return Conds.Standards.range_cond(df['PE'], lower_thres=lowrange, upper_thres=highrange, use_flag=use_flag)
         
         @staticmethod
-        def pb(
+        def PB(
             df: pd.DataFrame,
             range_use_flag = False,
             range_low = 0,
             range_high = 10,
             
-            bb_length = 20,
-            bb_mult = 2.0,
-            bb_upper_use_flag = False,
-            bb_upper_method = 'above', 
-            bb_lower_use_flag = False,
-            bb_lower_method = 'below',
+            bb_length: int = 20,
+            bb_mult: float = 2.0,
+            bb_upper_use_flag: bool = False,
+            bb_upper_method: str = 'above', 
+            bb_lower_use_flag: bool = False,
+            bb_lower_method: str = 'below',
         ):
             src = df['PB']
             
-            range_cond = Utils.in_range(src, lower_thres=range_low, upper_thres=range_high)
+            range_cond = Conds.Standards.range_cond(
+                src, 
+                lower_thres=range_low, 
+                upper_thres=range_high, 
+                use_flag=range_use_flag
+            )
             
+            basis = Ta.sma(src, bb_length)
+            dev = bb_mult * Ta.stdev(src, bb_length)
+            upper = basis + dev
+            lower = basis - dev
             
+            PB_upperCond = Conds.Standards.two_line_pos(
+                line1=src,
+                line2=upper,
+                direction=bb_upper_method,
+                equal=True,
+                use_flag=bb_upper_use_flag
+            )
             
+            PB_lowerCond = Conds.Standards.two_line_pos(
+                line1=src,
+                line2=lower,
+                direction=bb_lower_method,
+                equal=True,
+                use_flag=bb_lower_use_flag
+            )
             
+            cond = Utils.combine_conditions([range_cond, PB_upperCond, PB_lowerCond])
             
+            return cond
 
+            
     class Sectors:
         @staticmethod
         def steel_ma_and_hl(
@@ -1131,7 +1158,7 @@ class Conds:
             )
         
         @staticmethod
-        def china_longsteel(
+        def china_rebar(
             df: pd.DataFrame, 
             ma_use_flag: bool = True, # Coking Coal MA combination
             ma_type = 'EMA', # Method
@@ -1216,10 +1243,6 @@ class Conds:
                 hl_lower = hl_lower,
                 hl_upper = hl_upper,
             )
-
-
-        
-        
 
     @staticmethod
     def compute_any_conds(df: pd.DataFrame, functions_params_dic: dict):
@@ -1357,10 +1380,15 @@ class Simulator:
         open_p, 
         high_p,
         low_p,
+        close_p,
         entry_signals,
         exit_signals,
-        direction,
-        holding_periods
+        direction=1,
+        use_holding_periods=False,
+        holding_periods=15,
+        use_takeprofit_cutloss=False,
+        profit_thres=5,
+        loss_thres=5
     ):
 # %%
         # entry_condition = {
@@ -1470,6 +1498,7 @@ class Simulator:
 
         trade_upside = np.NaN
         trade_downside = np.NaN
+        entry_price = np.NaN
         
         for bar_index, signal in enumerate(entry_signals):
             if signal and not is_trading:
@@ -1527,11 +1556,21 @@ class Simulator:
                     trade_downside = drawdown if np.isnan(trade_downside) else min(trade_downside, drawdown)
                 trading_status[bar_index] = 1
                 
-            match_exit = (
-                (bar_index - start_bar >= 1) & (exit_signals[bar_index])
-            ) | (
-                (bar_index - start_bar) == holding_periods
-            )
+            # match_exit = (
+            #     (bar_index - start_bar >= 1) & (exit_signals[bar_index])
+            # ) | (
+            #     (bar_index - start_bar) == holding_periods
+            # )
+            
+            exit_by_signals = (bar_index - start_bar >= 1) & (exit_signals[bar_index])
+            exit_by_periods = use_holding_periods and ((bar_index - start_bar) == holding_periods)
+            
+            exit_by_periods = False
+            if (bar_index - start_bar >= 1):
+                pc = Utils.calc_percentage_change(entry_price, close_p[bar_index])
+                exit_by_periods = use_takeprofit_cutloss and ((pc >= profit_thres) or (pc <= -loss_thres))
+
+            match_exit = exit_by_signals or exit_by_periods or exit_by_periods
             
             if is_trading and match_exit:
                 
@@ -1614,7 +1653,15 @@ class Simulator:
             price_change_arr,
         )
         
-    def run2(self, trade_direction="Long", compute_start_time="2018_01_01", holding_periods=8):
+    def run2(self, 
+            trade_direction="Long", 
+            compute_start_time="2018_01_01", 
+            use_holding_periods=True,
+            holding_periods=60,
+            use_takeprofit_cutloss=False,
+            profit_thres=5,
+            loss_thres=5
+            ):
         
         df = self.df
         func = self.func
@@ -1697,10 +1744,15 @@ class Simulator:
             open_p=df['open'].values, 
             high_p=df['high'].values,
             low_p=df['low'].values,
+            close_p=df['close'].values,
             entry_signals=df['signal'].values,
             exit_signals=df['exitSignal'].values,
             direction = 1 if trade_direction == 'Long' else -1,
-            holding_periods=holding_periods
+            use_holding_periods=use_holding_periods,
+            holding_periods=holding_periods,
+            use_takeprofit_cutloss=use_takeprofit_cutloss,
+            profit_thres=profit_thres,
+            loss_thres=loss_thres
         )
         def strday(x):  
             y = str(x)
@@ -2258,9 +2310,17 @@ class Scanner:
 
         return res_df, trades_df
     
-    
     @staticmethod
-    def scan_multiple_stocks3(func, params, stocks=None, trade_direction="Long", holding_periods=60):
+    def scan_multiple_stocks3(
+        func, params, 
+        stocks=None, 
+        trade_direction="Long", 
+        use_holding_periods=True,
+        holding_periods=60,
+        use_takeprofit_cutloss=False,
+        profit_thres=5,
+        loss_thres=5
+        ):
         # %%
         # func = Conds.compute_any_conds
         # stocks=None
@@ -2341,7 +2401,11 @@ class Scanner:
                 params=params,
                 name=stock,
                 trade_direction=trade_direction,
-                holding_periods=holding_periods
+                use_holding_periods=use_holding_periods,
+                holding_periods=holding_periods,
+                use_takeprofit_cutloss=use_takeprofit_cutloss,
+                profit_thres=profit_thres,
+                loss_thres=loss_thres
             )
             
             task_dic[stock] = task
@@ -2387,44 +2451,25 @@ def test():
     df = glob_obj.get_one_stock_data("HPG")
 
     params = (
-        {'china_hrc': {
-            'ma_use_flag': True,
-            'ma_len1': 5,
-            'ma_len2': 15,
-            'ma_type': 'EMA',
-            'ma_dir': 'crossover',
-            'hl_use_flag': False,
-            'hl_dir': 'Increase',
-            'hl_nbars': 10,
-            'hl_lower': 5,
-            'hl_upper': 100
-            },
-        'coking_coal': {
-            'ma_use_flag': False,
-            'ma_len1': 5,
-            'ma_len2': 15,
-            'ma_type': 'EMA',
-            'ma_dir': 'crossover',
-            'hl_use_flag': False,
-            'hl_dir': 'Increase',
-            'hl_nbars': 10,
-            'hl_lower': 5,
-            'hl_upper': 100
-            },
-        'iron_ore': {
-            'ma_use_flag': False,
-            'ma_len1': 5,
-            'ma_len2': 15,
-            'ma_type': 'EMA',
-            'ma_dir': 'crossover',
-            'hl_use_flag': False,
-            'hl_dir': 'Increase',
-            'hl_nbars': 10,
-            'hl_lower': 5,
-            'hl_upper': 100
+        {
+            'price_change':{
+                'lower_thres':5,
+                'use_flag': True
             }
         }
     )
+    res, df = Scanner.scan_multiple_stocks3(
+            func=Conds.compute_any_conds,
+            params=params,
+            stocks=['HPG', 'SSI', 'CTR'],
+            trade_direction='Long', 
+            use_holding_periods=True,
+            holding_periods=15,
+            use_takeprofit_cutloss=False,
+            profit_thres=5,
+            loss_thres=5
+        )
+    
     
 if __name__ == "__main__":
 
