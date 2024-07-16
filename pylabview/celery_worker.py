@@ -48,7 +48,8 @@ class TaskName:
     SCAN_STOCK_V2 = 'scan_one_stock_v2'
     
 @app.task(name=TaskName.SCAN_STOCK)
-def scan_one_stock(df: pd.DataFrame, func, params, name="", trade_direction='Long', holding_periods=15):
+def scan_one_stock(df: pd.DataFrame, func, params, name="", trade_direction='Long', use_shift=False,
+        n_shift=15, holding_periods=15):
     bt = Simulator(
         func,
         df_ohlcv=df,
@@ -56,7 +57,8 @@ def scan_one_stock(df: pd.DataFrame, func, params, name="", trade_direction='Lon
         name=name,
     )
     try:
-        bt.run(trade_direction=trade_direction, holding_periods=holding_periods)
+        bt.run(trade_direction=trade_direction, use_shift=use_shift,
+        n_shift=n_shift,holding_periods=holding_periods)
     except Exception as e:
         print(f"scan error: {e}")
 
@@ -68,6 +70,8 @@ def scan_one_stock_v2(
         func, params: dict, 
         name="", 
         trade_direction='Long',
+        use_shift=False,
+        n_shift=15,
         use_holding_periods = True, 
         holding_periods=15,
         use_takeprofit_cutloss=False,
@@ -88,6 +92,8 @@ def scan_one_stock_v2(
     try:
         bt.run2(
             trade_direction, 
+            use_shift=use_shift,
+            n_shift=n_shift,
             use_holding_periods=use_holding_periods,
             holding_periods=holding_periods,
             use_takeprofit_cutloss=use_takeprofit_cutloss,

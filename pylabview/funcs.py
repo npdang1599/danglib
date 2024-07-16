@@ -192,6 +192,18 @@ class Globs:
         df = pd.DataFrame(data_list)
 
         return df
+    
+    @staticmethod
+    def old_saved_adapters(params: dict):
+        net_income_params = params.get('net_income')
+        if net_income_params is not None:
+
+            if 'use_shift' in net_income_params.keys():
+                use_shift = net_income_params.pop('use_shift')
+                n_shift = net_income_params.pop('n_shift')
+                params['stock_scanner']['use_shift'] = use_shift
+                params['stock_scanner']['n_shift'] = n_shift
+        return params  
 
 class Conds:
     """Custom condition funcitions"""
@@ -242,10 +254,10 @@ class Conds:
         ):
             """Two line conditions"""
             pos_cond = Conds.Standards.two_line_pos(
-                line1, line2, direction, use_vs_signal
+                line1, line2, direction, use_flag=use_vs_signal
             )
             range_cond = Conds.Standards.range_cond(
-                line1, lower_thres, upper_thres, use_range
+                line1, lower_thres, upper_thres, use_flag=use_range
             )
             res = Utils.combine_conditions([pos_cond, range_cond])
             return res
@@ -405,7 +417,7 @@ class Conds:
             if direction == "Decrease":
                 pct_change = pct_change * -1
 
-            return Utils.in_range(pct_change, low_range, high_range, equal=False)
+            return Utils.in_range(pct_change, low_range, high_range, equal=True)
 
         return None
 
@@ -751,6 +763,8 @@ class Conds:
                 lower_thres,
                 upper_thres,
             )
+            
+
 
         return res
 
@@ -801,7 +815,7 @@ class Conds:
         if use_flag:
             bbpctb = Ta.bbpctb(df, src_name, length, mult)
 
-            cross_l = Utils.new_1val_series(1 if cross_line == "Upper band" else 0, df)
+            cross_l = Utils.new_1val_series(100 if cross_line == "Upper band" else 0, df)
 
             res = Conds.Standards.two_line_conditions(
                 bbpctb,
@@ -825,8 +839,6 @@ class Conds:
             roll_len: int = 1,
             direction: str = "positive",
             percentage: float = 0,
-            use_shift: bool = False,
-            n_shift: int = 5,
             use_flag: bool = False,
         ):
             """Net Income based conditions"""
@@ -854,13 +866,6 @@ class Conds:
                 )
 
                 matched = df["mapYQ"].map(df_ni["matched"])
-
-                if use_shift:
-                    matched = matched.shift(n_shift)
-                    matched = pd.Series(
-                        data=np.where(matched.isna(), False, matched), 
-                        index=matched.index
-                    )
                     
                 # df['matched'] = matched
 
@@ -875,8 +880,6 @@ class Conds:
             roll_len: int = 1,
             direction: str = "positive",
             percentage: float = 0,
-            use_shift: bool = False,
-            n_shift: int = 5,
             use_flag: bool = False,
         ):
             """Net Income based conditions"""
@@ -905,55 +908,9 @@ class Conds:
 
                 matched = df["mapYQ"].map(df_ni["matched"])
 
-                if use_shift:
-                    matched = matched.shift(n_shift)
-                    matched = pd.Series(
-                        data=np.where(matched.isna(), False, matched), 
-                        index=matched.index
-                    )
-                    
-                # df['matched'] = matched
-
                 return matched
 
             return None
-# PE_useRange = input.bool(false, title = 'Range Cond', inline = "PErange", group = 'P/E conditions')
-# PE_highrange = input.float(10, minval =0,title = 'P/E High Range',inline = "PErange", group = 'P/E conditions')
-# PE_lowrange = input.float(0, minval =0 , title = 'P/E Low Range' ,inline = "PErange", group = 'P/E conditions')
-# PE_plot = input.bool(false, title = 'plot P/E')
-
-# PB_useRange = input.bool(false, title = 'Range Cond', inline = "PBrange", group = 'P/B conditions')
-# PB_highrange = input.float(10, minval =0,title = 'P/B High Range',inline = "PBrange", group = 'P/B conditions')
-# PB_lowrange = input.float(0, minval =0 , title = 'P/B Low Range' ,inline = "PBrange", group = 'P/B conditions')
-
-# PB_BB_length = input.int(20, minval=1,title ='P/B MA Length', group = 'P/B conditions')
-# PB_BB_mult = input.float(2.0, minval=0.001, maxval=50, title="P/B StdDev",group = 'P/B conditions')
-# PB_useUpperMethod = input.bool(defval = false, title = '', inline = 'BBUpdir', group = 'P/B conditions')
-# PB_upperMethod = input.string('above', options = ['above', 'below', 'crossover', 'crossunder'], title = 'P/B vs UpperBand',inline = 'BBUpdir', group = 'P/B conditions')
-# PB_useLowerMethod = input.bool(defval = false, title = '', inline = 'BBLowdir',group = 'P/B conditions') 
-# PB_lowerMethod = input.string('below', options = ['above', 'below', 'crossover', 'crossunder'], title = 'P/B vs LowerBand', inline = 'BBLowdir',group = 'P/B conditions')
-# PB_plot = input.bool(false, title = 'plot  P/B', group = 'P/B conditions')
-
-# f_PECond(PriceEarningsRatio) =>
-#     EPSCond = not PE_useRange or dlib.f_inrange(PriceEarningsRatio, PE_lowrange, PE_highrange)
-#     EPSCond
-
-# f_PBCond(PriceBookRatio)=>
-#     PBRangeCond = (not PB_useRange or dlib.f_inrange(PriceBookRatio, PB_lowrange, PB_highrange))
-
-#     PB_basis = ta.sma(PriceBookRatio, PB_BB_length)
-#     PB_dev = PB_BB_mult * ta.stdev(PriceBookRatio, PB_BB_length)
-#     PB_upper = PB_basis + PB_dev
-#     PB_lower = PB_basis - PB_dev
-
-#     PB_upperCond = not PB_useUpperMethod or f_define_2line_cond(PriceBookRatio, PB_upper, PB_upperMethod, true)
-#     PB_lowerCond = not PB_useLowerMethod or f_define_2line_cond(PriceBookRatio, PB_lower, PB_lowerMethod, true)
-
-#     PBBBCond = PB_upperCond and PB_lowerCond // Điều kiện upper lower bollinger Band
-#     PBCond = PBBBCond and PBRangeCond
-
-# f_PEPBCond(PriceEarningsRatio, PriceBookRatio) =>
-#     f_PECond(PriceEarningsRatio) and f_PBCond(PriceBookRatio)
 
         @staticmethod
         def PE(
@@ -1018,33 +975,40 @@ class Conds:
         def steel_ma_and_hl(
             df: pd.DataFrame, 
             steel_src,
-            ma_use_flag: bool = True, # Coking Coal MA combination
+            show_src: bool = False,
+            ma_use_flag: bool = False, # Coking Coal MA combination
             ma_type = 'EMA', # Method
             ma_len1 = 5, # MA1
             ma_len2 = 15, # MA2
             ma_dir = 'crossover', # Direction
             hl_use_flag: bool = False, # Increase/Decrease over N bars
             hl_nbars = 5, # N Bars
-            hl_dir = 'increase', # Direction
+            hl_dir = 'Increase', # Direction
             hl_lower = -999, # Lower
             hl_upper = 999 # Upper
         ):
             
-            # steel_src='Aus Coal'
-            # ma_use_flag: bool = False # Coking Coal MA combination
-            # ma_type = 'EMA' # Method
-            # ma_len1 = 5 # MA1
-            # ma_len2 = 15 # MA2
-            # ma_dir = 'crossover' # Direction
-            # hl_use_flag: bool = False # Increase/Decrease over N bars
-            # hl_nbars = 5 # N Bars
-            # hl_dir = 'increase' # Direction
-            # hl_lower = -999 # Lower
-            # hl_upper = 999 # Upper
-            # df = glob_obj.get_one_stock_data("HPG")
+            def test():
+                steel_src='Ore 62'
+                ma_use_flag: bool = False # Coking Coal MA combination
+                ma_type = 'EMA' # Method
+                ma_len1 = 5 # MA1
+                ma_len2 = 15 # MA2
+                ma_dir = 'crossover' # Direction
+                hl_use_flag: bool = True # Increase/Decrease over N bars
+                hl_nbars = 10 # N Bars
+                hl_dir = 'Increase' # Direction
+                hl_lower = 15 # Lower
+                hl_upper = 999 # Upper
+                df = glob_obj.get_one_stock_data("HPG")
         
             df_steel = glob_obj.sectors['steel']['io_data'].copy()
             df_steel['high'] = df_steel['low'] = df_steel[steel_src].copy()
+            df_steel = df_steel[df_steel['day'].isin(df['day'])]
+            
+            if show_src:
+                df[steel_src] = df['day'].map(dict(zip(df_steel['day'], df_steel[steel_src])))
+            
             ma_cond = Conds.Standards.two_ma_lines(
                 df_steel,
                 src_name=steel_src,
@@ -1069,26 +1033,30 @@ class Conds:
             if steel_cond is not None:
                 df_steel['cond'] = steel_cond
                 return Utils.merge_condition(df, dict(zip(df_steel['day'], df_steel['cond'])))
+            
+                
 
             return None
         
         @staticmethod
         def coking_coal(
             df: pd.DataFrame, 
-            ma_use_flag: bool = True, # Coking Coal MA combination
+            show_src: bool = False,
+            ma_use_flag: bool = False, # Coking Coal MA combination
             ma_type = 'EMA', # Method
             ma_len1 = 5, # MA1
             ma_len2 = 15, # MA2
             ma_dir = 'crossover', # Direction
             hl_use_flag: bool = False, # Increase/Decrease over N bars
             hl_nbars = 5, # N Bars
-            hl_dir = 'increase', # Direction
+            hl_dir = 'Increase', # Direction
             hl_lower = -999, # Lower
             hl_upper = 999 # Upper
         ):
             return Conds.Sectors.steel_ma_and_hl(
                 df = df,
                 steel_src='Aus Coal',
+                show_src=show_src,
                 ma_use_flag = ma_use_flag,
                 ma_type = ma_type,
                 ma_len1 = ma_len1,
@@ -1104,20 +1072,22 @@ class Conds:
         @staticmethod
         def iron_ore(
             df: pd.DataFrame, 
-            ma_use_flag: bool = True, # Coking Coal MA combination
+            show_src: bool = False,
+            ma_use_flag: bool = False, # Coking Coal MA combination
             ma_type = 'EMA', # Method
             ma_len1 = 5, # MA1
             ma_len2 = 15, # MA2
             ma_dir = 'crossover', # Direction
             hl_use_flag: bool = False, # Increase/Decrease over N bars
             hl_nbars = 5, # N Bars
-            hl_dir = 'increase', # Direction
+            hl_dir = 'Increase', # Direction
             hl_lower = -999, # Lower
             hl_upper = 999 # Upper
         ):
             return Conds.Sectors.steel_ma_and_hl(
                 df = df,
                 steel_src='Ore 62',
+                show_src=show_src,
                 ma_use_flag = ma_use_flag,
                 ma_type = ma_type,
                 ma_len1 = ma_len1,
@@ -1133,14 +1103,14 @@ class Conds:
         @staticmethod
         def china_hrc(
             df: pd.DataFrame, 
-            ma_use_flag: bool = True, # Coking Coal MA combination
+            ma_use_flag: bool = False, # Coking Coal MA combination
             ma_type = 'EMA', # Method
             ma_len1 = 5, # MA1
             ma_len2 = 15, # MA2
             ma_dir = 'crossover', # Direction
             hl_use_flag: bool = False, # Increase/Decrease over N bars
             hl_nbars = 5, # N Bars
-            hl_dir = 'increase', # Direction
+            hl_dir = 'Increase', # Direction
             hl_lower = -999, # Lower
             hl_upper = 999 # Upper
         ):
@@ -1162,14 +1132,14 @@ class Conds:
         @staticmethod
         def china_rebar(
             df: pd.DataFrame, 
-            ma_use_flag: bool = True, # Coking Coal MA combination
+            ma_use_flag: bool = False, # Coking Coal MA combination
             ma_type = 'EMA', # Method
             ma_len1 = 5, # MA1
             ma_len2 = 15, # MA2
             ma_dir = 'crossover', # Direction
             hl_use_flag: bool = False, # Increase/Decrease over N bars
             hl_nbars = 5, # N Bars
-            hl_dir = 'increase', # Direction
+            hl_dir = 'Increase', # Direction
             hl_lower = -999, # Lower
             hl_upper = 999 # Upper
         ):
@@ -1191,14 +1161,14 @@ class Conds:
         @staticmethod
         def steel_scrap(
             df: pd.DataFrame, 
-            ma_use_flag: bool = True, # Coking Coal MA combination
+            ma_use_flag: bool = False, # Coking Coal MA combination
             ma_type = 'EMA', # Method
             ma_len1 = 5, # MA1
             ma_len2 = 15, # MA2
             ma_dir = 'crossover', # Direction
             hl_use_flag: bool = False, # Increase/Decrease over N bars
             hl_nbars = 5, # N Bars
-            hl_dir = 'increase', # Direction
+            hl_dir = 'Increase', # Direction
             hl_lower = -999, # Lower
             hl_upper = 999 # Upper
         ):
@@ -1220,14 +1190,14 @@ class Conds:
         @staticmethod
         def hpg_margin(
             df: pd.DataFrame, 
-            ma_use_flag: bool = True, # Coking Coal MA combination
+            ma_use_flag: bool = False, # Coking Coal MA combination
             ma_type = 'EMA', # Method
             ma_len1 = 5, # MA1
             ma_len2 = 15, # MA2
             ma_dir = 'crossover', # Direction
             hl_use_flag: bool = False, # Increase/Decrease over N bars
             hl_nbars = 5, # N Bars
-            hl_dir = 'increase', # Direction
+            hl_dir = 'Increase', # Direction
             hl_lower = -999, # Lower
             hl_upper = 999 # Upper
         ):
@@ -1247,9 +1217,9 @@ class Conds:
             )
 
     @staticmethod
-    def compute_any_conds(df: pd.DataFrame, functions_params_dic: dict):
+    def compute_any_conds(df: pd.DataFrame, functions_params_dic: dict, *args):
         """Compute and combine any conditions"""
-        df = df.copy()
+        # df = df.copy()
         conds = []
         try:
             for func_name, params in functions_params_dic.items():
@@ -1547,7 +1517,7 @@ class Simulator:
                 
                 entry_price = src_idx(open_p, bar_index+1)
                 entry_price_arr[start_bar] = entry_price
-                entry_day_arr[start_bar] = day[bar_index]
+                entry_day_arr[start_bar] = src_idx(day,bar_index+1)
                 entry_price_i = src_idx(open_i, bar_index+1)
                 
                 trade_return1 =  src_idx(open_p, bar_index+2) - entry_price
@@ -1616,75 +1586,76 @@ class Simulator:
                 is_trading = False
                 
                 close_price = src_idx(open_p, bar_index+1)
-                close_price_i = src_idx(open_i, bar_index+1)
+                if not np.isnan(close_price):
+                    close_price_i = src_idx(open_i, bar_index+1)
 
-                price_change = (close_price - entry_price) * direction
-                price_change_i = (close_price_i - entry_price_i) * direction
-                
-                trade_return = price_change / entry_price * 100
-                trade_return_i = price_change_i / entry_price_i * 100
-
-                
-                if trade_return > 0:
-                    num_win = num_win + 1
-                    total_profit = total_profit + price_change
- 
-                if trade_return < 0:
-                    total_loss = total_loss + price_change
+                    price_change = (close_price - entry_price) * direction
+                    price_change_i = (close_price_i - entry_price_i) * direction
                     
-                if trade_return_i > 0:
-                    num_win_i = num_win_i + 1
-                    total_profit_i = total_profit_i + price_change_i
- 
-                if trade_return_i < 0:
-                    total_loss_i = total_loss_i + price_change_i
-                
-                total_return = total_return + trade_return
-                total_return_i = total_return_i + trade_return_i
-                
-                trade_upside =  max(trade_upside, (close_price - entry_price) / entry_price * 100)
-                trade_downside =  min(trade_downside,  (close_price - entry_price) / entry_price * 100)
-                trade_upside_i =  max(trade_upside_i, (close_price_i - entry_price_i) / entry_price_i * 100)
-                trade_downside_i =  min(trade_downside_i,  (close_price_i - entry_price_i) / entry_price_i * 100)
-            
-                max_runup = trade_upside if np.isnan(max_runup) else max(max_runup, trade_upside)
-                max_drawdown = trade_downside if np.isnan(max_drawdown) else min(max_drawdown, trade_downside)
-                max_runup_i = trade_upside_i if np.isnan(max_runup_i) else max(max_runup_i, trade_upside_i)
-                max_drawdown_i = trade_downside_i if np.isnan(max_drawdown_i) else min(max_drawdown_i, trade_downside_i)
+                    trade_return = price_change / entry_price * 100
+                    trade_return_i = price_change_i / entry_price_i * 100
 
-                winrate_arr[start_bar] = num_win / num_trades * 100
-                avg_returns_arr[start_bar] = total_return / num_trades
+                    
+                    if trade_return > 0:
+                        num_win = num_win + 1
+                        total_profit = total_profit + price_change
+    
+                    if trade_return < 0:
+                        total_loss = total_loss + price_change
+                        
+                    if trade_return_i > 0:
+                        num_win_i = num_win_i + 1
+                        total_profit_i = total_profit_i + price_change_i
+    
+                    if trade_return_i < 0:
+                        total_loss_i = total_loss_i + price_change_i
+                    
+                    total_return = total_return + trade_return
+                    total_return_i = total_return_i + trade_return_i
+                    
+                    trade_upside =  max(trade_upside, (close_price - entry_price) / entry_price * 100)
+                    trade_downside =  min(trade_downside,  (close_price - entry_price) / entry_price * 100)
+                    trade_upside_i =  max(trade_upside_i, (close_price_i - entry_price_i) / entry_price_i * 100)
+                    trade_downside_i =  min(trade_downside_i,  (close_price_i - entry_price_i) / entry_price_i * 100)
                 
-                total_upside += trade_upside
-                total_downside += trade_downside
-                upside_arr[start_bar] = trade_upside
-                downside_arr[start_bar] = trade_downside
-                max_runup_arr[start_bar] = max_runup
-                max_drawdown_arr[start_bar] = max_drawdown
-                avg_upside_arr[start_bar] = total_upside / num_trades
-                avg_downside_arr[start_bar] = total_downside / num_trades
-                
-                profit_factor_arr[start_bar] = (total_profit / (total_loss * -1) if total_loss != 0 else np.NaN)
+                    max_runup = trade_upside if np.isnan(max_runup) else max(max_runup, trade_upside)
+                    max_drawdown = trade_downside if np.isnan(max_drawdown) else min(max_drawdown, trade_downside)
+                    max_runup_i = trade_upside_i if np.isnan(max_runup_i) else max(max_runup_i, trade_upside_i)
+                    max_drawdown_i = trade_downside_i if np.isnan(max_drawdown_i) else min(max_drawdown_i, trade_downside_i)
 
-                exit_price_arr[start_bar] = close_price
-                exit_day_arr[start_bar] = day[bar_index]
-                return_arr[start_bar] = trade_return
-                price_change_arr[start_bar] = price_change
-                
-                return_arr_i[start_bar] = trade_return_i
-                winrate_arr_i[start_bar] = num_win_i / num_trades * 100
-                avg_returns_arr_i[start_bar] = total_return_i / num_trades
-                
-                total_upside_i += trade_upside_i
-                total_downside_i += trade_downside_i
-                upside_arr_i[start_bar] = trade_upside_i
-                downside_arr_i[start_bar] = trade_downside_i
-                max_runup_arr_i[start_bar] = max_runup_i
-                max_drawdown_arr_i[start_bar] = max_drawdown_i
-                avg_upside_arr_i[start_bar] = total_upside_i / num_trades
-                avg_downside_arr_i[start_bar] = total_downside_i / num_trades
-                
-                profit_factor_arr_i[start_bar] = (total_profit_i / (total_loss_i * -1) if total_loss_i != 0 else np.NaN)                
+                    winrate_arr[start_bar] = num_win / num_trades * 100
+                    avg_returns_arr[start_bar] = total_return / num_trades
+                    
+                    total_upside += trade_upside
+                    total_downside += trade_downside
+                    upside_arr[start_bar] = trade_upside
+                    downside_arr[start_bar] = trade_downside
+                    max_runup_arr[start_bar] = max_runup
+                    max_drawdown_arr[start_bar] = max_drawdown
+                    avg_upside_arr[start_bar] = total_upside / num_trades
+                    avg_downside_arr[start_bar] = total_downside / num_trades
+                    
+                    profit_factor_arr[start_bar] = (total_profit / (total_loss * -1) if total_loss != 0 else np.NaN)
+
+                    exit_price_arr[start_bar] = close_price
+                    exit_day_arr[start_bar] = src_idx(day, bar_index+1)
+                    return_arr[start_bar] = trade_return
+                    price_change_arr[start_bar] = price_change
+                    
+                    return_arr_i[start_bar] = trade_return_i
+                    winrate_arr_i[start_bar] = num_win_i / num_trades * 100
+                    avg_returns_arr_i[start_bar] = total_return_i / num_trades
+                    
+                    total_upside_i += trade_upside_i
+                    total_downside_i += trade_downside_i
+                    upside_arr_i[start_bar] = trade_upside_i
+                    downside_arr_i[start_bar] = trade_downside_i
+                    max_runup_arr_i[start_bar] = max_runup_i
+                    max_drawdown_arr_i[start_bar] = max_drawdown_i
+                    avg_upside_arr_i[start_bar] = total_upside_i / num_trades
+                    avg_downside_arr_i[start_bar] = total_downside_i / num_trades
+                    
+                    profit_factor_arr_i[start_bar] = (total_profit_i / (total_loss_i * -1) if total_loss_i != 0 else np.NaN)                
                 
         return  (
             entry_price_arr,
@@ -1747,6 +1718,8 @@ class Simulator:
         
     def run2(self, 
             trade_direction="Long", 
+            use_shift = False,
+            n_shift = 15,
             compute_start_time="2018_01_01", 
             use_holding_periods=True,
             holding_periods=60,
@@ -1764,6 +1737,8 @@ class Simulator:
 # %%
         def test_params():
             trade_direction="Long"
+            use_shift = False,
+            n_shift = 15,
             use_holding_periods = True
             holding_periods=15
             profit_thres=5,
@@ -1798,6 +1773,10 @@ class Simulator:
         
         df['signal'] = Utils.new_1val_series(True, df) if signals is None else signals
         df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
+        if use_shift:
+            df["signal"] = df["signal"].shift(n_shift)
+            df["signal"] = df['signal'].fillna(value=False)
+                    
 
         exit_signals = Conds.compute_any_conds(df, exit_params)
         df["exitSignal"] = Utils.new_1val_series(False, df) if exit_signals is None else exit_signals
@@ -1857,7 +1836,7 @@ class Simulator:
             max_runup_arr_i,
             max_drawdown_arr_i,
             avg_upside_arr_i,
-            avg_downside_arr_i,
+            avg_downside_arr_i
         )=Simulator.compute_trade_stats2(
             day=df['day'].astype(int).values,
             open_p=df['open'].values, 
@@ -2192,7 +2171,8 @@ class Simulator:
         )
 
     def run(
-        self, trade_direction="Long", compute_start_time="2018_01_01", holding_periods=8
+        self, trade_direction="Long", compute_start_time="2018_01_01", use_shift=False,
+        n_shift=15, holding_periods=8
     ):
         df = self.df
         func = self.func
@@ -2223,6 +2203,9 @@ class Simulator:
         
             
         df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
+        if use_shift:
+            df["signal"] = df["signal"].shift(n_shift)
+            df["signal"] = df['signal'].fillna(value=False)
         # print(f"num of nan signals: {df['signal'].isna().sum()}")
         df["name"] = name
 
@@ -2353,7 +2336,14 @@ class Scanner:
     """Scanner"""
 
     @staticmethod
-    def scan_multiple_stocks(func, params, stocks=None, trade_direction="Long", holding_periods=60):
+    def scan_multiple_stocks(
+        func, 
+        params, 
+        stocks=None,
+        trade_direction="Long", 
+        use_shift=False,
+        n_shift=15,
+        holding_periods=60):
         """Backtest on multiple stocks"""
         from danglib.pylabview.celery_worker import scan_one_stock, clean_redis
 
@@ -2370,6 +2360,8 @@ class Scanner:
         err_stocks = {}
         task_dic = {}
         
+        params = Globs.old_saved_adapters(params)
+        
         for stock, df_stock in df_all_stocks.groupby("stock"):
             df_stock = df_stock.reset_index(drop=True)
 
@@ -2379,6 +2371,8 @@ class Scanner:
                 params=params,
                 name=stock,
                 trade_direction=trade_direction,
+                use_shift=use_shift,
+                n_shift=n_shift,
                 holding_periods=holding_periods
             )
             
@@ -2413,62 +2407,12 @@ class Scanner:
         return res_df, trades_df
     
     @staticmethod
-    def scan_multiple_stocks2(func, params, trade_direction="Long", holding_periods=60):
-        df_all_stocks = glob_obj.df_stocks
-
-        res_ls = []
-        df_ls = []
-        err_stocks = {}
-
-        for stock, df_stock in df_all_stocks.groupby("stock"):
-            df_stock = df_stock.reset_index(drop=True)
-            try:
-                bt = Simulator(
-                    func,
-                    df_ohlcv=df_stock,
-                    params=params,
-                    name=stock,
-                )
-                bt.run(trade_direction, holding_periods=holding_periods)
-                res = bt.result
-                df_trades = bt.df
-                df_trades["beta_group"] = glob_obj.dic_groups[stock]
-
-                if res is not None:
-                    res_ls.append(res)
-                    df_ls.append(df_trades)
-                else:
-                    err_stocks[stock] = "Empty simmulated result"
-            except ValueError as e:
-                err_stocks[stock] = e
-
-        if Globs.verbosity == 1:
-            logging.info("Stocks' scanned errors:")
-            pprint.pprint(err_stocks)
-
-        res_df = pd.DataFrame(res_ls)
-        res_df = res_df[
-            [
-                "name",
-                "numTrade",
-                "winrate",
-                "profitFactor",
-                "avgReturn",
-                "avgUpside",
-                "avgDownside",
-            ]
-        ].round(2)
-        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups)
-
-        trades_df = pd.concat(df_ls)
-
-        return res_df, trades_df
-    
-    @staticmethod
     def scan_multiple_stocks3(
         func, params, 
         stocks=None, 
         trade_direction="Long", 
+        use_shift=False,
+        n_shift=15,
         use_holding_periods=True,
         holding_periods=60,
         use_takeprofit_cutloss=False,
@@ -2546,6 +2490,8 @@ class Scanner:
         err_stocks = {}
         task_dic = {}
         
+        params = Globs.old_saved_adapters(params)
+        
         for stock, df_stock in df_all_stocks.groupby("stock"):
             df_stock = df_stock.reset_index(drop=True)
 
@@ -2555,6 +2501,8 @@ class Scanner:
                 params=params,
                 name=stock,
                 trade_direction=trade_direction,
+                use_shift=use_shift,
+                n_shift=n_shift,
                 use_holding_periods=use_holding_periods,
                 holding_periods=holding_periods,
                 use_takeprofit_cutloss=use_takeprofit_cutloss,

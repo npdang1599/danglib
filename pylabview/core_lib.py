@@ -69,7 +69,7 @@ class Adapters:
         stock = Vnstock().stock(symbol=symbol, source="VCI")
         df: pd.DataFrame = stock.finance.income_statement(period="quarter")
         df = df[
-            ["ticker", "yearReport", "lengthReport", "Net Profit/Loss before tax"]
+            ["ticker", "yearReport", "lengthReport", 'Attributable to parent company']
         ].copy()
         df.columns = ["ticker", "year", "quarter", "netIncome"]
         df['netIncome'] = df['netIncome'].fillna(0)
@@ -395,13 +395,23 @@ class Adapters:
                         "ticker":1,
                         "yearreport":1,
                         "lengthreport":1,
-                        "net_profitloss_before_tax":1,
+                        "attributable_to_parent_company":1,
                         "revenue_bn_vnd":1
                     }
                 )
             )
         )
-        df.columns = ["stock", "year", "quarter", "netIncome", "revenue"]
+        # df.columns = ["stock", "year", "quarter", "netIncome", "revenue"]
+        # df.columns = ["stock", "year", "quarter", "revenue", "netIncome"]
+        df = df.rename(columns = {
+            'ticker':'stock',
+            'yearreport': 'year',
+            'lengthreport' : 'quarter',
+            'revenue_bn_vnd' :'revenue',
+            'attributable_to_parent_company' :'netIncome'
+        }   
+        )
+
         df['netIncome'] = df['netIncome'].fillna(0)
         df['revenue'] = df['revenue'].fillna(0)
         df["mapYQ"] = df["year"] * 10 + df["quarter"]
@@ -1298,10 +1308,11 @@ class Utils:
         return res
     
     @staticmethod
-    def merge_condition(df: pd.DataFrame, day_mapped_cond: pd.Series):
+    def merge_condition(df: pd.DataFrame, day_mapped_cond: pd.Series, fillna=True):
         if day_mapped_cond is not None:
             df['cond'] = df['day'].map(day_mapped_cond)
-            df['cond'] = df['cond'].fillna(False)
+            if fillna:
+                df['cond'] = df['cond'].fillna(False)
             return df["cond"]
 
     @staticmethod
