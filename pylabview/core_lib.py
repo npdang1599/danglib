@@ -77,6 +77,7 @@ class Adapters:
         df["mapYQ"] = np.where(df["quarter"] == 4, df["mapYQ"] + 7, df["mapYQ"] + 1)
         df = df.set_index("mapYQ")
         return df
+    
 
     @staticmethod
     def get_stocks_ohlcv_from_db_cafef(stocks: list, from_day: str = "2018_01_01"):
@@ -419,14 +420,15 @@ class Adapters:
         return df
     
     @staticmethod
-    def load_fiinpro_PE_PB_ttm_daily(stocks):
+    def load_fiinpro_PE_PB_ttm_daily(stocks, from_day="2016_01_01"):
+        from_day = from_day.replace('_','-')
         db = MongoClient("ws", 27022)["stockdata"]
         col = db['fiinpro_ratio_ttm_daily']
         
         df = pd.DataFrame(list(col.find(
                     {
                         'Ticker': {"$in":stocks},
-                        "TradingDate": {"$gte":"2016-01-01"},
+                        "TradingDate": {"$gte":from_day},
                     },
                     {
                         "_id":0,
@@ -442,23 +444,62 @@ class Adapters:
         df['day'] = df['day'].str.replace('-', '_')
         return df
         
+    @staticmethod
+    def load_inventory_data_from_db(stocks, from_day="2016_01_01"):
+        from_day = from_day.replace('_','-')
+        db = MongoClient("ws", 27022)["stockdata"]
+        col = db['combined_price_fa']
+        
+        df = pd.DataFrame(list(col.find(
+                    {
+                        'stock': {"$in":stocks},
+                        "day": {"$gte":from_day},
+                    },
+                    {
+                        "_id":0,
+                        'stock':1,
+                        'day': 1,
+                        'mapYQ':1,
+                        "inventories_net_bn_vnd":1,
+                    }
+                )
+            )
+        )
+        df.columns = ['stock','day', 'mapYQ', 'inventory']
+        df['day'] = df['day'].str.replace('-', '_')
+        df['inventory'] = df['inventory'].ffill()
+        return df
     
-
+    
+    
     @staticmethod
     def prepare_stocks_data(stocks, fn="stocks_data.pickle", db_collection=None, start_day='2017_01_01', to_pickle=False, to_mongo=True):
         df_stocks: pd.DataFrame = Adapters.get_stocks_data_from_db_fiinpro(stocks=stocks, from_day=start_day)
         df_stocks = Utils.compute_quarter_day_map(df_stocks)
         
+        # NetIncome, Revenue
         df_ni = Adapters.load_quarter_netincome_from_db_VCI(stocks)
         dfres = pd.merge(df_stocks, df_ni, how='left', on=['stock', 'mapYQ'])
         dfres = dfres.fillna(0)
         dfres = dfres.drop(['year', 'quarter'], axis=1)
         dfres = dfres.sort_values(['stock', 'day'])
         
+        # P/E P/B
         df_pepb = Adapters.load_fiinpro_PE_PB_ttm_daily(stocks)
-        
         dfres = pd.merge(dfres, df_pepb, how='left', on=['stock', 'day'])
         dfres[['PE', 'PB']] = dfres[['PE', 'PB']].ffill()
+        
+        # Inventory
+        df_inv = Adapters.load_inventory_data_from_db(stocks, from_day=start_day)
+        df_inv = df_inv.drop('mapYQ', axis=1)
+        dfres = pd.merge(dfres, df_inv, how='left', on=['stock', 'day'])
+        dfres['inventory'] = dfres['inventory'].ffill()
+        
+        # Margin Lending:
+        df_margin = Adapters.Sectors.load_brokerage_margin_lending(stocks)
+        dfres = pd.merge(dfres, df_margin, how='left', on=['stock', 'mapYQ'])
+        
+        
         
         if to_pickle:
             dfres.to_pickle(fn)
@@ -471,9 +512,6 @@ class Adapters:
 
         return dfres
     
-    
-
-
     @staticmethod
     def get_stocks():
         """get stocks' symbol"""
@@ -715,11 +753,114 @@ class Adapters:
                 'categories': df_cate,
                 'io_data': df_io
             }
+            
+            res['brokerage'] = {
+                'categories': pd.DataFrame({
+                    'name': ['deposit rate'],
+                    'categories': ["Input"],
+                    'available': [True]
+                }),
+                'io_data': Adapters.Sectors.load_brokerage_bank_rates()
+            }
+            res['fish'] = Adapters.Sectors.load_fish_data()
+            res['hog'] = Adapters.Sectors.load_hog_data()
+            res['fertilizer'] = Adapters.Sectors.load_fertilizer()
 
         return res
+    
+    class Sectors:
+        @staticmethod
+        def load_brokerage_margin_lending(stocks:list):
+            df: pd.DataFrame = pd.read_excel(**Fns.sectors_rawdata['brokerage']['margin_lending'])
+            df = df.rename(columns={'Unnamed: 0':'stock'})
+            df = df[df['stock'].isin(stocks)]
+            df = df.set_index('stock').transpose()
+            df['year'] = df.index.str[-2:].astype(int)+2000
+            df['quarter'] = df.index.str[:1].astype(int)
+            
+            df['mapYQ'] = df['year'] * 10 + df['quarter']
+            df["mapYQ"] = np.where(df["quarter"] == 4, df["mapYQ"] + 7, df["mapYQ"] + 1)
+            df = df.drop(['quarter', 'year'], axis=1)
+            df = df.set_index('mapYQ')
+            df = df.stack().reset_index(name='marginLending')
+            return df
+        
+        @staticmethod
+        def load_brokerage_bank_rates():
+            df: pd.DataFrame = pd.read_excel(**Fns.sectors_rawdata['brokerage']['bank_rates'])
+            df = df[['Date', '12M']].copy()
+            df['Date'] = df['Date'].astype(str).str[:10]
+            df['Date'] = df['Date'].str.replace("-", "_")
+            df.columns = ['day', 'depositRate']
+            return df
+        
+        @staticmethod
+        def load_fish_data():
+            df: pd.DataFrame = pd.read_excel(**Fns.sectors_rawdata['fish']['fish_data'])
+            df = df.drop(0)
+            df.columns = ['day', 'vhcUsAsp', 'rawFishPrice', 'usPriceSpread']
+            df['day'] = df['day'].astype(str)
+            df['day'] = df['day'].str[:10]
+            df['day'] = df['day'].str.replace('-', '_')
+            
+            df_cate = pd.DataFrame({
+                'name':[i for i in df.columns if i != 'day']
+            })
+            df_cate['categories'] = 'Input'
+            df_cate['available'] = True
+            return {
+                'categories': df_cate,
+                'io_data': df
+            }
+
+        @staticmethod
+        def load_hog_data():
+            df: pd.DataFrame = pd.read_excel(**Fns.sectors_rawdata['hog']['hog_data'], header=3)
+            df =  df[['Date','Average Northern live hog price', 'Average Southern live hog price', 'Feed cost per kg of live hog', 'Cash spread (ASP - feed cost)']]
+            df = df.dropna(how='all')
+            df.columns = ['day', 'avgNorthHogPrice', 'avgSouthHogPrice', 'hogFeedCost', 'hogCashSpread']
+            df['day'] = df['day'].astype(str)
+            df['day'] = df['day'].str[:10]
+            df['day'] = df['day'].str.replace('-', '_')
+            
+            df_cate = pd.DataFrame({
+                'name':[i for i in df.columns if i != 'day']
+            })
+            df_cate['categories'] = 'Input'
+            df_cate['available'] = True
+            return {
+                'categories': df_cate,
+                'io_data': df
+            }
+
+
+        @staticmethod
+        def load_fertilizer():
+            df: pd.DataFrame = pd.read_excel(**Fns.sectors_rawdata['fertilizer']['p4_price'], skiprows=5)
+            df = df[['Date', 'China P4 price', 'China P4 cash spread']]
+            df.columns = ['day', 'ChinaP4Price', 'ChinaP4CashSpread']
+            df['day'] = df['day'].astype(str)
+            df['day'] = df['day'].str[:10]
+            df['day'] = df['day'].str.replace('-', '_')
+                        
+            df_cate = pd.DataFrame({
+                'name':[i for i in df.columns if i != 'day']
+            })
+            df_cate['categories'] = 'Input'
+            df_cate['available'] = True
+            return {
+                'categories': df_cate,
+                'io_data': df
+            }
+
 
 class Ta:
     """Technical analysis"""
+    
+    @staticmethod
+    def rolling_rank(src: pd.Series, ranking_window):
+        src_rank = (src.rolling(ranking_window).rank() - 1) / (ranking_window - 1) * 100
+        return src_rank
 
     @staticmethod
     def highest(src: pd.Series, length: int):

@@ -46,6 +46,7 @@ app = app_factory(CELERY_RESOURCES.HOST)
 class TaskName:
     SCAN_STOCK = 'scan_one_stock'
     SCAN_STOCK_V2 = 'scan_one_stock_v2'
+    SCAN_STOCK_V3 = 'scan_one_stock_v3'
     
 @app.task(name=TaskName.SCAN_STOCK)
 def scan_one_stock(df: pd.DataFrame, func, params, name="", trade_direction='Long', use_shift=False,
@@ -106,4 +107,20 @@ def scan_one_stock_v2(
 
     return bt
     
+@app.task(name=TaskName.SCAN_STOCK_V3)
+def scan_one_stock_v3(df: pd.DataFrame, func, params, name="", trade_direction='Long', use_shift=False,
+        n_shift=15, holding_periods=15):
+    bt = Simulator(
+        func,
+        df_ohlcv=df,
+        params=params,
+        name=name,
+    )
+    try:
+        bt.run3(trade_direction=trade_direction, use_shift=use_shift,
+        n_shift=n_shift,holding_periods=holding_periods)
+    except Exception as e:
+        print(f"scan error: {e}")
+
+    return bt
 # celery -A celery_worker worker --concurrency=10 --loglevel=INFO -n celery_worker@pylabview

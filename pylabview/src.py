@@ -4,6 +4,41 @@ class Fns:
 
     pickle_stocks_data = "/home/ubuntu/Dang/data/pylabview_stocks_data.pickle"
     stock_beta_group = "/home/ubuntu/Dang/data/All Ticker_Beta_May2024.xlsx"
+    
+    sectors_rawdata = {
+        'brokerage': {
+            'margin_lending': {
+                'io':'/home/ubuntu/Dang/data/Margin lending.xlsx',
+                'sheet_name':'Sheet1',
+                'skiprows':range(1,2)
+            },
+            'bank_rates':{
+                'io':'/home/ubuntu/Dang/data/bank_rates.xlsx',
+                'sheet_name': 'Sheet2',
+                'skiprows': range(1,7)
+            }
+        },
+        'fish':{
+            'fish_data': {
+                'io': '/home/ubuntu/Dang/data/Fish data for trading view 2024_1.xlsx',
+                'sheet_name': 'Consolidated data'
+            }
+        },
+        'hog':{
+            'hog_data':{
+                'io': '/home/ubuntu/Dang/data/Hog data sets_5 Jul 2024.xlsx',
+                'sheet_name': 'Sheet1'
+            }
+        },
+        'fertilizer':{
+            'p4_price':{
+                'io': '/home/ubuntu/Dang/data/P4 Price (Fertilizer).xlsx'
+            }
+        }
+    }
+
+    
+    
 
 sectors_paths = {
     'steel': {
@@ -18,3 +53,6 @@ sectors_paths = {
         },
     }
 }
+
+
+

@@ -7,7 +7,6 @@ from numba import njit
 from pymongo import MongoClient
 import logging
 import warnings
-import argparse
 from danglib.chatbots.viberbot import F5bot
 
 pd.options.mode.chained_assignment = None
@@ -201,7 +200,7 @@ class Conds:
         
 
 
-class Scanner:
+class Simulator:
 
     def __init__(
         self,
@@ -430,7 +429,7 @@ class Scanner:
         trade_return_t10,
         trade_return_t15,
         downside,
-        upside) = Scanner.prepare_data_for_backtesting(
+        upside) = Simulator.prepare_data_for_backtesting(
             df,
             trade_direction=trade_direction,
             holding_periods=holding_periods,
@@ -486,7 +485,7 @@ class Scanner:
                 avg_downside_arr,
                 profit_factor_arr,
                 is_entry_arr,
-            ) = Scanner.compute_trade_stats(
+            ) = Simulator.compute_trade_stats(
                 s_price_changes, 
                 s_returns, 
                 s_returns1, 
@@ -574,8 +573,11 @@ class Scanner:
                 "isTrading",
             ]
         ].iloc[-1]
+        
+        return result, df_res
 
 glob_obj = Globs()
-glob_obj.load_stocks_data_pickle()
+glob_obj.load_stocks_data()
 glob_obj.load_vnindex()
 glob_obj.load_sectors_data()
+

@@ -3174,7 +3174,7 @@ class Scanner:
     def scan_multiple_stocks3(
         func, params, 
         stocks=None, 
-        trade_direction="Long",
+        trade_direction="Long", 
         use_shift=False,
         n_shift=15,
         use_holding_periods=True,
