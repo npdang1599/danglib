@@ -34,6 +34,8 @@ class Globs:
             "price_change_vs_hl": Conds.price_change_vs_hl,
             "price_comp_ma": Conds.price_comp_ma,
             "price_gap": Conds.price_gap,
+            "price_highest_lowest": Conds.PriceAction.price_highest_lowest,
+            "consecutive_conditional_bars": Conds.PriceAction.consecutive_conditional_bars,
         }
         self.sectors = {}
 
@@ -338,6 +340,81 @@ class Conds:
             return cond
 
         return None
+    
+    class PriceAction:
+        """Price Action session conditions"""
+
+        @staticmethod
+        def price_highest_lowest(
+            df: pd.DataFrame,
+            method: str = "Highest",
+            num_bars: int = 10,
+            use_flag: bool = True,
+        ):
+            """Check if close price is highest or lowest over the latest n bars
+
+            Args:
+                df (pd.DataFrame): ohlcv datafrane
+                method (str): "Highest" or "Lowest"
+                num_bars (int):
+
+            Returns:
+                pd.Series: True or False
+            """
+            assert method in [
+                "Highest",
+                "Lowest",
+            ], "`method` must be `Highest` or `Lowest`"
+
+            num_bars = int(num_bars)
+            if use_flag:
+                p_c = df["close"]
+
+                return (
+                    Ta.is_highest(p_c, num_bars)
+                    if method == "Highest"
+                    else Ta.is_lowest(p_c, num_bars)
+                )
+
+            return None
+
+        @staticmethod
+        def consecutive_conditional_bars(
+            df: pd.DataFrame,
+            src1_name: str,
+            src2_name: str,
+            direction: str,
+            num_bars: int,
+            num_matched: int,
+            use_flag: bool = True,
+        ):
+            """Check if there are enough increasing (decreasing) bars within the last N bars.
+            It is possible to check two sources simultaneously.
+
+            Args:
+                df (pd.DataFrame): ohlcv dataframe
+                src1_name (str): source 1 (open, high, low, close)
+                src2_name (str): source 2 (open, high, low, close)
+                direction (str): "Increase" or "Decrease"
+                num_bars (int): The number of the latest bars that need to be checked
+                num_matched (int): The number of the latest bars that need to meet the condition
+
+            Returns:
+                pd.Series: True or False
+            """
+            if use_flag:
+                num_bars = int(num_bars)
+                num_matched = int(num_matched)
+                src1 = df[src1_name]
+                src2 = df[src2_name]
+
+                matched1 = Utils.count_changed(src1, num_bars, direction) >= num_matched
+                matched2 = Utils.count_changed(src2, num_bars, direction) >= num_matched
+
+                return matched1 & matched2
+
+            return None
+
     
     @staticmethod
     def compute_any_conds(df, function, *args, **kwargs):
@@ -813,10 +890,25 @@ class Vectorized:
                 'params':{
                     'gap_dir': ['Use Gap Up', 'Use Gap Down']
                 }
+            },
+            'hlest1':{
+                'function': 'price_highest_lowest',
+                'params': {
+                    'method': ['Highest', 'Lowest'],
+                    'num_bars': [5, 10, 15, 20, 50, 200]
+                }
+            },
+            'cons_bar1':{
+                'function': 'consecutive_conditional_bars',
+                'params': {
+                    ('src1_name', 'src2_name'): [('close', 'close'), ('high', 'low'), ('low', 'low'), ('high', 'high'), ('high', 'close'), ('low', 'close')],
+                    'direction': ['Increase', 'Decrease'],
+                    ('num_bars', 'num_matched'): [(2,2), (3,3), (4,4), (5,5), (6,6), (7,7), (8,8)]
+                }
             }
 
         }
-
+        
         params_df: pd.DataFrame = None
         for cluster, val in params_dic.items():
             f = val['function']
@@ -824,8 +916,12 @@ class Vectorized:
 
             combinations = list(product(*p.values()))
             dff = pd.DataFrame(combinations, columns=p.keys())
+            for c in dff.columns:
+                if not isinstance(c, str) :
+                    dff[list(c)] = pd.DataFrame(dff[c].tolist(), index=dff.index)
+                    dff = dff.drop(c, axis=1)
+
             dff['function'] = f
-            # dff['cluster'] = cluster
 
             params_df = pd.concat([params_df, dff], ignore_index=True)
 
@@ -842,15 +938,19 @@ class Vectorized:
 
         df = df_raw.copy()
 
-        params_df = Vectorized.create_params_sets()
+        params_df:pd.DataFrame = Vectorized.create_params_sets()
 
         sig_dic = {}
         for idx, params in params_df.iterrows():
-            params = params.dropna().to_dict()
+            try:
+                params = params.dropna().to_dict()
 
-            signals: pd.DataFrame = Conds.compute_any_conds(df, **params)
+                signals: pd.DataFrame = Conds.compute_any_conds(df, **params)
 
-            sig_dic[idx] = signals
+                sig_dic[idx] = signals
+            except Exception as e:
+                print(params)
+                print(e)
 
 
 

@@ -754,6 +754,32 @@ class Ta:
         """
         return src.rolling(length).max()
     
+    @staticmethod
+    def is_highest(src: pd.Series, length: int):
+        """Check if this is highest value for a given period.
+
+        Args:
+            src (pd.Series): Series of values to process.
+            length (_type_): Number of bars.
+
+        Returns:
+            pd.Series: If this is highest value of given period
+        """
+        return src.rolling(length).max() == src
+    
+    @staticmethod
+    def is_lowest(src: pd.Series, length: int):
+        """Check if is lowest value for a given period.
+
+        Args:
+            src (pd.Series): Series of values to process.
+            length (_type_): Number of bars.
+
+        Returns:
+            pd.Series: if is lowest value for a given period
+        """
+        return src.rolling(length).min() == src
+    
 class Utils:
     """Ultilities"""
     
@@ -781,3 +807,23 @@ class Utils:
         formula: (b - a) / a * 100
         """
         return (b - a) / abs(a) * 100
+    
+    @staticmethod
+    def count_changed(src: pd.Series, num_bars: int, direction: str):
+        """Count the number of bars that increased (decreased) within the last n bars.
+
+        Args:
+            src (pd.Series): series for calculating
+            num_bar (int): number of latest bars needed to be checked
+            direction (str): "Increase" or "Decrease"
+
+        Returns:
+            pd.Series: A series showing the number of bars that
+            increased (decreased) within the last n bars
+        """
+
+        diff = src.diff()
+        matched: pd.Series = diff > 0 if direction == "Increase" else diff < 0
+        count = matched.rolling(num_bars, min_periods=1).sum()
+
+        return count
