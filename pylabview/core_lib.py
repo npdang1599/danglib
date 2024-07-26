@@ -842,12 +842,13 @@ class Adapters:
             df['day'] = df['day'].astype(str)
             df['day'] = df['day'].str[:10]
             df['day'] = df['day'].str.replace('-', '_')
-                        
+            df = Utils.remove_saturday_sunday(df, day_col='day')                   
             df_cate = pd.DataFrame({
                 'name':[i for i in df.columns if i != 'day']
             })
             df_cate['categories'] = 'Input'
             df_cate['available'] = True
+
             return {
                 'categories': df_cate,
                 'io_data': df
@@ -1474,7 +1475,20 @@ class Utils:
             df_diff = df_diff.sort_values(by=sort_values)
 
         return df_diff
+    
+    @staticmethod
+    def remove_saturday_sunday(df: pd.DataFrame, day_col='day'):
 
+        # Convert the date column to datetime
+        df['date'] = pd.to_datetime(df[day_col], format='%Y_%m_%d')
+
+        # Create a new column to indicate if the date is a weekend
+        df['is_weekend'] = df['date'].dt.weekday.isin([5, 6])
+
+        df = df[~df['is_weekend']].copy()
+        df = df.drop(['date', 'is_weekend'], axis=1)
+
+        return df
 
 
 RUN = False

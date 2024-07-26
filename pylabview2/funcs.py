@@ -7,6 +7,7 @@ from numba import njit
 from pymongo import MongoClient
 import logging
 import warnings
+from itertools import product
 from danglib.chatbots.viberbot import F5bot
 
 pd.options.mode.chained_assignment = None
@@ -28,9 +29,13 @@ class Globs:
         self.strategies = []
         self.stocks, self.dic_groups = Adapters.get_stocks_beta_group()
         self.df_stocks = pd.DataFrame()
-        self.function_map = {}
+        self.function_map = {
+            "price_change": Conds.price_change,
+            "price_change_vs_hl": Conds.price_change_vs_hl,
+            "price_comp_ma": Conds.price_comp_ma,
+            "price_gap": Conds.price_gap,
+        }
         self.sectors = {}
-
 
     def load_stocks_data(self):
         """run to load stocks data"""
@@ -164,6 +169,31 @@ class Conds:
                     res = line1 < line2
 
             return res
+        
+        @staticmethod
+        def comp_two_ma(
+            df: pd.DataFrame,
+            src_name:str,
+            ma_len1=5,
+            ma_len2=15,
+            ma_type="EMA",
+            ma_dir="above",
+            use_flag: bool = True,
+        ):
+            if use_flag:
+                src = df[src_name]
+                ma1 = Ta.ma(src, ma_len1, ma_type)
+                ma2 = Ta.ma(src, ma_len2, ma_type)
+
+                return Conds.Standards.two_line_pos(
+                    line1=ma1,
+                    line2=ma2,
+                    direction=ma_dir,
+                    use_flag=True
+                )
+            
+            return None
+            
 
     @staticmethod
     def price_change(
@@ -172,7 +202,7 @@ class Conds:
         periods: int = 1,
         direction: str = "increase",
         lower_thres: float = 0,
-        upper_thres: float = 100,
+        upper_thres: float = 10000,
         use_flag: bool = True,
     ):
         """Check if the percentage change in price over a period of time
@@ -188,6 +218,7 @@ class Conds:
         Returns:
             pd.Series[bool]: True or False if use_flag is True else None
         """
+        periods = int(periods)
         src = df[src_name]
         if use_flag:
             pct_change = src.pct_change(periods=periods).round(6) * 100
@@ -197,9 +228,124 @@ class Conds:
             return Utils.in_range(pct_change, lower_thres, upper_thres, equal=False)
 
         return None
+    
+    @staticmethod
+    def price_comp_ma(
+        df: pd.DataFrame,
+        ma_len1=5,
+        ma_len2=15,
+        ma_type="EMA",
+        ma_dir="above",
+        use_flag: bool = True,
+    ):
+        """Check if the two moving averages (MA) of the price
+        crossover, crossunder, are above, or below each other.
+
+        Args:
+            df (pd.DataFrame): ohlcv dataframe
+            ma_len1 (int): MA1 length
+            ma_len2 (int): MA2 length
+            ma_type (str): "EMA", "SMA"
+            ma_dir (str): "crossover", "crossunder", "above", "below"
+
+        Returns:
+             pd.Series[bool]: True or False if use_flag is True else None
+        """
+        ma_len1 = int(ma_len1)
+        ma_len2 = int(ma_len2)
+
+        return Conds.Standards.comp_two_ma(
+            df=df, 
+            src_name='close', 
+            ma_len1=ma_len1,
+            ma_len2=ma_len2,
+            ma_type=ma_type,
+            ma_dir=ma_dir,
+            use_flag=use_flag
+        )
+    
+    @staticmethod
+    def price_change_vs_hl(
+        df: pd.DataFrame,
+        src_name = 'close',
+        use_flag: bool = False, 
+        direction: str = "Increase",
+        nbars: int = 10,
+        low_range: float = 5,
+        high_range: float = 10000
+        ):
+        """Check if the percentage change between `close` price with lowest(`low`) (if direction is increase) 
+        or highest(`high`)(decrease) over a period of time falls within the specified range.
+
+        Args:
+            df (pd.DataFrame): ohlcv dataframe
+            
+            use_flag (bool, optional): if use_flag set to False return None, 
+            calculating condition otherwise. Defaults to False.
+            
+            direction (str, optional): `Increase` or `Decrease`. Defaults to "Increase".
+            
+            nbars (int, optional): periods. Defaults to 10.
+            
+            low_range (float, optional): low threshold. Defaults to 5.
+            
+            high_range (float, optional): high threshold. Defaults to 100.
+
+        Returns:
+            pd.Series[bool]: True or False if use_flag is True else None
+        """
+        nbars = int(nbars)
+        close = df[src_name]
+        comp_src = Ta.lowest(df['low'], nbars) if direction == 'Increase' else Ta.highest(df['high'], nbars)
         
+        if use_flag:
+            pct_change = Utils.calc_percentage_change(comp_src, close)
+            if direction == "Decrease":
+                pct_change = pct_change * -1
 
+            return Utils.in_range(pct_change, low_range, high_range, equal=True)
 
+        return None
+    
+    @staticmethod
+    def price_gap(df: pd.DataFrame, gap_dir="Use Gap Up", use_flag: bool = True):
+        """Check if this is Gap Up or Gap Down bar.
+
+        Args:
+            df (pd.DataFrame): ohlcv dataframe
+            gap_dir (_type_): "Use Gap Up" or "Use Gap Down"
+
+        Returns:
+            pd.Series[bool]: True or False
+        """
+        
+        if use_flag:
+            p_o = df["open"]
+            p_h = df["high"]
+            p_l = df["low"]
+            p_c = df["close"]
+
+            assert gap_dir in [
+                "Use Gap Up",
+                "Use Gap Down",
+            ], "`gap_dir` must be in ['Use Gap Up', 'Use Gap Down']"
+
+            if gap_dir == "Use Gap Up":
+                cond = (p_o > p_c.shift(1)) & (p_l > p_h.shift(1))
+            elif gap_dir == "Use Gap Down":
+                cond = (p_o < p_c.shift(1)) & (p_h < p_l.shift(1))
+
+            return cond
+
+        return None
+    
+    @staticmethod
+    def compute_any_conds(df, function, *args, **kwargs):
+        func = glob_obj.function_map[function]
+        cond = func(df, *args, **kwargs)
+        return cond
+
+    
 class Simulator:
 
     def __init__(
@@ -576,8 +722,141 @@ class Simulator:
         
         return result, df_res
 
+
+class Vectorized:
+    @staticmethod
+    def create_params_sets():
+# %%
+        params_dic = {
+            'price1':{
+                'function': 'price_change',
+                'params': {
+                    'periods': [1],
+                    'lower_thres': [0, 3, 5, 6.7],
+                    'direction': ['increase', 'decrease']
+                 }
+            },
+            'price2':{
+                'function':'price_change',
+                'params' : {
+                    'periods': [2],
+                    'lower_thres': [6, 10, 13],
+                    'direction': ['increase', 'decrease']
+                }
+            }, 
+            'price3':{
+                'function': 'price_change',
+                'params' : {
+                    'periods': [3],
+                    'lower_thres': [9, 15, 19],
+                    'direction': ['increase', 'decrease']
+                }
+            },
+            'price4':{
+                'function': 'price_change',
+                'params' : {
+                    'periods': [5],
+                    'lower_thres': [10, 15, 20, 25],
+                    'direction': ['increase', 'decrease']
+                }
+            },
+            'price_ma1':{
+                'function': 'price_comp_ma',
+                'params': {
+                    'ma_len1':[1],
+                    'ma_len2':[5,10,15,20,50,200],
+                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
+                }
+            },
+            'price_ma2':{
+                'function': 'price_comp_ma',
+                'params': {
+                    'ma_len1':[5],
+                    'ma_len2':[15,20],
+                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
+                }
+            },
+            'price_ma3':{
+                'function': 'price_comp_ma',
+                'params': {
+                    'ma_len1':[10],
+                    'ma_len2':[30],
+                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
+                }
+            },
+            'price_ma4':{
+                'function': 'price_comp_ma',
+                'params': {
+                    'ma_len1':[20],
+                    'ma_len2':[50, 100],
+                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
+                }
+            },
+            'price_ma5':{
+                'function': 'price_comp_ma',
+                'params': {
+                    'ma_len1':[50],
+                    'ma_len2':[200],
+                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
+                }
+            },
+            'price_hl1':{
+                'function': 'price_change_vs_hl',
+                'params': {
+                    'direction': ['Increase','Decrease'],
+                    'nbars': [5, 10, 15, 20, 30],
+                    'low_range': [10, 15, 20, 25]
+                }
+            },
+            'price_gap1':{
+                'function': 'price_gap',
+                'params':{
+                    'gap_dir': ['Use Gap Up', 'Use Gap Down']
+                }
+            }
+
+        }
+
+        params_df: pd.DataFrame = None
+        for cluster, val in params_dic.items():
+            f = val['function']
+            p: dict = val['params']
+
+            combinations = list(product(*p.values()))
+            dff = pd.DataFrame(combinations, columns=p.keys())
+            dff['function'] = f
+            # dff['cluster'] = cluster
+
+            params_df = pd.concat([params_df, dff], ignore_index=True)
+
+        return params_df
+
+        
+
+
+# %% 
+
+
+    @staticmethod
+    def compute_conditions(df, params):
+
+        df = df_raw.copy()
+
+        params_df = Vectorized.create_params_sets()
+
+        sig_dic = {}
+        for idx, params in params_df.iterrows():
+            params = params.dropna().to_dict()
+
+            signals: pd.DataFrame = Conds.compute_any_conds(df, **params)
+
+            sig_dic[idx] = signals
+
+
+
 glob_obj = Globs()
 glob_obj.load_stocks_data()
 glob_obj.load_vnindex()
 glob_obj.load_sectors_data()
 
+df_raw = glob_obj.df_stocks.copy()

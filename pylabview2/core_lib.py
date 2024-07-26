@@ -681,6 +681,79 @@ class Ta:
         """
         return (src1 <= src2) & (src1.shift(1) > src2.shift(1))
     
+    @staticmethod
+    def sma(src: pd.Series, length):
+        """The sma function returns the moving average,
+        that is the sum of last y values of x, divided by y.
+
+        Args:
+            src (pd.Series): Series of values to process.
+            length (_type_): Number of bars.
+
+        Returns:
+            pd.Series: Simple moving average of source for length bars back.
+        """
+        return src.rolling(length).mean()
+
+    @staticmethod
+    def ema(src: pd.Series, length):
+        """The ema function returns the exponentially weighted moving average.
+        In ema weighting factors decrease exponentially.
+        It calculates by using a formula:
+        EMA = alpha * source + (1 - alpha) * EMA[1], where alpha = 2 / (length + 1).
+
+        Args:
+            src (pd.Series): Series of values to process.
+            length (int): Number of bars (length).
+
+        Returns:
+            pd.Series: Exponential moving average of source with alpha = 2 / (length + 1).
+        """
+        return src.ewm(span=length, adjust=False).mean()
+
+    @staticmethod
+    def ma(src: pd.Series, length, ma_type):
+        """
+        if ma_type == "EMA":
+            return Ta.ema(src, length)
+        if ma_type == "SMA":
+            return Ta.sma(src, length)
+        if ma_type == "RMA":
+            return Ta.rma(src, length)
+        """
+
+        if ma_type == "EMA":
+            return Ta.ema(src, length)
+        if ma_type == "SMA":
+            return Ta.sma(src, length)
+        return Ta.sma(src, length)
+    
+    @staticmethod
+    def lowest(src: pd.Series, length: int):
+        """Lowest value for a given period.
+
+        Args:
+            src (pd.Series): Series of values to process.
+            length (_type_): Number of bars.
+
+        Returns:
+            pd.Series: Lowest value in the period
+        """
+        return src.rolling(length).min()
+    
+    @staticmethod
+    def highest(src: pd.Series, length: int):
+        """Highest value for a given period.
+
+        Args:
+            src (pd.Series): Series of values to process.
+            length (_type_): Number of bars.
+
+        Returns:
+            pd.Series: Highest value in the period
+        """
+        return src.rolling(length).max()
+    
 class Utils:
     """Ultilities"""
     
@@ -701,3 +774,10 @@ class Utils:
             return (lower_thres <= comp_src) & (comp_src <= upper_thres)
         
         return (lower_thres < comp_src) & (comp_src < upper_thres)
+    
+    @staticmethod
+    def calc_percentage_change(a, b):
+        """Calculate percentage change between b and a
+        formula: (b - a) / a * 100
+        """
+        return (b - a) / abs(a) * 100
