@@ -442,10 +442,11 @@ class Conds:
             pd.Series[bool]: True or False if use_flag is True else None
         """
         
-        close = df[src_name]
-        comp_src = Ta.lowest(df['low'], nbars) if direction == 'Increase' else Ta.highest(df['high'], nbars)
+
         
         if use_flag:
+            close = df[src_name]
+            comp_src = Ta.lowest(df['low'], nbars) if direction == 'Increase' else Ta.highest(df['high'], nbars)
             pct_change = Utils.calc_percentage_change(comp_src, close)
             if direction == "Decrease":
                 pct_change = pct_change * -1
@@ -914,7 +915,7 @@ class Conds:
             trend_direction: str = "increase",
             trend_n_quarters: float = 3,
             trend_growth: str = 'acceleration', # deceleration
-            trend_use_flag: bool = True,
+            trend_use_flag: bool = False,
         ):
             """Net Income based conditions"""
             
