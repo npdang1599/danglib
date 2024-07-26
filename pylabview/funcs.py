@@ -1675,6 +1675,7 @@ class Conds:
                 
             df_sector = glob_obj.sectors[sector]['io_data'].copy()
             
+            
             ma_cond = Conds.Standards.two_ma_lines(
                 df=df_sector,
                 src_name=field,
@@ -1716,7 +1717,9 @@ class Conds:
 
             if matched is not None:
                 df_sector['cond'] = matched
-                return Utils.merge_condition(df, dict(zip(df_sector['day'], df_sector['cond'])))
+                cond = Utils.merge_condition(df, dict(zip(df_sector['day'], df_sector['cond'])), fillna=False)
+                cond = cond.ffill().fillna(False)
+                return cond
             
             return  None
         

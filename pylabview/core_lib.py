@@ -1475,8 +1475,6 @@ class Utils:
 
         return df_diff
 
-
-
 RUN = False
 if __name__ == "__main__" and RUN:
     dft = Adapters.get_stock_from_vnstock("HPG")
