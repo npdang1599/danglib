@@ -160,6 +160,13 @@ class Adapters:
             logging.warning(warning_msg)
         df = df[df["day"] >= "2018_01_01"].reset_index(drop=True)
         return df
+    
+    @staticmethod
+    def get_vnindex_from_db():
+        db = MongoClient("localhost", 27022)["stockdata"]
+        col = db['price_data']
+        df_vnindex =pd.DataFrame(col.find({'stock':'VNINDEX','source':'VCI'},{'_id':0}))
+        return df_vnindex
 
     @staticmethod
     def get_stock_from_vnstock(ticker: str, from_day: str = "2018_01_01"):
@@ -693,6 +700,7 @@ class Ta:
         Returns:
             pd.Series: Simple moving average of source for length bars back.
         """
+        length = int(length)
         return src.rolling(length).mean()
 
     @staticmethod
@@ -709,6 +717,7 @@ class Ta:
         Returns:
             pd.Series: Exponential moving average of source with alpha = 2 / (length + 1).
         """
+        length = int(length)
         return src.ewm(span=length, adjust=False).mean()
 
     @staticmethod
@@ -721,7 +730,7 @@ class Ta:
         if ma_type == "RMA":
             return Ta.rma(src, length)
         """
-
+        length = int(length)
         if ma_type == "EMA":
             return Ta.ema(src, length)
         if ma_type == "SMA":
@@ -739,6 +748,7 @@ class Ta:
         Returns:
             pd.Series: Lowest value in the period
         """
+        length = int(length)
         return src.rolling(length).min()
     
     @staticmethod
@@ -752,6 +762,7 @@ class Ta:
         Returns:
             pd.Series: Highest value in the period
         """
+        length = int(length)
         return src.rolling(length).max()
     
     @staticmethod
@@ -765,6 +776,7 @@ class Ta:
         Returns:
             pd.Series: If this is highest value of given period
         """
+        length = int(length)
         return src.rolling(length).max() == src
     
     @staticmethod
@@ -778,8 +790,276 @@ class Ta:
         Returns:
             pd.Series: if is lowest value for a given period
         """
+        length = int(length)
         return src.rolling(length).min() == src
     
+    @staticmethod
+    def stdev(source: pd.Series, length: int):
+        """Calculating standard deviation
+
+        Args:
+            source (pd.Series): Series of values to process
+            length (int): Number of bars (length)
+
+        Returns:
+            pd.Series: source.rolling(length).std()
+        """
+        return source.rolling(length).std(ddof=0)
+    
+    @staticmethod
+    def squeeze(
+        df: pd.DataFrame,
+        src_name: str = "close",
+        bb_length: int = 20,
+        length_kc: int = 20,
+        mult_kc: float = 1.5,
+        use_true_range: bool = True,
+    ):
+        """Calculation squeeze
+
+        Args:
+            df (pd.DataFrame): ohlcv dataframe
+            src_name (str, optional): source name (open, high, low, close). Defaults to 'close'.
+            bb_length (int, optional): BB length. Defaults to 20.
+            length_kc (int, optional): KC length. Defaults to 20.
+            mult_kc (float, optional): KC mult factor. Defaults to 1.5.
+            use_true_range (bool, optional): Use true range (KC) or not . Defaults to True.
+
+        Returns:
+            sqz_on (pd.Series): Series of squeeze on or not
+            sqz_off (pd.Series): Series of squeeze off or not
+            no_sqz (pd.Series): Series of no squeeze (no on and no off)
+        """
+        def test():
+            src_name: str = "close"
+            bb_length: int = 20
+            length_kc: int = 20
+            mult_kc: float = 1.5
+            use_true_range: bool = True
+
+        p_h = df["high"]
+        p_l = df["low"]
+        p_c = df["close"]
+        src = df[src_name]
+
+        basic = Ta.sma(src, bb_length)
+        dev = mult_kc * Ta.stdev(src, bb_length)
+        upper_bb = basic + dev
+        lower_bb = basic - dev
+
+        sqz_ma = Ta.sma(src, length_kc)
+
+        sqz_range = (
+            Math.max([p_h - p_l, abs(p_h - p_c.shift(1)), abs(p_l - p_c.shift(1))])
+            if use_true_range
+            else (p_h - p_l)
+        )
+
+        rangema = Ta.sma(sqz_range, length_kc)
+        upper_kc = sqz_ma + rangema * mult_kc
+        lower_kc = sqz_ma - rangema * mult_kc
+
+        sqz_on :pd.DataFrame = (lower_bb > lower_kc) & (upper_bb < upper_kc)
+        sqz_off:pd.DataFrame = (lower_bb < lower_kc) & (upper_bb > upper_kc)
+        no_sqz = pd.DataFrame(
+            np.where(sqz_on | sqz_off, False, True),
+            columns=sqz_on.columns,
+            index=sqz_on.index
+        )
+
+        return sqz_on, sqz_off, no_sqz
+    
+    @staticmethod
+    def bbwp(
+        df: pd.DataFrame,
+        src_name: str = "close",
+        basic_type: str = "SMA",
+        bbwp_len: int = 13,
+        bbwp_lkbk: int = 128,
+    ):
+        def test():
+            src_name: str = "close"
+            basic_type: str = "SMA"
+            bbwp_len: int = 13
+            bbwp_lkbk: int = 128
+
+        """bbwp"""
+        _price = df[src_name]
+
+        _basic = Ta.ma(_price, bbwp_len, basic_type)
+        _dev = Ta.stdev(_price, bbwp_len)
+        _bbw = (_basic + _dev - (_basic - _dev)) / _basic
+
+        # _bbw_sum = (_bbw.rolling(bbwp_lkbk).rank() - 1) / (bbwp_lkbk - 1)
+        # _bbw_sum = (_bbw.rolling(bbwp_lkbk + 1).rank() - 1) / bbwp_lkbk
+        index = df.reset_index(drop=True).index
+        bbwp_denominator = pd.Series(np.where(index < bbwp_lkbk, index, bbwp_lkbk), index=df.index)
+        _bbw_sum = (_bbw.rolling(bbwp_lkbk + 1, min_periods= bbwp_len).rank() - 1).div(bbwp_denominator, axis=0)
+
+        return _bbw_sum * 100
+    
+    @staticmethod
+    def bbpctb(
+        df: pd.DataFrame, src_name: str = "close", length: int = 20, mult: float = 2
+    ):
+        """bbpctb"""
+        src = df[src_name].copy()
+        basic = Ta.sma(src, length)
+        dev = mult * Ta.stdev(src, length)
+        upper = basic + dev
+        lower = basic - dev
+        bbpctb = (src - lower) / (upper - lower) * 100
+
+        return bbpctb
+    
+    @staticmethod
+    def ursi(
+        src: pd.DataFrame,
+        length: int = 14,
+        smo_type1: str = "RMA",
+        smooth: int = 14,
+        smo_type2: str = "EMA",
+    ):
+        """Ultimate RSI
+
+        Args:
+            src (pd.Series): Input source of the indicator (open, high, low, close)
+
+            length (int, optional): Calculation period of the indicator. Defaults to 14.
+
+            smo_type1 (str, optional): Smoothing method used for the calculation of the indicator.
+            Defaults to 'RMA'.
+
+            smooth (int, optional): Degree of smoothness of the signal line. Defaults to 14.
+
+            smo_type2 (str, optional): Smoothing method used to calculation the signal line.
+            Defaults to 'EMA'.
+
+        Returns:
+            arsi (pd.Series): ursi line
+            signal (pd.Series): ursi's signal line
+        """
+        
+        upper = Ta.highest(src, length)
+        lower = Ta.lowest(src, length)
+        r = upper - lower
+        d = src.diff()
+
+        diff = np.where(upper > upper.shift(1), r, np.where(lower < lower.shift(1), -r, d))
+        diff = pd.DataFrame(diff, index=src.index, columns=src.columns)
+
+        num = Ta.ma(diff, length, smo_type1)
+        den = Ta.ma(diff.abs(), length, smo_type1)
+        arsi = (num / den) * 50 + 50
+
+        signal = Ta.ma(arsi, smooth, smo_type2)
+
+        return arsi, signal
+
+    @staticmethod
+    def macd(
+        df: pd.DataFrame,
+        src_name: str = "close",
+        r2_period: int = 20,
+        fast: int = 10,
+        slow: int = 20,
+        signal_length: int = 9,
+    ):
+        """Calculate MACD"""
+
+        def test():
+            src_name: str = "close"
+            r2_period: int = 20
+            fast: int = 10
+            slow: int = 20
+            signal_length: int = 9
+
+        src: pd.DataFrame = df[src_name].reset_index(drop=True)
+        bar_index = range(len(df))
+
+        a1 = 2 / (fast + 1)
+        a2 = 2 / (slow + 1)
+
+        correlation = src.rolling(r2_period).corr(pd.Series(bar_index))
+        r2 = 0.5 * correlation**2 + 0.5
+        K = r2 * ((1 - a1) * (1 - a2)) + (1 - r2) * ((1 - a1) / (1 - a2))
+
+        var1 = src.diff().fillna(0) * (a1 - a2)
+        var1 = var1.to_numpy()
+        K = K.to_numpy()
+
+        i = 2
+        np_macd =  np.zeros_like(src) * np.nan
+        prev = np.nan_to_num(np_macd[i - 1])
+        prev_prev = np.nan_to_num(np_macd[i - 2])
+        for i in range(2, len(src)):
+            current = np_macd[i] = (
+                var1[i]
+                + (-a2 - a1 + 2) * np.nan_to_num(prev)
+                - K[i] * np.nan_to_num(prev_prev)
+            )
+            prev_prev = prev
+            prev = current
+        
+        macd = pd.DataFrame(np_macd, index=df.index, columns=src.columns)
+        signal = Ta.ema(macd, signal_length)
+
+        return macd, signal
+
+    
+class Math:
+    """mathematical functions for pandas Series"""
+
+    @staticmethod
+    def max(df_ls: list[pd.DataFrame]):
+        """To calculate the maximum value for each row from multiple Pandas dataframe.
+
+        Args:
+            dataframe_ls (list): A sequence of dataframe to use in the calculation.
+
+        Returns:
+            pd.dataframe: The dataframe of maximum values for each row of the input dataframe
+        """
+        max_df = np.maximum.reduce([df.to_numpy() for df in df_ls])
+        max_df = pd.DataFrame(max_df, columns=df_ls[1].columns, index=df_ls[1].index)
+
+        return max_df
+    
+    @staticmethod
+    def sum(src: pd.DataFrame, length: int):
+        """The sum function returns the sliding sum of last y values of x.
+
+        Args:
+            src (pd.DataFrame, pd.Series): src of values to process.
+            length (int): Number of bars (length).
+
+        Returns:
+            pd.src: Sum of source for length bars back.
+        """
+        return src.rolling(length).sum()
+
+    @staticmethod
+    def pct_change(src: pd.DataFrame, periods: int = 1):
+        """Fractional change between the current and a prior element.
+
+        Computes the fractional change from the immediately previous row by
+        default. This is useful in comparing the fraction of change in a time
+        src of elements.
+
+        Args:
+            src (pd.DataFrame): src of values to process.
+
+            periods (int): Periods to shift for forming percent change. Default 1
+
+        Returns:
+            pd.src: (src - src.shift(periods=periods)) / abs(src.shift(periods=periods))
+        """
+
+        return (src - src.shift(periods=periods)) / abs(
+            src.shift(periods=periods)
+        )
+
+
 class Utils:
     """Ultilities"""
     
@@ -821,9 +1101,56 @@ class Utils:
             pd.Series: A series showing the number of bars that
             increased (decreased) within the last n bars
         """
-
+        num_bars=int(num_bars)
         diff = src.diff()
         matched: pd.Series = diff > 0 if direction == "Increase" else diff < 0
         count = matched.rolling(num_bars, min_periods=1).sum()
 
         return count
+
+    @staticmethod
+    def count_consecutive(dfi: pd.DataFrame):
+        """_summary_
+
+        Args:
+            dfi (pd.DataFrame): input dataframe
+
+        Returns:
+            _type_: _description_
+        """
+        # Hàm để đếm số True liên tiếp
+        def count_consecutive_true(series: pd.Series):
+            # Tạo một mask cho giá trị True
+            mask = series == True
+            # Tính toán nhóm giá trị True liên tiếp
+            groups = mask.astype(int).groupby((mask != mask.shift()).cumsum()).cumsum()
+            return groups.where(mask).fillna(0).astype(int)
+
+        # Áp dụng hàm trên từng cột
+        result = dfi.apply(count_consecutive_true)
+
+        return result
+    
+
+    @staticmethod
+    def new_1val_series(value, series_to_copy_index: pd.Series):
+        """Create an one-value series replicated another series' index"""
+        return pd.Series(value, index=series_to_copy_index.index)
+
+    @staticmethod
+    def new_1val_df(value, df_sample: pd.DataFrame):
+        """Create an one-value dataframe"""
+        return pd.DataFrame(value, columns=df_sample.columns, index=df_sample.index)
+
+    @staticmethod
+    def combine_conditions(conditions: list[pd.DataFrame]):
+        """Calculate condition from orther conditions"""
+        res = None
+        for cond in conditions:
+            if cond is not None:
+                if res is None:
+                    res = cond
+                else:
+                    res = res & cond 
+        return res
+    

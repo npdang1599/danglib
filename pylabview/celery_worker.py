@@ -123,4 +123,7 @@ def scan_one_stock_v3(df: pd.DataFrame, func, params, name="", trade_direction='
         print(f"scan error: {e}")
 
     return bt
+    
+
+
 # celery -A celery_worker worker --concurrency=10 --loglevel=INFO -n celery_worker@pylabview

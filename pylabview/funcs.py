@@ -634,6 +634,7 @@ class Conds:
         mult_kc: float = 1.5,
         use_true_range: bool = True,
         num_bars: int = 1,
+        use_no_sqz:bool =  False,
         use_flag: bool = False,
     ):
         """Check if squeeze occurs continuously within the last n bars.
@@ -653,14 +654,24 @@ class Conds:
             pd.Series: True or False
         """
         if use_flag:
+            bb_length = int(bb_length)
+            length_kc = int(length_kc)
+            num_bars = int(num_bars)
             # Calculating squeeze
-            sqz_on, _, _ = Ta.squeeze(
+            sqz_on, _, no_sqz = Ta.squeeze(
                 df, src_name, bb_length, length_kc, mult_kc, use_true_range
             )
 
-            # Count consecutive squeeze on
-            cons_sqz_num = Utils.count_consecutive(sqz_on)
-            return cons_sqz_num >= num_bars
+            # # Count consecutive squeeze on
+            # cons_sqz_num = Utils.count_consecutive(sqz_on)
+            # return cons_sqz_num >= num_bars
+        
+            if use_no_sqz:
+                return no_sqz
+            else:
+                # Count consecutive squeeze on
+                cons_sqz_num = Utils.count_consecutive(sqz_on)
+                return cons_sqz_num >= num_bars
 
         return None
 

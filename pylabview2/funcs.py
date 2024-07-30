@@ -2,13 +2,23 @@
 
 import pprint
 import logging
-from danglib.pylabview2.core_lib import pd, np, Ta, Adapters, Fns, Utils
+from danglib.pylabview2.core_lib import pd, np, Ta, Adapters, Fns, Utils, Math
+from danglib.pylabview.funcs import Conds as Series_Conds
 from numba import njit
 from pymongo import MongoClient
 import logging
 import warnings
 from itertools import product
 from danglib.chatbots.viberbot import F5bot
+
+def show_ram_usage_mb():
+    import os
+    import psutil
+    pid = os.getpid()
+    python_process = psutil.Process(pid)
+    memoryUse = round(python_process.memory_info()[0] / 2. ** 20, 2) # memory use in GB
+    return memoryUse
+
 
 pd.options.mode.chained_assignment = None
 
@@ -36,6 +46,31 @@ class Globs:
             "price_gap": Conds.price_gap,
             "price_highest_lowest": Conds.PriceAction.price_highest_lowest,
             "consecutive_conditional_bars": Conds.PriceAction.consecutive_conditional_bars,
+            "vol_comp_ma": Conds.vol_comp_ma,
+            "vol_percentile": Conds.vol_percentile,
+            "consecutive_squeezes": Conds.consecutive_squeezes,
+            "bbwp": Conds.bbwp,
+            "bbpctb": Conds.bbpctb,
+            "ursi": Conds.ursi,
+            "macd": Conds.macd,
+            "index_cond": Conds.index_cond,
+            "lookback_cond": Conds.lookback_cond,
+
+            "s_price_change": Series_Conds.price_change,
+            "s_price_change_vs_hl": Series_Conds.price_change_vs_hl,
+            "s_price_comp_ma": Series_Conds.price_comp_ma,
+            "s_price_gap": Series_Conds.price_gap,
+            "s_price_highest_lowest": Series_Conds.PriceAction.price_highest_lowest,
+            "s_consecutive_conditional_bars": Series_Conds.PriceAction.consecutive_conditional_bars,
+            "s_vol_comp_ma": Series_Conds.vol_comp_ma,
+            "s_vol_percentile": Series_Conds.vol_percentile,
+            "s_consecutive_squeezes": Series_Conds.consecutive_squeezes,
+            "s_bbwp": Series_Conds.bbwp,
+            "s_bbpctb": Series_Conds.bbpctb,
+            "s_ursi": Series_Conds.ursi,
+            "s_macd": Series_Conds.macd,
+
+
         }
         self.sectors = {}
 
@@ -195,6 +230,35 @@ class Conds:
                 )
             
             return None
+        
+        @staticmethod
+        def range_cond(line, lower_thres, upper_thres, use_flag):
+            """Use flag wrapper or Utils.in_range function"""
+            res = None
+            if use_flag:
+                res = Utils.in_range(line, lower_thres, upper_thres)
+
+            return res
+        
+        @staticmethod
+        def two_line_conditions(
+            line1: pd.Series,
+            line2: pd.Series,
+            use_vs_signal: bool = False,
+            direction: str = "crossover",
+            use_range: bool = False,
+            lower_thres: float = 0,
+            upper_thres: float = 0,
+        ):
+            """Two line conditions"""
+            pos_cond = Conds.Standards.two_line_pos(
+                line1, line2, direction, use_flag=use_vs_signal
+            )
+            range_cond = Conds.Standards.range_cond(
+                line1, lower_thres, upper_thres, use_flag=use_range
+            )
+            res = Utils.combine_conditions([pos_cond, range_cond])
+            return res
             
 
     @staticmethod
@@ -415,7 +479,391 @@ class Conds:
 
             return None
 
+    @staticmethod
+    def vol_comp_ma(
+        df: pd.DataFrame,
+        v_type="volume",
+        n_bars=1,
+        ma_len=20,
+        comp_ma_dir="higher",
+        comp_ma_perc=20,
+        use_flag: bool = True,
+    ):
+        """Compare volume(value) with MA
+
+        Args:
+            df (pd.DataFrame): ohlcv dataframe
+            v_type (_type_): "volume" or "value"
+            n_bars (_type_): period
+            ma_len (_type_): volume smooth length
+            comp_ma_dir (_type_): "higher" or "lower"
+            comp_ma_perc (_type_): percentage different
+
+        Returns:
+            pd.Series[bool]: True or False
+        """
+        if use_flag:
+            n_bars=int(n_bars)
+            ma_len=int(ma_len)
+            v = df[v_type]
+
+            comp_v = Ta.sma(v, n_bars)
+            vol_ma = Ta.sma(v, ma_len)
+            vcp = Utils.calc_percentage_change(vol_ma, comp_v)
+            vcp *= 1 if comp_ma_dir == "higher" else -1
+            avcp = Ta.sma(vcp, n_bars)
+
+            return avcp >= comp_ma_perc
+
+        return None
     
+    @staticmethod
+    def vol_percentile(
+        df: pd.DataFrame,
+        ma_length: int = 10,
+        ranking_window: int = 128,
+        low_range: float = 0,
+        high_range: float = 100,
+        use_flag: bool = True,
+    ):
+        """Check if percentile of volume(value) is within the customed range
+
+        Args:
+            df (pd.DataFrame): ohlcv dataframe
+            ma_length (int, optional): Smooth length. Defaults to 10.
+            ranking_window (int, optional): Length of the ranking window. Defaults to 128.
+            low_range (float, optional): low threshold. Defaults to 0.
+            high_range (float, optional): high threshold. Defaults to 100.
+            use_flag (bool, optional): Perform calculation when use_flag is set to True
+            else return a Series of True values. Defaults to True.
+
+        Returns:
+            pd.Series: True or False
+        """
+        ma_length = int(ma_length)
+        v = df["volume"]
+        if use_flag:
+            ranking_window = int(ranking_window)
+            ma_length = int(ma_length)
+
+            smoothed_v = Ta.sma(v, ma_length)
+            smoothed_v_rank = (smoothed_v.rolling(ranking_window).rank() - 1) / (ranking_window - 1) * 100
+            return Utils.in_range(smoothed_v_rank, low_range, high_range)
+
+        return None
+
+    @staticmethod
+    def consecutive_squeezes(
+        df: pd.DataFrame,
+        src_name: str = "close",
+        bb_length: int = 20,
+        length_kc: int = 20,
+        mult_kc: float = 1.5,
+        use_true_range: bool = True,
+        num_bars: int = 1,
+        use_no_sqz:bool =  False,
+        use_flag: bool = False,
+    ):
+        """Check if squeeze occurs continuously within the last n bars.
+
+        Args:
+            df (pd.DataFrame): ohlcv dataframe
+            src_name (str, optional): source (open, high, low, close). Defaults to 'close'.
+            bb_length (int, optional): BB length. Defaults to 20.
+            length_kc (int, optional): KC length. Defaults to 20.
+            mult_kc (float, optional): KC mult factor. Defaults to 1.5.
+            use_true_range (bool, optional): Use true range (KC) or not. Defaults to True.
+            num_bars (int, optional): The minimum number squeeze bars. Defaults to 1.
+            use_flag (bool, optional): Perform calculation when use_flag is set to True
+            else return a Series of True values. Defaults to True.
+
+        Returns:
+            pd.Series: True or False
+        """
+        bb_length = int(bb_length)
+        length_kc = int(length_kc)
+        num_bars = int(num_bars)
+
+        if use_flag:
+            num_bars = int(num_bars)
+            # Calculating squeeze
+            sqz_on, _, no_sqz  = Ta.squeeze(
+                df, src_name, bb_length, length_kc, mult_kc, use_true_range
+            )
+            if use_no_sqz:
+                return no_sqz
+            else:
+                # Count consecutive squeeze on
+                cons_sqz_num = Utils.count_consecutive(sqz_on)
+                return cons_sqz_num >= num_bars
+
+        return None
+
+    @staticmethod
+    def bbwp(
+        df: pd.DataFrame,
+        src_name: str = "close",
+        basic_type: str = "SMA",
+        bbwp_len: int = 13,
+        bbwp_lkbk: int = 128,
+        use_low_thres: bool = False,
+        low_thres: float = 20,
+        use_high_thres: bool = False,
+        high_thres: float = 80,
+        use_flag: bool = False,
+    ):
+        """bbwp based conditions"""
+        def test():
+            df: pd.DataFrame = df_raw.copy()
+            src_name: str = "close"
+            basic_type: str = "SMA"
+            bbwp_len: int = 13
+            bbwp_lkbk: int = 128
+            use_low_thres: bool = False
+            low_thres: float = 20
+            use_high_thres: bool = False
+            high_thres: float = 80
+            use_flag: bool = False
+            
+        bbwp_len = int(bbwp_len)
+        bbwp_lkbk = int(bbwp_lkbk)
+
+        res = None
+        if use_flag:
+            bbwp = Ta.bbwp(df, src_name, basic_type, bbwp_len, bbwp_lkbk)
+
+            if use_low_thres:
+                res = bbwp <= low_thres
+
+            if use_high_thres:
+                res = bbwp >= high_thres
+
+        return res
+    
+
+    @staticmethod
+    def bbpctb(
+        df: pd.DataFrame,
+        src_name: str = "close",
+        length: int = 20,
+        mult: float = 2,
+        direction: str = "crossover",
+        cross_line: str = "Upper band",
+        use_flag: bool = False,
+    ):
+        """bbpctb based conditions"""
+        res = None
+
+        length = int(length)
+
+        if use_flag:
+            bbpctb = Ta.bbpctb(df, src_name, length, mult)
+
+            cross_l = Utils.new_1val_df(100 if cross_line == "Upper band" else 0, df[src_name])
+
+            res = Conds.Standards.two_line_pos(
+                line1=bbpctb,
+                line2=cross_l,
+                direction=direction,
+                use_flag=use_flag,
+            )
+
+        return res
+    
+    @staticmethod
+    def ursi(
+        df: pd.DataFrame,
+        length: int = 14,
+        smo_type1: str = "RMA",
+        smooth: int = 14,
+        smo_type2: str = "EMA",
+        use_vs_signal: bool = False,
+        direction: str = "crossover",
+        use_range: bool = False,
+        lower_thres: float = 0,
+        upper_thres: float = 0,
+        use_flag: bool = False,
+    ):
+        """Conditions base on URSI and URSI Signal
+
+        Args:
+            df (pd.DataFrame): ohlcv DataFrame.
+
+            ursi_setting_params (dict, optional): URSI setting params.
+
+            example: { "length": 14, "smo_type1": "RMA", "smooth": 14, "smo_type2": "EMA" }.
+
+            use_vs_signal (bool, optional): Check to use the condition based on the position
+            between the URSI line and the signal line. Defaults to False.
+
+            direction (str, optional): above, below, crossover, crossunder. Defaults to "crossover".
+
+            use_range (bool, optional): Check to use the condition based on URSI line range.
+            Condition met if URSI is within an input range.
+            Defaults to False.
+
+            lower_thres (float, optional): lower range. Defaults to 0.
+            upper_thres (float, optional): upper range. Defaults to 0.
+
+            use_flag (bool, optional): Perform calculation when use_flag is set to True
+            else return a Series of True values. Defaults to True.
+
+        Returns:
+            pd.Series: True or False
+        """
+        def test():
+            length: int = 14
+            smo_type1: str = "RMA"
+            smooth: int = 14
+            smo_type2: str = "EMA"
+            use_vs_signal: bool = True
+            direction: str = "crossover"
+            use_range: bool = True
+            lower_thres: float = 0
+            upper_thres: float = 0
+            use_flag: bool = True
+
+        src = df["close"]
+
+        res = None
+        if use_flag:
+            ursi, signal = Ta.ursi(
+                src, 
+                length,
+                smo_type1,
+                smooth,
+                smo_type2,
+            )
+
+            res = Conds.Standards.two_line_conditions(
+                ursi,
+                signal,
+                use_vs_signal,
+                direction,
+                use_range,
+                lower_thres,
+                upper_thres,
+            )
+
+        return res
+
+    @staticmethod
+    def macd(
+        df: pd.DataFrame,
+        src_name: str = "close",
+        r2_period: int = 20,
+        fast: int = 10,
+        slow: int = 20,
+        signal_length: int = 9,
+        use_vs_signal: bool = False,
+        direction: str = "crossover",
+        use_range: bool = False,
+        lower_thres: float = 0,
+        upper_thres: float = 0,
+        use_flag: bool = False,
+    ):
+        """Conditions base on MACD and MACD Signal
+
+        Args:
+            src (pd.Series): input source (open, high, low, close)
+
+            macd_setting_params (dict, optional): MACD setting params.
+            if this param is None, fuction will use the following defaul setting:
+            {
+                "src_name": "close",
+                "r2_period": 20,
+                "fast": 10,
+                "slow": 20,
+                "signal_length": 9
+            }
+
+            use_vs_signal (bool, optional): Check to use the condition based on the position
+            between the MACD line and the signal line. Defaults to False.
+
+            direction (str, optional): above, below, crossover, crossunder. Defaults to "crossover".
+
+            use_range (bool, optional): Check to use the condition based on MACD line range.
+            Condition met if MACD is within an input range.
+            Defaults to False.
+
+            lower_thres (float, optional): lower range. Defaults to 0.
+            upper_thres (float, optional): upper range. Defaults to 0.
+
+            use_flag (bool, optional): Perform calculation when use_flag is set to True
+            else return a Series of True values. Defaults to True.
+
+        Returns:
+            pd.Series: True or False
+        """
+        def test():
+            src_name: str = "close"
+            r2_period: int = 20
+            fast: int = 10
+            slow: int = 20
+            signal_length: int = 9
+            use_vs_signal: bool = True
+            direction: str = "crossover"
+            use_range: bool = False
+            lower_thres: float = 0
+            upper_thres: float = 0
+            use_flag: bool = True
+
+        res = None
+        if use_flag:
+            macd, signal = Ta.macd(
+                df,
+                src_name,
+                r2_period,
+                fast,
+                slow,
+                signal_length,
+            )
+
+            res = Conds.Standards.two_line_conditions(
+                macd,
+                signal,
+                use_vs_signal,
+                direction,
+                use_range,
+                lower_thres,
+                upper_thres,
+            )
+            
+        return res
+
+
+    @staticmethod
+    def index_cond(df: pd.DataFrame, function2, *args, **kwargs):
+        """Compute index condition"""
+
+        df2 = glob_obj.df_vnindex.copy()
+
+        df2['cond']= Conds.compute_any_conds(df2, function2, *args, **kwargs)
+        # params = {'lower_thres': 80.0,
+        #             'direction': 'below',
+        #             'function': 's_ursi',
+        #             'use_vs_signal': True,
+        #             'use_range': True,
+        #             'upper_thres': 100.0,
+        #             'use_flag': True}
+        # df2['cond'] = Conds.compute_any_conds(df2, **params)
+
+        df2 = pd.merge(df['day'].reset_index(drop=True), df2, on='day', how='left' )
+        df2['cond'] = df2['cond'].fillna(False)
+        df2 = df2.set_index('day')  
+
+        matched = df['close'].notna()
+        matched = matched.apply(lambda col: col & df2['cond'])
+
+        return matched
+    
+    @staticmethod
+    def lookback_cond(df: pd.DataFrame, function2, *args, **kwargs):
+        """Compute lookback condition"""
+        lookback_cond: pd.DataFrame = Conds.compute_any_conds(df, function2, *args, **kwargs)
+        return lookback_cond.rolling(5, closed = 'left').max().astype(bool)
+
+
     @staticmethod
     def compute_any_conds(df, function, *args, **kwargs):
         func = glob_obj.function_map[function]
@@ -905,8 +1353,324 @@ class Vectorized:
                     'direction': ['Increase', 'Decrease'],
                     ('num_bars', 'num_matched'): [(2,2), (3,3), (4,4), (5,5), (6,6), (7,7), (8,8)]
                 }
-            }
-
+            },
+            'vol_comp_ma1':{
+                'function': 'vol_comp_ma',
+                'params' : {
+                    ("n_bars", "ma_len") : [(1, 20), (1, 10), (1, 6), (2, 20), (3, 15)],
+                    "comp_ma_dir": ["higher", "lower"],
+                    "comp_ma_perc": [0, 25, 50, 75, 100, 150]
+                }
+            },
+            'vol_perc1':{
+                'function': 'vol_percentile',
+                'params': {
+                    'ma_length': [1,3,5,10],
+                    'ranking_window': [64, 128, 256],
+                    'low_range': [2,5, 10, 15, 20],
+                    'high_range': [80, 90, 95, 98]
+                }
+            },
+            'squeeze1':{
+                'function': 'consecutive_squeezes', 
+                'params': {
+                    'use_no_sqz': [True]
+                }
+            },
+            'squeeze2':{
+                'function': 'consecutive_squeezes', 
+                'params': {
+                    'num_bars': [3, 5, 10, 15, 20]
+                }
+            },
+            'bbwp1' : {
+                'function': 'bbwp',
+                'params': {
+                    ('use_low_thres', 'use_high_thres'):[(True, False), (False, True)],
+                    'bbwp_len': [13, 30, 50],
+                    'bbwp_lkbk': [64, 128, 256],
+                    'low_thres': [2,5,10,20],
+                    'high_thres': [80, 90, 95, 98]
+                }
+            },
+            'bbpctb1':{
+                'function': 'bbpctb',
+                'params':{
+                'length': [20, 50, 100],
+                'mult': [1.5, 2, 2.5, 3],
+                'direction' : ['crossover', 'crossunder'],
+                'cross_line': ['Upper band', 'Lower band']
+                }
+            },
+            'ursi1': {
+                'function': 'ursi',
+                'params': {
+                    'direction': ['crossover', 'crossunder', 'above', 'below'],
+                    'use_vs_signal': [True],
+                    'use_range': [True],
+                    ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
+                }
+            },
+            'macd1': {
+                'function': 'macd',
+                'params': {
+                    'use_vs_signal': [True],
+                    'use_range' : [True],
+                    'direction': ['crossover', 'crossunder'],
+                    ('lower_thres','upper_thres'):[(-9999,0), (0, 9999)]
+                }
+            },
+            'index1': {
+                'function': 'index_cond',
+                'params': {
+                    'function2': ['s_price_comp_ma'],
+                    ('ma_len1', 'ma_len2'): [(1,5), (1, 10), (1, 15), (1, 20), (1, 50), (1, 200), (5, 15), (5, 20), (10, 30), (20, 50), (20, 100), (50, 200)],
+                    'ma_dir': ['above', 'below', 'crossover', 'crossunder']
+                }
+            },
+            'index2': {
+                'function': 'index_cond',
+                'params': {
+                    'function2': ['s_bbwp'],
+                    ('use_low_thres', 'use_high_thres'):[(True, False), (False, True)],
+                    'bbwp_len': [13, 30, 50],
+                    'bbwp_lkbk': [64, 128, 256],
+                    'low_thres': [2,5,10,20],
+                    'high_thres': [80, 90, 95, 98]
+                }
+            },
+            'index3': {
+                'function': 'index_cond', 
+                'params': {
+                    'function2': ['s_consecutive_squeezes'],
+                    'use_no_sqz': [True]
+                }
+            },
+            'index4': {
+                'function': 'index_cond', 
+                'params': {
+                    'function2': ['s_consecutive_squeezes'],
+                    'num_bars': [3, 5, 10, 15, 20]
+                }
+            },
+            'index5': {
+                'function': 'index_cond', 
+                'params': {
+                    'function2': ['s_ursi'], 
+                    'direction': ['crossover', 'crossunder', 'above', 'below'],
+                    'use_vs_signal': [True],
+                    'use_range': [True],
+                    ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
+                }
+            },
+            'lkbk1':{
+                'function': 'lookback_cond',
+                'params': {
+                    'function2': ['price_change'],
+                    'periods': [1],
+                    'lower_thres': [0, 3, 5, 6.7],
+                    'direction': ['increase', 'decrease']
+                 }
+            },
+            'lkbk2':{
+                'function': 'lookback_cond',
+                
+                'params' : {
+                    'function2':['price_change'],
+                    'periods': [2],
+                    'lower_thres': [6, 10, 13],
+                    'direction': ['increase', 'decrease']
+                }
+            }, 
+            'lkbk3':{
+                'function': 'lookback_cond',
+                
+                'params' : {
+                    'function2': ['price_change'],
+                    'periods': [3],
+                    'lower_thres': [9, 15, 19],
+                    'direction': ['increase', 'decrease']
+                }
+            },
+            'lkbk4':{
+                'function': 'lookback_cond',
+                
+                'params' : {
+                    'function2': ['price_change'],
+                    'periods': [5],
+                    'lower_thres': [10, 15, 20, 25],
+                    'direction': ['increase', 'decrease']
+                }
+            },
+            'lkbk5':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['price_comp_ma'],
+                    'ma_len1':[1],
+                    'ma_len2':[5,10,15,20,50,200],
+                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
+                }
+            },
+            'lkbk6':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['price_comp_ma'],
+                    'ma_len1':[5],
+                    'ma_len2':[15,20],
+                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
+                }
+            },
+            'lkbk7':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['price_comp_ma'],
+                    'ma_len1':[10],
+                    'ma_len2':[30],
+                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
+                }
+            },
+            'lkbk8':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['price_comp_ma'],
+                    'ma_len1':[20],
+                    'ma_len2':[50, 100],
+                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
+                }
+            },
+            'lkbk9':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['price_comp_ma'],
+                    'ma_len1':[50],
+                    'ma_len2':[200],
+                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
+                }
+            },
+            'lkbk10':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['price_change_vs_hl'],
+                    'direction': ['Increase','Decrease'],
+                    'nbars': [5, 10, 15, 20, 30],
+                    'low_range': [10, 15, 20, 25]
+                }
+            },
+            'lkbk11':{
+                'function': 'lookback_cond',
+                
+                'params':{
+                    'function2': ['price_gap'],
+                    'gap_dir': ['Use Gap Up', 'Use Gap Down']
+                }
+            },
+            'lkbk12':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['price_highest_lowest'],
+                    'method': ['Highest', 'Lowest'],
+                    'num_bars': [5, 10, 15, 20, 50, 200]
+                }
+            },
+            'lkbk13':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['consecutive_conditional_bars'],
+                    ('src1_name', 'src2_name'): [('close', 'close'), ('high', 'low'), ('low', 'low'), ('high', 'high'), ('high', 'close'), ('low', 'close')],
+                    'direction': ['Increase', 'Decrease'],
+                    ('num_bars', 'num_matched'): [(2,2), (3,3), (4,4), (5,5), (6,6), (7,7), (8,8)]
+                }
+            },
+            'lkbk14':{
+                'function': 'lookback_cond',
+                
+                'params' : {
+                    'function2': ['vol_comp_ma'],
+                    ("n_bars", "ma_len") : [(1, 20), (1, 10), (1, 6), (2, 20), (3, 15)],
+                    "comp_ma_dir": ["higher", "lower"],
+                    "comp_ma_perc": [0, 25, 50, 75, 100, 150]
+                }
+            },
+            'lkbk15':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['vol_percentile'],
+                    'ma_length': [1,3,5,10],
+                    'ranking_window': [64, 128, 256],
+                    'low_range': [2,5, 10, 15, 20],
+                    'high_range': [80, 90, 95, 98]
+                }
+            },
+            'lkbk16':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['consecutive_squeezes'], 
+                    'use_no_sqz': [True]
+                }
+            },
+            'lkbk17':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['consecutive_squeezes'], 
+                    'num_bars': [3, 5, 10, 15, 20]
+                }
+            },
+            'lkbk18' : {
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['bbwp'],
+                    ('use_low_thres', 'use_high_thres'):[(True, False), (False, True)],
+                    'bbwp_len': [13, 30, 50],
+                    'bbwp_lkbk': [64, 128, 256],
+                    'low_thres': [2,5,10,20],
+                    'high_thres': [80, 90, 95, 98]
+                }
+            },
+            'lkbk19':{
+                'function': 'lookback_cond',
+                
+                'params':{
+                    'function2': ['bbpctb'],
+                    'length': [20, 50, 100],
+                    'mult': [1.5, 2, 2.5, 3],
+                    'direction' : ['crossover', 'crossunder'],
+                    'cross_line': ['Upper band', 'Lower band']
+                }
+            },
+            'lkbk20': {
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['ursi'],
+                    'direction': ['crossover', 'crossunder', 'above', 'below'],
+                    'use_vs_signal': [True],
+                    'use_range': [True],
+                    ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
+                }
+            },
+            'lkbk21': {
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['macd'],
+                    'use_vs_signal': [True],
+                    'use_range' : [True],
+                    'direction': ['crossover', 'crossunder'],
+                    ('lower_thres','upper_thres'):[(-9999,0), (0, 9999)]
+                }
+            },
         }
         
         params_df: pd.DataFrame = None
@@ -925,38 +1689,259 @@ class Vectorized:
 
             params_df = pd.concat([params_df, dff], ignore_index=True)
 
+        t = params_df[params_df['function'] == 'index_cond'].dropna(axis=1, how='all')
+        print(t)
+        print("len: ", len(t))
+        print("len all: ", len(params_df))
+# %%
         return params_df
-
-        
-
-
+    
 # %% 
 
-
     @staticmethod
-    def compute_conditions(df, params):
-
+    def compute_conditions(df):
+        from tqdm import tqdm
         df = df_raw.copy()
 
         params_df:pd.DataFrame = Vectorized.create_params_sets()
+        # params_df = params_df[params_df['function'] == 'index_cond']
 
         sig_dic = {}
-        for idx, params in params_df.iterrows():
+        for idx, params in tqdm(params_df.iterrows(), total=params_df.shape[0]):
+
             try:
                 params = params.dropna().to_dict()
+                for k, v in params.items():
+                    for patt in ['len', 'bar', 'lkbk', 'mult', 'period', 'ranking']:
+                        k: str
+                        if patt in k:
+                            params[k] = int(v)
+                params['use_flag'] = True
 
                 signals: pd.DataFrame = Conds.compute_any_conds(df, **params)
 
                 sig_dic[idx] = signals
+
             except Exception as e:
-                print(params)
+                print(idx)
                 print(e)
 
+        # for k, v in sig_dic.items():
+        #     if not isinstance(v, pd.DataFrame):
+        #         print(k)
 
 
-glob_obj = Globs()
-glob_obj.load_stocks_data()
-glob_obj.load_vnindex()
-glob_obj.load_sectors_data()
 
-df_raw = glob_obj.df_stocks.copy()
+        # t= params_df.loc[1633].dropna().to_dict()
+        # t = {
+        #     'bbwp_len': 50.0,
+        #     'bbwp_lkbk': 256.0,
+        #     'low_thres': 20.0,
+        #     'high_thres': 98.0,
+        #     }
+        # res = Conds.bbwp(df, **t)
+
+
+        # params_df.to_pickle("/home/ubuntu/Dang/pickles/params_df_full.pkl")
+        
+
+        # import pickle
+        # with open("/home/ubuntu/Dang/pickles/sig_dic_full.pkl", 'wb') as f:
+        #     pickle.dump(sig_dic, f)
+
+        return sig_dic
+    
+    @staticmethod
+    def compute_one_strategy(conds1, conds2, re_2d):
+        cond: pd.DataFrame = conds1 & conds2
+        re = np.sum(np.nan_to_num(cond * re_2d), axis=0)
+        return re
+    
+    @staticmethod
+    def compute_stats_v1():
+
+        sig_dic_num:dict = pd.read_pickle("/home/ubuntu/Dang/pickles/sig_dic_num.pkl")
+
+        df_return  = df['close'].pct_change(15) * 100
+        df_return = df_return.drop('2024_07_29')
+        df_return_num = df_return.to_numpy()
+
+        from tqdm import tqdm
+        re_ls = []
+        wr_ls = []
+        nt_ls = []
+
+        n = len(sig_dic_num)
+        for i in tqdm(range(0, n)):
+            for j in range(i, n):
+                cond: pd.DataFrame = sig_dic_num[i] & sig_dic_num[j]
+                re = np.nan_to_num(cond * df_return_num)
+
+                total_re = np.sum(re, axis=0)
+                num_win = np.sum(re > 0, axis=0)
+                num_trade = np.sum(cond, axis=0)
+
+                re_ls.append(total_re)
+                wr_ls.append(num_win)
+                nt_ls.append(num_trade)
+
+        to_pickle(re_ls, "/home/ubuntu/Dang/pickles/ls_re.pkl")
+        to_pickle(wr_ls, "/home/ubuntu/Dang/pickles/ls_wt.pkl")
+        to_pickle(nt_ls, "/home/ubuntu/Dang/pickles/ls_nt.pkl")
+
+
+    @staticmethod
+    def compute_stats_test():
+        # from tqdm import tqdm
+        # sig_dic: dict = pd.read_pickle('/home/ubuntu/Dang/pickles/sig_dic_full.pkl')
+
+        # stock_i2s = {k:v for k, v in enumerate(sig_dic[0].columns)}
+        # stock_s2i = {v:k for k, v in enumerate(sig_dic[0].columns)}
+        # map_data = {
+        #     'i2s': stock_i2s,
+        #     's2i': stock_s2i,
+        #     'days': sig_dic[0].index.to_list()
+        # }
+
+        # for idx, dfs in sig_dic.items():
+        #     dff: pd.DataFrame = dfs.copy()
+        #     dff = dff.rename(columns=stock_s2i)
+        #     dff.index = dff.index.astype(int)
+        #     sig_dic[idx] = dff
+
+        # to_pickle(data=map_data, fn = '/home/ubuntu/Dang/pickles/map_data.pkl')
+
+        # sig_dic_num = {k: v.to_numpy() for k, v in sig_dic.items()}
+        # to_pickle(data=sig_dic_num, fn = "/home/ubuntu/Dang/pickles/sig_dic_num.pkl")
+
+
+        # """Backtest on multiple stocks"""  
+        # from danglib.pylabview2.celery_worker import scan_one_stock, compute_multi_strategies, clean_redis
+
+        # clean_redis()
+
+        sig_dic_num:dict = pd.read_pickle("/home/ubuntu/Dang/pickles/sig_dic_num.pkl")
+
+
+        # Compute return array
+        df_return  = df['close'].pct_change(15) * 100
+        df_return = df_return.drop('2024_07_29')
+        df_return_num = df_return.to_numpy()
+
+
+
+        # from dc_server.lazy_core import gen_plasma_functions
+        # _, _, psave, pload, _ = gen_plasma_functions()
+        # psave("return_array", df_return_num)
+        # data = pload("return_array")
+        # from tqdm import tqdm
+        # def test1():
+        #     from tqdm import tqdm
+        #     ls = []
+        #     task_dic = {}
+
+        #     i = 1
+        #     j = 2
+        #     n = len(sig_dic_num)
+        #     for i in tqdm(range(0, 500)):
+        #         for j in range(i, n):
+
+        #             task = scan_one_stock.delay(
+        #             conds1 = sig_dic_num[i],
+        #             conds2 = sig_dic_num[j],
+        #             )
+
+        #             # cond: pd.DataFrame = sig_dic_num[i] & sig_dic_num[j]
+        #             # re = np.sum(np.nan_to_num(cond * df_return), axis=0)
+        #             # ls.append(re)
+        #             task_dic[f"{i},{j}"] = task
+
+        #     while any(t.status!='SUCCESS' for t in task_dic.values()):
+        #         pass
+
+        #     for k, v in task_dic.items():
+        #         res = v.result
+        #         if res is not None:
+        #             ls.append(res)
+
+        # def test2():
+
+        #     ls = []
+        #     task_dic = {}
+
+        #     i = 1
+        #     n = len(sig_dic_num)
+        #     for i in tqdm(range(0, 500)):
+
+        #         task = compute_multi_strategies.delay(
+        #             sig_dic_num,
+        #             i,
+        #             re_2d = df_return_num
+        #         )
+
+        #         task_dic[i] = task
+
+        #     while any(t.status!='SUCCESS' for t in task_dic.values()):
+        #         pass
+
+        #     for k, v in task_dic.items():
+        #         res = v.result
+        #         if res is not None:
+        #             ls.append(res)
+
+        # n = len(sig_dic_num)
+        # stra_idx_dic = {}
+        # count = 0
+        # for i in tqdm(range(0, n)):
+        #     for j in range(i, n):
+        #         stra_idx_dic[count] = (i, j)
+        #         count += 1
+
+
+
+        def test3():
+            from tqdm import tqdm
+            re_ls = []
+            wr_ls = []
+            nt_ls = []
+
+
+            n = len(sig_dic_num)
+            for i in tqdm(range(0, n)):
+                for j in range(i, n):
+                    cond: pd.DataFrame = sig_dic_num[i] & sig_dic_num[j]
+                    re = np.nan_to_num(cond * df_return_num)
+
+                    total_re = np.sum(re, axis=0)
+                    num_win = np.sum(re > 0, axis=0)
+                    num_trade = np.sum(cond, axis=0)
+
+                    re_ls.append(total_re)
+                    wr_ls.append(num_win)
+                    nt_ls.append(num_trade)
+
+            to_pickle(re_ls, "/home/ubuntu/Dang/pickles/ls_re.pkl")
+            to_pickle(wr_ls, "/home/ubuntu/Dang/pickles/ls_wt.pkl")
+            to_pickle(nt_ls, "/home/ubuntu/Dang/pickles/ls_nt.pkl")
+
+            
+def to_pickle(data, fn):
+    import pickle
+    with open(fn, 'wb') as f:
+        pickle.dump(data, f)
+
+
+
+
+if __name__ == "__main__":
+    glob_obj = Globs()
+
+    glob_obj.load_stocks_data()
+    glob_obj.load_vnindex()
+    glob_obj.load_sectors_data()
+
+    df_raw = glob_obj.df_stocks.copy()
+    df = df_raw.copy()
+    sqz_on, sqz_off, no_sqz = Ta.squeeze(df_raw)
+
+

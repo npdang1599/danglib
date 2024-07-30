@@ -164,6 +164,10 @@ class Adapters:
         return df
 
     @staticmethod
+    def get_vnindex_from():
+        pass
+
+    @staticmethod
     def get_stock_from_vnstock(ticker: str, from_day: str = "2018_01_01"):
         """load stock's ohlcv data from vnstock
 
