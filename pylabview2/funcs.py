@@ -1,5 +1,5 @@
 """Import functions"""
-
+#%%
 import pprint
 import logging
 from danglib.pylabview2.core_lib import pd, np, Ta, Adapters, Fns, Utils, Math
@@ -1251,7 +1251,7 @@ class Simulator:
 class Vectorized:
     @staticmethod
     def create_params_sets():
-# %%
+
         params_dic = {
             'price1':{
                 'function': 'price_change',
@@ -1693,10 +1693,10 @@ class Vectorized:
         print(t)
         print("len: ", len(t))
         print("len all: ", len(params_df))
-# %%
+
         return params_df
     
-# %% 
+
 
     @staticmethod
     def compute_conditions(df):
@@ -1762,8 +1762,8 @@ class Vectorized:
 
         sig_dic_num:dict = pd.read_pickle("/home/ubuntu/Dang/pickles/sig_dic_num.pkl")
 
-        df_return  = df['close'].pct_change(15) * 100
-        df_return = df_return.drop('2024_07_29')
+        df_return  = (df['open'].shift(-16) / df['open'].shift(-1) -1 )* 100
+        df_return = df_return.drop(['2024_07_29', '2024_07_30'])
         df_return_num = df_return.to_numpy()
 
         from tqdm import tqdm
@@ -1772,8 +1772,8 @@ class Vectorized:
         nt_ls = []
 
         n = len(sig_dic_num)
-        for i in tqdm(range(0, n)):
-            for j in range(i, n):
+        for i in tqdm(range(0, n-1)):
+            for j in range(i+1, n):
                 cond: pd.DataFrame = sig_dic_num[i] & sig_dic_num[j]
                 re = np.nan_to_num(cond * df_return_num)
 
@@ -1791,8 +1791,8 @@ class Vectorized:
 
 
     @staticmethod
-    def compute_stats_test():
-        # from tqdm import tqdm
+    def compute_stats_test_old():
+        from tqdm import tqdm
         # sig_dic: dict = pd.read_pickle('/home/ubuntu/Dang/pickles/sig_dic_full.pkl')
 
         # stock_i2s = {k:v for k, v in enumerate(sig_dic[0].columns)}
@@ -1824,7 +1824,7 @@ class Vectorized:
 
 
         # Compute return array
-        df_return  = df['close'].pct_change(15) * 100
+        df_return  = (df['open'].shift(-16) / df['open'].shift(-1) -1 )* 100
         df_return = df_return.drop('2024_07_29')
         df_return_num = df_return.to_numpy()
 
@@ -1889,14 +1889,15 @@ class Vectorized:
         #         if res is not None:
         #             ls.append(res)
 
-        # n = len(sig_dic_num)
-        # stra_idx_dic = {}
-        # count = 0
-        # for i in tqdm(range(0, n)):
-        #     for j in range(i, n):
-        #         stra_idx_dic[count] = (i, j)
-        #         count += 1
+        n = len(sig_dic_num)
+        stra_idx_dic = {}
+        count = 0
+        for i in tqdm(range(0, n)):
+            for j in range(i, n):
+                stra_idx_dic[count] = (i, j)
+                count += 1
 
+        to_pickle(stra_idx_dic, "/home/ubuntu/Dang/pickles/stra_idx_dic.pkl")
 
 
         def test3():
@@ -1924,16 +1925,100 @@ class Vectorized:
             to_pickle(wr_ls, "/home/ubuntu/Dang/pickles/ls_wt.pkl")
             to_pickle(nt_ls, "/home/ubuntu/Dang/pickles/ls_nt.pkl")
 
-            
+
+    @staticmethod
+    def compute_stats_v2():
+        # sig_dic_num:dict = pd.read_pickle("/home/ubuntu/Dang/pickles/sig_dic_num.pkl")
+
+        # len(sig_dic_num)
+
+        # n_stras =  len(sig_dic_num)
+        # n_rows, n_cols = sig_dic_num[0].shape
+
+        # # Khởi tạo một mảng NumPy 3 chiều với kích thước (2000, 2000, 200)
+        # array_3d = np.empty((n_stras, n_rows, n_cols))
+        # array_3d.shape
+
+        # # Gán giá trị từ dictionary vào mảng 3 chiều
+        # for key, value in sig_dic_num.items():
+        #     array_3d[key, :, :] = value
+
+        # array_3d.shape
+
+        # to_pickle(array_3d, "/home/ubuntu/Dang/pickles/sig_3d.pkl")
+        from tqdm import tqdm
+        array_3d: np.array = pd.read_pickle("/home/ubuntu/Dang/pickles/sig_3d.pkl")
+
+        df_return  = df['open'].pct_change(15).shift(-15) * 100
+        df_return = df_return.drop('2024_07_29')
+        return_num = df_return.to_numpy()
+
+        n = len(array_3d)
+        nt_ls = []
+        re_ls = []
+        wt_ls = []
+        for i in tqdm(range(0, n)):
+            df1 = array_3d[i]
+            df2 = array_3d[i+1:]
+            cond = df1 * df2
+            num_trade = np.sum(cond, axis=1)
+            re = np.nan_to_num(return_num * cond)
+            total_re = np.sum(re, axis=1)
+            num_win = np.sum(re > 0, axis=1)
+
+            nt_ls.append(num_trade)
+            re_ls.append(total_re)
+            wt_ls.append(num_win)
+
+        to_pickle(re_ls, "/home/ubuntu/Dang/pickles/ls_re_2.pkl")
+        to_pickle(wt_ls, "/home/ubuntu/Dang/pickles/ls_wt_2.pkl")
+        to_pickle(nt_ls, "/home/ubuntu/Dang/pickles/ls_nt_2.pkl")
+
+
+    @staticmethod
+    def statistic():
+        
+        def load():
+            from tqdm import tqdm
+            sig_dic_num:dict = pd.read_pickle("/home/ubuntu/Dang/pickles/sig_dic_num.pkl")
+            n = len(sig_dic_num)
+            stra_idx_dic = {}
+            count = 0
+            for i in tqdm(range(0, n-1)):
+                for j in range(i+1, n):
+                    stra_idx_dic[count] = (i, j)
+                    count += 1
+
+            # stra_idx_dic: dict = pd.read_pickle("/home/ubuntu/Dang/pickles/stra_idx_dic.pkl")
+            map_data = pd.read_pickle("/home/ubuntu/Dang/pickles/map_data.pkl")
+            stocks_map = map_data['i2s']
+
+            def load_and_map(fn_i, fn_o):
+                ls = pd.read_pickle(fn_i)
+                dfres = pd.DataFrame(np.vstack(ls), index=stra_idx_dic.values())
+                dfres = dfres.rename(columns=stocks_map)
+                dfres.index.names = ['i', 'j']
+
+                dfres.to_pickle(fn_o)
+                
+            load_and_map("/home/ubuntu/Dang/pickles/ls_re.pkl", "/home/ubuntu/Dang/pickles/df_re.pkl")
+            load_and_map("/home/ubuntu/Dang/pickles/ls_wt.pkl", "/home/ubuntu/Dang/pickles/df_wt.pkl")
+            load_and_map("/home/ubuntu/Dang/pickles/ls_nt.pkl", "/home/ubuntu/Dang/pickles/df_nt.pkl")
+
+        df_re: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/pickles/df_re.pkl")
+        df_wt: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/pickles/df_wt.pkl")
+        df_nt: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/pickles/df_nt.pkl")
+
+
 def to_pickle(data, fn):
     import pickle
     with open(fn, 'wb') as f:
         pickle.dump(data, f)
 
 
-
-
-if __name__ == "__main__":
+# %%
+run = False
+if __name__ == "__main__" and run:
     glob_obj = Globs()
 
     glob_obj.load_stocks_data()
@@ -1942,6 +2027,8 @@ if __name__ == "__main__":
 
     df_raw = glob_obj.df_stocks.copy()
     df = df_raw.copy()
-    sqz_on, sqz_off, no_sqz = Ta.squeeze(df_raw)
+
+    # Vectorized.compute_stats_v1()
+    Vectorized.compute_stats_v1()
 
 
