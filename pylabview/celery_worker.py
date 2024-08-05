@@ -99,7 +99,7 @@ def scan_one_stock_v2(
             holding_periods=holding_periods,
             use_takeprofit_cutloss=use_takeprofit_cutloss,
             profit_thres=profit_thres,
-            loss_thres=loss_thres
+            loss_thres=loss_thres 
             )
     except Exception as e:
         print(f"scan error: {e}")
@@ -125,4 +125,4 @@ def scan_one_stock_v3(df: pd.DataFrame, func, params, name="", trade_direction='
     
 
 
-# celery -A celery_worker worker --concurrency=10 --loglevel=INFO -n celery_worker@pylabview
+# celery -A celery_worker worker --concurrency=30 --loglevel=INFO -n celery_worker@pylabview

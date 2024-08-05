@@ -2,11 +2,13 @@
 
 from celery import Celery
 from redis import Redis
-from danglib.pylabview2.funcs import Vectorized
+from danglib.pylabview2.funcs import Vectorized, Conds
 import logging
 import numpy as np
+import pandas as pd
 from dc_server.lazy_core import gen_plasma_functions
 import threading
+import pickle
 
 plasma_lock = threading.Lock()
 
@@ -51,8 +53,37 @@ app = app_factory(CELERY_RESOURCES.HOST)
 class TaskName:
     COMPUTE_STOCK = 'compute_one_stock'
     COMPUTE_MULTI_STRATEGIES = 'compute_multi_strategies'
-    SCAN_STOCK_V3 = 'scan_one_stock_v3'
+    COMPUTE_SIGNAL = 'compute_signal'
+
+@app.task(name=TaskName.COMPUTE_SIGNAL)
+def compute_signal(idx, params: dict):
+
+    _, disconnect, psave, pload = gen_plasma_functions()
+
+    df: pd.DataFrame = pload("df_stocks")
+    print(df.shape)
+
+    try:
+        for k, v in params.items():
+            for patt in ['len', 'bar', 'lkbk', 'mult', 'period', 'ranking']:
+                k: str
+                if patt in k:
+                    params[k] = int(v)
+        params['use_flag'] = True
+
+        signals: pd.DataFrame = Conds.compute_any_conds(df, **params)
+        signals = signals[signals.index >= '2018_01_01']
+
+
+    except Exception as e:
+        print(f"{idx} error: {e}")
+        signals = None
     
+    disconnect()
+    return signals
+    
+
+
 @app.task(name=TaskName.COMPUTE_STOCK)
 def scan_one_stock(conds1, conds2):
     with plasma_lock:
@@ -64,15 +95,47 @@ def scan_one_stock(conds1, conds2):
     return Vectorized.compute_one_strategy(conds1=conds1, conds2=conds2, re_2d=re_2d)
 
 @app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES)
-def compute_multi_strategies(sig_dic_num, i, re_2d):
-    n = len(sig_dic_num)
-    ls = []
-    for j in range(i, n):
-        cond = sig_dic_num[i] & sig_dic_num[j]
-        re = np.sum(np.nan_to_num(cond * re_2d), axis=0)
-        ls.append(re)
+def compute_multi_strategies(i):
 
-    return ls
+    _, disconnect, psave, pload = gen_plasma_functions()
+
+    array_3d = pload("sig_3d_array")
+    re_2d = pload("return_array")
+    
+
+    df1 = array_3d[i]
+
+    nt_ls=[]
+    re_ls=[]
+    wt_ls=[]
+    for j in range(i+1, len(array_3d)):
+        df2 = array_3d[j]
+
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
+
+        cond = df1 * df2
+        num_trade = np.sum(cond, axis=0)
+        re = np.nan_to_num(re_2d * cond, 0.0)
+        total_re = np.sum(re, axis=0)
+        num_win = np.sum(re > 0, axis=0)
+
+        nt_ls.append(num_trade)
+        re_ls.append(total_re)
+        wt_ls.append(num_win)
+
+    disconnect()
+
+    nt_arr = np.vstack(nt_ls)
+    re_arr = np.vstack(re_ls)
+    wt_arr = np.vstack(wt_ls)
+
+
+    with open(f"/data/dang/tmp/combo_{i}.pkl", 'wb') as f:
+        pickle.dump((nt_arr, re_arr, wt_arr), f)
+    # return nt_ls, re_ls, wt_ls
+
+
 
 
 

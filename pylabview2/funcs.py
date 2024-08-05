@@ -1,6 +1,3 @@
-"""Import functions"""
-#%%
-import pprint
 import logging
 from danglib.pylabview2.core_lib import pd, np, Ta, Adapters, Fns, Utils, Math
 from danglib.pylabview.funcs import Conds as Series_Conds
@@ -10,21 +7,14 @@ import logging
 import warnings
 from itertools import product
 from danglib.chatbots.viberbot import F5bot
-
-def show_ram_usage_mb():
-    import os
-    import psutil
-    pid = os.getpid()
-    python_process = psutil.Process(pid)
-    memoryUse = round(python_process.memory_info()[0] / 2. ** 20, 2) # memory use in GB
-    return memoryUse
-
+from danglib.utils import write_pickle, walk_through_files
+from tqdm import tqdm
+from dc_server.lazy_core import gen_plasma_functions
 
 pd.options.mode.chained_assignment = None
 
 # Tắt tất cả các FutureWarning
 warnings.simplefilter(action='ignore', category=FutureWarning)
-
 
 class Globs:
     """Class of objects for global using purposes"""
@@ -69,8 +59,6 @@ class Globs:
             "s_bbpctb": Series_Conds.bbpctb,
             "s_ursi": Series_Conds.ursi,
             "s_macd": Series_Conds.macd,
-
-
         }
         self.sectors = {}
 
@@ -870,383 +858,6 @@ class Conds:
         cond = func(df, *args, **kwargs)
         return cond
 
-    
-class Simulator:
-
-    def __init__(
-        self,
-        func, 
-        df_ohlcv: pd.DataFrame,
-        params: dict, 
-        name: str = ""
-    ):
-        self.func = func
-        self.df = df_ohlcv
-        self.params = params
-        self.name = name
-        self.result = pd.DataFrame
-
-    @staticmethod
-    def prepare_data_for_backtesting(
-        df: pd.DataFrame, trade_direction="Long", holding_periods=8
-    ):
-        """Prepare data"""
-        df: pd.DataFrame = glob_obj.df_stocks.copy()
-        df["entryDay"] = df['day'].shift(-1)
-        df["entryType"] = 1 if trade_direction == "Long" else -1
-        entry_price: pd.DataFrame = df["open"].shift(-1)
-        df["exitDay"] = df["entryDay"].shift(-holding_periods)
-        df["exitType"] = df["entryType"] * -1
-        exit_price = entry_price.shift(-holding_periods)
-        price_change: pd.DataFrame = (exit_price - entry_price).multiply(df['entryType'], axis=0)
-        trade_return_tn: pd.DataFrame  = price_change / entry_price * 100
-        trade_return_t1: pd.DataFrame  =(entry_price.shift(-1)  / entry_price - 1) * 100
-        trade_return_t5: pd.DataFrame  =(entry_price.shift(-5)  / entry_price - 1) * 100
-        trade_return_t10: pd.DataFrame =(entry_price.shift(-10) / entry_price - 1) * 100
-        trade_return_t15: pd.DataFrame =(entry_price.shift(-15) / entry_price - 1) * 100
-
-        downside: pd.DataFrame = (df["low"].rolling(holding_periods).min().shift(-holding_periods))
-        downside = (Ta.min(downside, exit_price) / entry_price -1) * 100
-
-        upside: pd.DataFrame = df["high"].rolling(holding_periods).max().shift(-holding_periods)
-        upside = (Ta.max(upside, exit_price) / entry_price -1) * 100
-    
-        return (
-            df, 
-            entry_price, 
-            exit_price, 
-            price_change, 
-            trade_return_tn,
-            trade_return_t1,
-            trade_return_t5,
-            trade_return_t10,
-            trade_return_t15,
-            downside,
-            upside
-        )
-    
-    @staticmethod
-    @njit
-    def compute_trade_stats(
-        price_changes, 
-        returns, 
-        returns1,
-        returns5,
-        returns10,
-        returns15,
-        signals, 
-        upsides, 
-        downsides, 
-        holding_periods
-    ):
-        """Computing trade stats, using numba"""
-        num_trades = 0
-        num_win = 0
-        num_win1 = 0
-        num_win5 = 0
-        num_win10 = 0
-        num_win15 = 0
-
-        
-        
-        num_loss = 0
-        total_profit = 0.0
-        total_loss = 0.0
-        total_return = 0.0
-        total_return1 = 0.0
-        total_return5 = 0.0
-        total_return10 = 0.0
-        total_return15 = 0.0
-        
-        
-        total_upside = 0.0
-        total_downside = 0.0
-
-        is_trading = False
-        entry_idx = 0
-        trading_status = np.full(len(signals), np.NaN)
-        num_trades_arr = np.full(len(signals), np.NaN)
-        
-        winrate_arr = np.full(len(signals), np.NaN)
-        winrate1_arr = np.full(len(signals), np.NaN)
-        winrate5_arr = np.full(len(signals), np.NaN)
-        winrate10_arr = np.full(len(signals), np.NaN)
-        winrate15_arr = np.full(len(signals), np.NaN)
-        
-        avg_returns_arr = np.full(len(signals), np.NaN)
-        avg_returns1_arr = np.full(len(signals), np.NaN)
-        avg_returns5_arr = np.full(len(signals), np.NaN)
-        avg_returns10_arr = np.full(len(signals), np.NaN)
-        avg_returns15_arr = np.full(len(signals), np.NaN)
-        
-        profit_factor_arr = np.full(len(signals), np.NaN)
-        is_entry_arr = np.full(len(signals), np.NaN)
-
-        avg_upside_arr = np.full(len(signals), np.NaN)
-        avg_downside_arr = np.full(len(signals), np.NaN)
-
-        for index, signal in enumerate(signals):
-            if signal and not is_trading:
-                is_trading = True
-                entry_idx = index
-
-                trade_return = returns[index]
-
-                if not np.isnan(trade_return):
-                    num_trades += 1
-                    trade_profit = price_changes[index]
-
-                    total_return += trade_return
-                    total_return1 += returns1[index]
-                    total_return5 += returns5[index]
-                    total_return10 += returns10[index]
-                    total_return15 += returns15[index]
-                    
-                    
-                    total_upside += upsides[index]
-                    total_downside += downsides[index]
-
-                    if trade_profit > 0:
-                        num_win += 1
-                        total_profit += trade_profit
-                    else:
-                        num_loss += 1
-                        total_loss += trade_profit
-                        
-                    num_win1  += 1 if returns1[index]  > 0 else 0
-                    num_win5  += 1 if returns5[index]  > 0 else 0
-                    num_win10 += 1 if returns10[index] > 0 else 0
-                    num_win15 += 1 if returns15[index] > 0 else 0
-
-                    num_trades_arr[index] = num_trades
-                    
-                    winrate_arr[index] = num_win / num_trades * 100
-                    winrate1_arr[index] = num_win1 / num_trades * 100
-                    winrate5_arr[index] = num_win5 / num_trades * 100
-                    winrate10_arr[index] = num_win10 / num_trades * 100
-                    winrate15_arr[index] = num_win15 / num_trades * 100
-                    
-                    avg_returns_arr[index] = total_return / num_trades
-                    avg_returns1_arr[index] = total_return1 / num_trades
-                    avg_returns5_arr[index] = total_return5 / num_trades
-                    avg_returns10_arr[index] = total_return10 / num_trades
-                    avg_returns15_arr[index] = total_return15 / num_trades
-                    
-                    avg_upside_arr[index] = total_upside / num_trades
-                    avg_downside_arr[index] = total_downside / num_trades
-                    profit_factor_arr[index] = (
-                        total_profit / (total_loss * -1) if total_loss != 0 else np.NaN
-                    )
-
-                is_entry_arr[index] = 1
-
-            if is_trading and (index - entry_idx == holding_periods):
-                is_trading = False
-
-            if is_trading:
-                trading_status[index] = 1
-
-        return (
-            trading_status,
-            num_trades_arr,
-            winrate_arr,
-            winrate1_arr,
-            winrate5_arr,
-            winrate10_arr,
-            winrate15_arr,
-            avg_returns_arr,
-            avg_returns1_arr,
-            avg_returns5_arr,
-            avg_returns10_arr,
-            avg_returns15_arr,
-            avg_upside_arr,
-            avg_downside_arr,
-            profit_factor_arr,
-            is_entry_arr,
-        )
-
-    def run_combine_multi_conds(
-        self, trade_direction="Long", compute_start_time="2018_01_01", holding_periods=8
-    ):
-        df = self.df
-        func = self.func
-        params = self.params
-        name = self.name
-
-        df = glob_obj.df_stocks.copy()
-        func = Conds.price_change
-        params = {
-            'lower_thres':5,
-            'use_flag':True
-        }
-        
-        trade_direction="Long"
-        compute_start_time="2018_01_01"
-        holding_periods=15
-        df = glob_obj.df_stocks.copy()
-        func = Conds.price_change
-        params = {
-            "lower_thres":5,
-            "use_flag":True
-        }
-
-        (df, 
-        entry_price, 
-        exit_price, 
-        price_change, 
-        trade_return_tn,
-        trade_return_t1,
-        trade_return_t5,
-        trade_return_t10,
-        trade_return_t15,
-        downside,
-        upside) = Simulator.prepare_data_for_backtesting(
-            df,
-            trade_direction=trade_direction,
-            holding_periods=holding_periods,
-        )
-        
-        signals: pd.DataFrame = func(df, **params)
-
-        signals.loc[signals.index < compute_start_time] = signals.loc[signals.index < compute_start_time].map(lambda x: False)
-        res = []
-        from tqdm import tqdm
-        for s in tqdm(signals.columns.tolist()):
-
-            s_df = df.xs(s, 1, level=1)
-            s_df = s_df[s_df['close'].notna()].copy()
-            s_df['stock'] = s
-            s_df['signal'] = s_df.index.map(signals[s])
-            s_df['entryPrice'] = s_df.index.map(entry_price[s])
-            s_df['exitPrice'] = s_df.index.map(exit_price[s])
-            s_df['priceChange'] = s_df.index.map(price_change[s])
-            
-            s_df['return'] = s_df.index.map(trade_return_tn[s])
-            s_df['return1'] = s_df.index.map(trade_return_t1[s])
-            s_df['return5'] = s_df.index.map(trade_return_t5[s])
-            s_df['return10'] = s_df.index.map(trade_return_t10[s])
-            s_df['return15'] = s_df.index.map(trade_return_t15[s])
-            s_df['upside'] = s_df.index.map(upside[s])
-            s_df['downside'] = s_df.index.map(downside[s])
-
-
-            s_price_changes = s_df["priceChange"].values
-            s_returns = s_df["return"].values
-            s_returns1 = s_df["return1"].values
-            s_returns5 = s_df["return5"].values
-            s_returns10 = s_df["return10"].values
-            s_returns15 = s_df["return15"].values
-            s_signals = s_df["signal"].values
-            s_upsides = s_df["upside"].values
-            s_downsides = s_df["downside"].values
-            (
-                trading_status,
-                num_trades_arr,
-                winrate_arr,
-                winrate1_arr,
-                winrate5_arr,
-                winrate10_arr,
-                winrate15_arr,
-                avg_returns_arr,
-                avg_returns1_arr,
-                avg_returns5_arr,
-                avg_returns10_arr,
-                avg_returns15_arr,
-                avg_upside_arr,
-                avg_downside_arr,
-                profit_factor_arr,
-                is_entry_arr,
-            ) = Simulator.compute_trade_stats(
-                s_price_changes, 
-                s_returns, 
-                s_returns1, 
-                s_returns5, 
-                s_returns10, 
-                s_returns15, 
-                s_signals, 
-                s_upsides, 
-                s_downsides, 
-                holding_periods
-            )
-            
-            s_df["numTrade"] = num_trades_arr
-            s_df["winrate"] = winrate_arr
-            s_df["winrateT1"] = winrate1_arr
-            s_df["winrateT5"] = winrate5_arr
-            s_df["winrateT10"] = winrate10_arr
-            s_df["winrateT15"] = winrate15_arr
-            s_df["avgReturn"] = avg_returns_arr
-            s_df["avgReturnT1"] = avg_returns1_arr
-            s_df["avgReturnT5"] = avg_returns5_arr
-            s_df["avgReturnT10"] = avg_returns10_arr
-            s_df["avgReturnT15"] = avg_returns15_arr
-            s_df["avgUpside"] = avg_upside_arr
-            s_df["avgDownside"] = avg_downside_arr
-            s_df["profitFactor"] = profit_factor_arr
-            s_df["isEntry"] = is_entry_arr
-            s_df["isTrading"] = trading_status
-
-
-            s_df["matched"] = np.where(s_df["signal"], 1, np.NaN)
-            s_df[
-                [
-                    "numTrade",
-                    "winrate",
-                    "winrateT1",
-                    "winrateT5",
-                    "winrateT10",
-                    "winrateT15",
-                    "profitFactor",
-                    "avgReturn",
-                    "avgReturnT1",
-                    "avgReturnT5",
-                    "avgReturnT10",
-                    "avgReturnT15",
-                    "avgUpside",
-                    "avgDownside"
-                ]
-            ] = s_df[
-                [
-                    "numTrade",
-                    "winrate",
-                    "winrateT1",
-                    "winrateT5",
-                    "winrateT10",
-                    "winrateT15",
-                    "profitFactor",
-                    "avgReturn",
-                    "avgReturnT1",
-                    "avgReturnT5",
-                    "avgReturnT10",
-                    "avgReturnT15",
-                    "avgUpside",
-                    "avgDownside"
-                ]
-            ].ffill().fillna(0)
-
-            res.append(s_df)
-
-        df_res =pd.concat(res, axis=0)
-
-        t = df_res[df_res['stock'] == 'HPG']
-
-        result = t[
-            [
-                "stock",
-                "numTrade",
-                "winrate",
-                "profitFactor",
-                "avgReturn",
-                "avgUpside",
-                "avgDownside",
-                "isEntry",
-                "matched",
-                "isTrading",
-            ]
-        ].iloc[-1]
-        
-        return result, df_res
-
 
 class Vectorized:
     @staticmethod
@@ -1362,13 +973,31 @@ class Vectorized:
                     "comp_ma_perc": [0, 25, 50, 75, 100, 150]
                 }
             },
-            'vol_perc1':{
+            # 'vol_perc1':{
+            #     'function': 'vol_percentile',
+            #     'params': {
+            #         'ma_length': [1,3,5,10],
+            #         'ranking_window': [64, 128, 256],
+            #         'low_range': [2,5, 10, 15, 20],
+            #         'high_range': [80, 90, 95, 98]
+            #     }
+            # },
+            'vol_perc2':{
                 'function': 'vol_percentile',
                 'params': {
                     'ma_length': [1,3,5,10],
                     'ranking_window': [64, 128, 256],
-                    'low_range': [2,5, 10, 15, 20],
-                    'high_range': [80, 90, 95, 98]
+                    'low_range': [0],
+                    'high_range': [2,5, 10, 15, 20]
+                }
+            },
+            'vol_perc3':{
+                'function': 'vol_percentile',
+                'params': {
+                    'ma_length': [1,3,5,10],
+                    'ranking_window': [64, 128, 256],
+                    'low_range': [80, 90, 95, 98],
+                    'high_range': [100]
                 }
             },
             'squeeze1':{
@@ -1393,6 +1022,26 @@ class Vectorized:
                     'high_thres': [80, 90, 95, 98]
                 }
             },
+            # 'bbwp2' : {
+            #     'function': 'bbwp',
+            #     'params': {
+            #         ('use_low_thres', 'use_high_thres'):[(True, False), (False, True)],
+            #         'bbwp_len': [13, 30, 50],
+            #         'bbwp_lkbk': [64, 128, 256],
+            #         'low_thres': [0],
+            #         'high_thres': [2,5,10,20]
+            #     }
+            # },
+            # 'bbwp3' : {
+            #     'function': 'bbwp',
+            #     'params': {
+            #         ('use_low_thres', 'use_high_thres'):[(True, False), (False, True)],
+            #         'bbwp_len': [13, 30, 50],
+            #         'bbwp_lkbk': [64, 128, 256],
+            #         'low_thres': [80, 90, 95, 98],
+            #         'high_thres': [100]
+            #     }
+            # },
             'bbpctb1':{
                 'function': 'bbpctb',
                 'params':{
@@ -1402,22 +1051,38 @@ class Vectorized:
                 'cross_line': ['Upper band', 'Lower band']
                 }
             },
-            'ursi1': {
+            # 'ursi1': {
+            #     'function': 'ursi',
+            #     'params': {
+            #         'direction': ['crossover', 'crossunder', 'above', 'below'],
+            #         'use_vs_signal': [True],
+            #         'use_range': [True],
+            #         ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
+            #     }
+            # },
+            'ursi2': {
                 'function': 'ursi',
                 'params': {
                     'direction': ['crossover', 'crossunder', 'above', 'below'],
-                    'use_vs_signal': [True],
-                    'use_range': [True],
+                    ('use_vs_signal','use_range'): [(True, False), (False,True), (True, True)],
                     ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
                 }
             },
-            'macd1': {
+            # 'macd1': {
+            #     'function': 'macd',
+            #     'params': {
+            #         'use_vs_signal': [True],
+            #         'use_range' : [True],
+            #         'direction': ['crossover', 'crossunder'],
+            #         ('lower_thres','upper_thres'):[(-9999,0), (0, 9999)]
+            #     }
+            # },
+            'macd2': {
                 'function': 'macd',
                 'params': {
-                    'use_vs_signal': [True],
-                    'use_range' : [True],
+                    ('use_vs_signal','use_range'): [(True, False), (False,True), (True, True)],
                     'direction': ['crossover', 'crossunder'],
-                    ('lower_thres','upper_thres'):[(-9999,0), (0, 9999)]
+                    ('lower_thres','upper_thres'):[(-9999999,0), (0, 9999999)]
                 }
             },
             'index1': {
@@ -1453,13 +1118,22 @@ class Vectorized:
                     'num_bars': [3, 5, 10, 15, 20]
                 }
             },
-            'index5': {
+            # 'index5': {
+            #     'function': 'index_cond', 
+            #     'params': {
+            #         'function2': ['s_ursi'], 
+            #         'direction': ['crossover', 'crossunder', 'above', 'below'],
+            #         'use_vs_signal': [True],
+            #         'use_range': [True],
+            #         ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
+            #     }
+            # },
+            'index6': {
                 'function': 'index_cond', 
                 'params': {
                     'function2': ['s_ursi'], 
                     'direction': ['crossover', 'crossunder', 'above', 'below'],
-                    'use_vs_signal': [True],
-                    'use_range': [True],
+                    ('use_vs_signal','use_range'): [(True, False), (False,True), (True, True)],
                     ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
                 }
             },
@@ -1599,15 +1273,37 @@ class Vectorized:
                     "comp_ma_perc": [0, 25, 50, 75, 100, 150]
                 }
             },
-            'lkbk15':{
+            # 'lkbk15':{
+            #     'function': 'lookback_cond',
+                
+            #     'params': {
+            #         'function2': ['vol_percentile'],
+            #         'ma_length': [1,3,5,10],
+            #         'ranking_window': [64, 128, 256],
+            #         'low_range': [2,5, 10, 15, 20],
+            #         'high_range': [80, 90, 95, 98]
+            #     }
+            # },
+            'lkbk151':{
                 'function': 'lookback_cond',
                 
                 'params': {
                     'function2': ['vol_percentile'],
                     'ma_length': [1,3,5,10],
                     'ranking_window': [64, 128, 256],
-                    'low_range': [2,5, 10, 15, 20],
-                    'high_range': [80, 90, 95, 98]
+                    'low_range': [0],
+                    'high_range': [2,5, 10, 15, 20]
+                }
+            },
+            'lkbk152':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['vol_percentile'],
+                    'ma_length': [1,3,5,10],
+                    'ranking_window': [64, 128, 256],
+                    'low_range': [80, 90, 95, 98],
+                    'high_range': [100]
                 }
             },
             'lkbk16':{
@@ -1649,24 +1345,44 @@ class Vectorized:
                     'cross_line': ['Upper band', 'Lower band']
                 }
             },
-            'lkbk20': {
+            # 'lkbk20': {
+            #     'function': 'lookback_cond',
+                
+            #     'params': {
+            #         'function2': ['ursi'],
+            #         'direction': ['crossover', 'crossunder', 'above', 'below'],
+            #         'use_vs_signal': [True],
+            #         'use_range': [True],
+            #         ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
+            #     }
+            # },
+            'lkbk201': {
                 'function': 'lookback_cond',
                 
                 'params': {
                     'function2': ['ursi'],
                     'direction': ['crossover', 'crossunder', 'above', 'below'],
-                    'use_vs_signal': [True],
-                    'use_range': [True],
+                    ('use_vs_signal','use_range'): [(True, False), (False,True), (True, True)],
                     ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
                 }
             },
-            'lkbk21': {
+            # 'lkbk21': {
+            #     'function': 'lookback_cond',
+                
+            #     'params': {
+            #         'function2': ['macd'],
+            #         'use_vs_signal': [True],
+            #         'use_range' : [True],
+            #         'direction': ['crossover', 'crossunder'],
+            #         ('lower_thres','upper_thres'):[(-9999,0), (0, 9999)]
+            #     }
+            # },
+            'lkbk211': {
                 'function': 'lookback_cond',
                 
                 'params': {
                     'function2': ['macd'],
-                    'use_vs_signal': [True],
-                    'use_range' : [True],
+                    ('use_vs_signal','use_range'): [(True, False), (False,True), (True, True)],
                     'direction': ['crossover', 'crossunder'],
                     ('lower_thres','upper_thres'):[(-9999,0), (0, 9999)]
                 }
@@ -1690,18 +1406,13 @@ class Vectorized:
             params_df = pd.concat([params_df, dff], ignore_index=True)
 
         t = params_df[params_df['function'] == 'index_cond'].dropna(axis=1, how='all')
-        print(t)
-        print("len: ", len(t))
-        print("len all: ", len(params_df))
-
         return params_df
     
-
-
     @staticmethod
-    def compute_conditions(df):
+    def compute_conditions(df, to_pickle= False):
         from tqdm import tqdm
-        df = df_raw.copy()
+        def test():
+            df = df_raw.copy()
 
         params_df:pd.DataFrame = Vectorized.create_params_sets()
         # params_df = params_df[params_df['function'] == 'index_cond']
@@ -1726,309 +1437,141 @@ class Vectorized:
                 print(idx)
                 print(e)
 
-        # for k, v in sig_dic.items():
-        #     if not isinstance(v, pd.DataFrame):
-        #         print(k)
+        if to_pickle:
+            params_df.to_pickle("/home/ubuntu/Dang/pickles/params_df.pkl")
+            write_pickle(sig_dic, "/home/ubuntu/Dang/pickles/signal_dict.pkl")
 
-
-
-        # t= params_df.loc[1633].dropna().to_dict()
-        # t = {
-        #     'bbwp_len': 50.0,
-        #     'bbwp_lkbk': 256.0,
-        #     'low_thres': 20.0,
-        #     'high_thres': 98.0,
-        #     }
-        # res = Conds.bbwp(df, **t)
-
-
-        # params_df.to_pickle("/home/ubuntu/Dang/pickles/params_df_full.pkl")
-        
-
-        # import pickle
-        # with open("/home/ubuntu/Dang/pickles/sig_dic_full.pkl", 'wb') as f:
-        #     pickle.dump(sig_dic, f)
-
-        return sig_dic
+        return params_df, sig_dic
     
     @staticmethod
-    def compute_one_strategy(conds1, conds2, re_2d):
-        cond: pd.DataFrame = conds1 & conds2
-        re = np.sum(np.nan_to_num(cond * re_2d), axis=0)
-        return re
-    
-    @staticmethod
-    def compute_stats_v1():
+    def compute_all(df: pd.DataFrame, recompute_signals = True):
+        from danglib.pylabview2.celery_worker import compute_signal, clean_redis, compute_multi_strategies
+        _, client_disconnect, psave, pload = gen_plasma_functions()
 
-        sig_dic_num:dict = pd.read_pickle("/home/ubuntu/Dang/pickles/sig_dic_num.pkl")
+        psave("df_stocks", df)
 
-        df_return  = (df['open'].shift(-16) / df['open'].shift(-1) -1 )* 100
-        df_return = df_return.drop(['2024_07_29', '2024_07_30'])
-        df_return_num = df_return.to_numpy()
-
-        from tqdm import tqdm
-        re_ls = []
-        wr_ls = []
-        nt_ls = []
-
-        n = len(sig_dic_num)
-        for i in tqdm(range(0, n-1)):
-            for j in range(i+1, n):
-                cond: pd.DataFrame = sig_dic_num[i] & sig_dic_num[j]
-                re = np.nan_to_num(cond * df_return_num)
-
-                total_re = np.sum(re, axis=0)
-                num_win = np.sum(re > 0, axis=0)
-                num_trade = np.sum(cond, axis=0)
-
-                re_ls.append(total_re)
-                wr_ls.append(num_win)
-                nt_ls.append(num_trade)
-
-        to_pickle(re_ls, "/home/ubuntu/Dang/pickles/ls_re.pkl")
-        to_pickle(wr_ls, "/home/ubuntu/Dang/pickles/ls_wt.pkl")
-        to_pickle(nt_ls, "/home/ubuntu/Dang/pickles/ls_nt.pkl")
-
-
-    @staticmethod
-    def compute_stats_test_old():
-        from tqdm import tqdm
-        # sig_dic: dict = pd.read_pickle('/home/ubuntu/Dang/pickles/sig_dic_full.pkl')
-
-        # stock_i2s = {k:v for k, v in enumerate(sig_dic[0].columns)}
-        # stock_s2i = {v:k for k, v in enumerate(sig_dic[0].columns)}
-        # map_data = {
-        #     'i2s': stock_i2s,
-        #     's2i': stock_s2i,
-        #     'days': sig_dic[0].index.to_list()
-        # }
-
-        # for idx, dfs in sig_dic.items():
-        #     dff: pd.DataFrame = dfs.copy()
-        #     dff = dff.rename(columns=stock_s2i)
-        #     dff.index = dff.index.astype(int)
-        #     sig_dic[idx] = dff
-
-        # to_pickle(data=map_data, fn = '/home/ubuntu/Dang/pickles/map_data.pkl')
-
-        # sig_dic_num = {k: v.to_numpy() for k, v in sig_dic.items()}
-        # to_pickle(data=sig_dic_num, fn = "/home/ubuntu/Dang/pickles/sig_dic_num.pkl")
-
-
-        # """Backtest on multiple stocks"""  
-        # from danglib.pylabview2.celery_worker import scan_one_stock, compute_multi_strategies, clean_redis
-
-        # clean_redis()
-
-        sig_dic_num:dict = pd.read_pickle("/home/ubuntu/Dang/pickles/sig_dic_num.pkl")
-
-
-        # Compute return array
-        df_return  = (df['open'].shift(-16) / df['open'].shift(-1) -1 )* 100
-        df_return = df_return.drop('2024_07_29')
-        df_return_num = df_return.to_numpy()
-
-
-
-        # from dc_server.lazy_core import gen_plasma_functions
-        # _, _, psave, pload, _ = gen_plasma_functions()
-        # psave("return_array", df_return_num)
-        # data = pload("return_array")
-        # from tqdm import tqdm
-        # def test1():
-        #     from tqdm import tqdm
-        #     ls = []
-        #     task_dic = {}
-
-        #     i = 1
-        #     j = 2
-        #     n = len(sig_dic_num)
-        #     for i in tqdm(range(0, 500)):
-        #         for j in range(i, n):
-
-        #             task = scan_one_stock.delay(
-        #             conds1 = sig_dic_num[i],
-        #             conds2 = sig_dic_num[j],
-        #             )
-
-        #             # cond: pd.DataFrame = sig_dic_num[i] & sig_dic_num[j]
-        #             # re = np.sum(np.nan_to_num(cond * df_return), axis=0)
-        #             # ls.append(re)
-        #             task_dic[f"{i},{j}"] = task
-
-        #     while any(t.status!='SUCCESS' for t in task_dic.values()):
-        #         pass
-
-        #     for k, v in task_dic.items():
-        #         res = v.result
-        #         if res is not None:
-        #             ls.append(res)
-
-        # def test2():
-
-        #     ls = []
-        #     task_dic = {}
-
-        #     i = 1
-        #     n = len(sig_dic_num)
-        #     for i in tqdm(range(0, 500)):
-
-        #         task = compute_multi_strategies.delay(
-        #             sig_dic_num,
-        #             i,
-        #             re_2d = df_return_num
-        #         )
-
-        #         task_dic[i] = task
-
-        #     while any(t.status!='SUCCESS' for t in task_dic.values()):
-        #         pass
-
-        #     for k, v in task_dic.items():
-        #         res = v.result
-        #         if res is not None:
-        #             ls.append(res)
-
-        n = len(sig_dic_num)
-        stra_idx_dic = {}
-        count = 0
-        for i in tqdm(range(0, n)):
-            for j in range(i, n):
-                stra_idx_dic[count] = (i, j)
-                count += 1
-
-        to_pickle(stra_idx_dic, "/home/ubuntu/Dang/pickles/stra_idx_dic.pkl")
-
-
-        def test3():
-            from tqdm import tqdm
-            re_ls = []
-            wr_ls = []
-            nt_ls = []
-
-
-            n = len(sig_dic_num)
-            for i in tqdm(range(0, n)):
-                for j in range(i, n):
-                    cond: pd.DataFrame = sig_dic_num[i] & sig_dic_num[j]
-                    re = np.nan_to_num(cond * df_return_num)
-
-                    total_re = np.sum(re, axis=0)
-                    num_win = np.sum(re > 0, axis=0)
-                    num_trade = np.sum(cond, axis=0)
-
-                    re_ls.append(total_re)
-                    wr_ls.append(num_win)
-                    nt_ls.append(num_trade)
-
-            to_pickle(re_ls, "/home/ubuntu/Dang/pickles/ls_re.pkl")
-            to_pickle(wr_ls, "/home/ubuntu/Dang/pickles/ls_wt.pkl")
-            to_pickle(nt_ls, "/home/ubuntu/Dang/pickles/ls_nt.pkl")
-
-
-    @staticmethod
-    def compute_stats_v2():
-        # sig_dic_num:dict = pd.read_pickle("/home/ubuntu/Dang/pickles/sig_dic_num.pkl")
-
-        # len(sig_dic_num)
-
-        # n_stras =  len(sig_dic_num)
-        # n_rows, n_cols = sig_dic_num[0].shape
-
-        # # Khởi tạo một mảng NumPy 3 chiều với kích thước (2000, 2000, 200)
-        # array_3d = np.empty((n_stras, n_rows, n_cols))
-        # array_3d.shape
-
-        # # Gán giá trị từ dictionary vào mảng 3 chiều
-        # for key, value in sig_dic_num.items():
-        #     array_3d[key, :, :] = value
-
-        # array_3d.shape
-
-        # to_pickle(array_3d, "/home/ubuntu/Dang/pickles/sig_3d.pkl")
-        from tqdm import tqdm
-        array_3d: np.array = pd.read_pickle("/home/ubuntu/Dang/pickles/sig_3d.pkl")
-
-        df_return  = df['open'].pct_change(15).shift(-15) * 100
-        df_return = df_return.drop('2024_07_29')
+        df_return: pd.DataFrame  = df['open'].pct_change(15).shift(-16) * 100
+        df_return = get_from_day(df_return, '2018_01_01')
         return_num = df_return.to_numpy()
 
-        n = len(array_3d)
-        nt_ls = []
-        re_ls = []
-        wt_ls = []
-        for i in tqdm(range(0, n)):
-            df1 = array_3d[i]
-            df2 = array_3d[i+1:]
-            cond = df1 * df2
-            num_trade = np.sum(cond, axis=1)
-            re = np.nan_to_num(return_num * cond)
-            total_re = np.sum(re, axis=1)
-            num_win = np.sum(re > 0, axis=1)
-
-            nt_ls.append(num_trade)
-            re_ls.append(total_re)
-            wt_ls.append(num_win)
-
-        to_pickle(re_ls, "/home/ubuntu/Dang/pickles/ls_re_2.pkl")
-        to_pickle(wt_ls, "/home/ubuntu/Dang/pickles/ls_wt_2.pkl")
-        to_pickle(nt_ls, "/home/ubuntu/Dang/pickles/ls_nt_2.pkl")
+        stocks_map = {k: v for k, v in enumerate(df_return.columns)}
 
 
-    @staticmethod
-    def statistic():
-        
-        def load():
-            from tqdm import tqdm
-            sig_dic_num:dict = pd.read_pickle("/home/ubuntu/Dang/pickles/sig_dic_num.pkl")
-            n = len(sig_dic_num)
-            stra_idx_dic = {}
-            count = 0
-            for i in tqdm(range(0, n-1)):
-                for j in range(i+1, n):
-                    stra_idx_dic[count] = (i, j)
-                    count += 1
+        psave("return_array", return_num)
 
-            # stra_idx_dic: dict = pd.read_pickle("/home/ubuntu/Dang/pickles/stra_idx_dic.pkl")
-            map_data = pd.read_pickle("/home/ubuntu/Dang/pickles/map_data.pkl")
-            stocks_map = map_data['i2s']
 
-            def load_and_map(fn_i, fn_o):
-                ls = pd.read_pickle(fn_i)
-                dfres = pd.DataFrame(np.vstack(ls), index=stra_idx_dic.values())
-                dfres = dfres.rename(columns=stocks_map)
-                dfres.index.names = ['i', 'j']
 
-                dfres.to_pickle(fn_o)
+        def compute_signals():
+            params_df: pd.DataFrame = Vectorized.create_params_sets()
+            n_strats = len(params_df)
+
+            if recompute_signals:
+                df_tmp = df['close']
+                df_tmp = df_tmp[df_tmp.index >= '2018_01_01']
+                n_rows, n_cols = df_tmp.shape
+
+                # Khởi tạo một mảng NumPy 3 chiều với kích thước (2000, 2000, 200)
+                array_3d = np.empty((n_strats, n_rows, n_cols))
+
+                task_dic = {}
+                print("Computing signals:")
+                for idx, params in tqdm(params_df.iterrows(), total=params_df.shape[0]):    
+                    params = params.dropna().to_dict()
+                    task_dic[idx] = compute_signal.delay(idx, params)
+
+                while any(t.status!='SUCCESS' for t in task_dic.values()):
+                    pass
                 
-            load_and_map("/home/ubuntu/Dang/pickles/ls_re.pkl", "/home/ubuntu/Dang/pickles/df_re.pkl")
-            load_and_map("/home/ubuntu/Dang/pickles/ls_wt.pkl", "/home/ubuntu/Dang/pickles/df_wt.pkl")
-            load_and_map("/home/ubuntu/Dang/pickles/ls_nt.pkl", "/home/ubuntu/Dang/pickles/df_nt.pkl")
+                for idx, v in task_dic.items():
+                    res: pd.DataFrame = v.result
+                    if res is not None:
+                        array_3d[idx, :, :] = res
 
-        df_re: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/pickles/df_re.pkl")
-        df_wt: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/pickles/df_wt.pkl")
-        df_nt: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/pickles/df_nt.pkl")
+                    else:
+                        print(f"{idx} error")
+                array_3d = array_3d.astype(bool)
+                psave("sig_3d_array",array_3d)
+                clean_redis()
+
+            return n_strats
+
+        def compute_stats(n):
+            clean_redis()
+
+            task_dic = {}
+            print("Computing stats")
+            for i in tqdm(range(0, n-1)):
+                task_dic[i] = compute_multi_strategies.delay(i)
+
+            while any(t.status!='SUCCESS' for t in task_dic.values()):
+                pass
+
+            clean_redis()
+
+        def join_data(n):
+            fns = walk_through_files("/data/dang/tmp/")
+
+            def join_one_stats(name):
+
+                # df_res: pd.DataFrame = None
+                res = []
+                print(f"Join {name} stats: ")
+                for f in tqdm(fns):
+                    f: str
+                    i = int(f.split('/')[-1].split(".")[0].split("_")[1])
+                    if i < 2013:
+                        nt_raw, re_raw, wt_raw = pd.read_pickle(f)
+                        src = None
+                        if name == 'nt':
+                            src = nt_raw
+                        if name == 're':
+                            src = re_raw
+                        if name == 'wt':
+                            src = wt_raw
+
+                        tmp = pd.DataFrame(src, index=list(range(i+1, n)))
+                        tmp[-1] = i 
+                        res.append(tmp)
+                res: pd.DataFrame = pd.concat(res)
+                res = res.reset_index(names=-2)
+                cols_map = stocks_map.copy()
+                cols_map[-1] = 'i'
+                cols_map[-2] = 'j'
+
+                res = res.rename(columns = cols_map)
+                res = res.set_index(['i', 'j'])
+                write_pickle(f"/home/ubuntu/Dang/pickles/df_{name}.pkl", res)
+
+            join_one_stats('nt')
+            join_one_stats('wt')
+            join_one_stats('re')
 
 
-def to_pickle(data, fn):
-    import pickle
-    with open(fn, 'wb') as f:
-        pickle.dump(data, f)
+
+        n = compute_signals()
+        compute_stats(n)
+        join_data(n)
+
+        client_disconnect()
+
+def run():     
+    Vectorized.compute_all(df, recompute_signals=True)
+        
 
 
-# %%
-run = False
-if __name__ == "__main__" and run:
-    glob_obj = Globs()
+glob_obj = Globs()
 
-    glob_obj.load_stocks_data()
-    glob_obj.load_vnindex()
-    glob_obj.load_sectors_data()
+glob_obj.load_stocks_data()
+glob_obj.load_vnindex()
+glob_obj.load_sectors_data()
 
-    df_raw = glob_obj.df_stocks.copy()
-    df = df_raw.copy()
-
-    # Vectorized.compute_stats_v1()
-    Vectorized.compute_stats_v1()
+df_raw = glob_obj.df_stocks.copy()
+df = df_raw.copy()
 
 
+def get_from_day(df: pd.DataFrame, from_day, col = None):
+    if col is not None:
+        df = df[df[col] >= from_day]    
+    else:
+        df = df[df.index >= from_day]
+    return df
