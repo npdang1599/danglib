@@ -100,7 +100,6 @@ def scan_one_stock_v2(
             use_takeprofit_cutloss=use_takeprofit_cutloss,
             profit_thres=profit_thres,
             loss_thres=loss_thres
-            
             )
     except Exception as e:
         print(f"scan error: {e}")

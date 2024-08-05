@@ -471,10 +471,105 @@ class Adapters:
         )
         df.columns = ['stock','day', 'mapYQ', 'inventory']
         df['day'] = df['day'].str.replace('-', '_')
-        df['inventory'] = df['inventory'].ffill()
+        df['inventory'] = df.groupby('stock')['inventory'].ffill()
         return df
     
-    
+    @staticmethod
+    def load_balance_sheet_data(stocks, from_day="2016_01_01"):
+        
+        def test():
+            stocks = ['HPG', 'SSI', 'VND', 'STB']
+            from_day = '2016_01_01'
+            
+        db = MongoClient("ws", 27022)['stockdata']
+        
+        # get YQ mapped data
+        col1 = db['combined_price_fa']
+        df = pd.DataFrame(
+            list(
+                col1.find(
+                    {
+                        'stock': {"$in":stocks},
+                        "day": {"$gte":from_day},
+                    },
+                    {
+                        "_id":0,
+                        'stock':1,
+                        'day': 1,
+                        'mapYQ':1,
+                        "inventories_net_bn_vnd":1,
+                        "days_inventory_outstanding":1,
+                        "purchase_of_fixed_assets":1,
+                        "MarketCap":1
+                    }
+                )
+            )
+        )
+        
+        # df.columns = ['stock','day', 'mapYQ', 'inventory', 'inventoryDay', 'CAPEX', 'marketCap']
+        df = df.rename(columns={
+            'inventories_net_bn_vnd': 'inventory',
+            'days_inventory_outstanding': 'inventoryDay',
+            'purchase_of_fixed_assets': 'CAPEX', 
+            'MarketCap': 'marketCap'
+        })
+        
+        df['day'] = df['day'].str.replace('-', '_')
+        df[
+            ["marketCap","mapYQ","inventory","CAPEX","inventoryDay"]
+        ] = df.groupby('stock')[
+            ["marketCap","mapYQ","inventory","CAPEX","inventoryDay"]
+        ].ffill()
+        
+        # Map YQ data:
+        col2 =  db['VCI_balance_sheet_quarter']
+        
+        # df2 = pd.DataFrame(list(col2.find({}, {"_id": 0}).limit(5)))
+        # df2.columns
+        # inventoryDay: days_inventory_outstanding
+        # CAPEX: purchase_of_fixed_assets
+        # MarketCap: MarketCap
+        # Gross: long_term_assets_bn_vnd
+        # Cash: cash_and_cash_equivalents_bn_vnd + short_term_investments_bn_vnd
+        # Debt: long_term_liabilities_bn_vnd + current_liabilities_bn_vnd
+        
+        df2 = pd.DataFrame(
+            list(
+                col2.find(
+                    {
+                        'ticker': {"$in":stocks},
+                    },
+                    {
+                        "_id":0,
+                        'ticker':1,
+                        'yearreport': 1,
+                        'lengthreport':1,
+                        "long_term_assets_bn_vnd":1,
+                        "cash_and_cash_equivalents_bn_vnd":1,
+                        "short_term_investments_bn_vnd":1,
+                        "long_term_liabilities_bn_vnd":1,
+                        "current_liabilities_bn_vnd":1,
+                    }
+                )
+            )
+        )
+        df2 = df2.rename(columns={
+            'ticker': 'stock',
+            'yearreport': 'year', 
+            'lengthreport': 'quarter',
+            'long_term_assets_bn_vnd': 'gross', 
+        })
+        
+        df2["mapYQ"] = df2["year"] * 10 + df2["quarter"]
+        df2["mapYQ"] = np.where(df2["quarter"] == 4, df2["mapYQ"] + 7, df2["mapYQ"] + 1)
+        
+        df2 = df2.set_index("mapYQ")
+        df2['cash'] = df2['cash_and_cash_equivalents_bn_vnd'] + df2['short_term_investments_bn_vnd']
+        df2['debt'] = df2['long_term_liabilities_bn_vnd'] + df2['current_liabilities_bn_vnd']
+        df2 = df2[['stock','gross', 'cash', 'debt']].copy()
+        
+        return df, df2
+        
     
     @staticmethod
     def prepare_stocks_data(stocks, fn="stocks_data.pickle", db_collection=None, start_day='2017_01_01', to_pickle=False, to_mongo=True):
@@ -491,19 +586,25 @@ class Adapters:
         # P/E P/B
         df_pepb = Adapters.load_fiinpro_PE_PB_ttm_daily(stocks)
         dfres = pd.merge(dfres, df_pepb, how='left', on=['stock', 'day'])
-        dfres[['PE', 'PB']] = dfres[['PE', 'PB']].ffill()
+        dfres[['PE', 'PB']] = dfres.groupby('stock')[['PE', 'PB']].ffill()
         
-        # Inventory
-        df_inv = Adapters.load_inventory_data_from_db(stocks, from_day=start_day)
-        df_inv = df_inv.drop('mapYQ', axis=1)
-        dfres = pd.merge(dfres, df_inv, how='left', on=['stock', 'day'])
-        dfres['inventory'] = dfres['inventory'].ffill()
+        # # Inventory
+        # df_inv = Adapters.load_inventory_data_from_db(stocks, from_day=start_day)
+        # df_inv = df_inv.drop('mapYQ', axis=1)
+        # dfres = pd.merge(dfres, df_inv, how='left', on=['stock', 'day'])
+        # dfres['inventory'] = dfres['inventory'].ffill()
         
         # Margin Lending:
         df_margin = Adapters.Sectors.load_brokerage_margin_lending(stocks)
         dfres = pd.merge(dfres, df_margin, how='left', on=['stock', 'mapYQ'])
         
+        # balance sheet:
+        dfbs1, dfbs2 = Adapters.load_balance_sheet_data(stocks)
+        dfbs1 = dfbs1.drop('mapYQ', axis=1)
+        dfres = pd.merge(dfres, dfbs1, how='left', on=['stock', 'day'])
+        dfres[['marketCap','inventory','CAPEX','inventoryDay']] = dfres.groupby('stock')[['marketCap','inventory','CAPEX','inventoryDay']].ffill()
         
+        dfres = pd.merge(dfres, dfbs2, how='left', on=['stock', 'mapYQ'])
         
         if to_pickle:
             dfres.to_pickle(fn)
@@ -840,9 +941,30 @@ class Adapters:
 
         @staticmethod
         def load_fertilizer():
-            df: pd.DataFrame = pd.read_excel(**Fns.sectors_rawdata['fertilizer']['p4_price'], skiprows=5)
-            df = df[['Date', 'China P4 price', 'China P4 cash spread']]
-            df.columns = ['day', 'ChinaP4Price', 'ChinaP4CashSpread']
+            def load_china_p4():
+                df: pd.DataFrame = pd.read_excel(**Fns.sectors_rawdata['fertilizer']['p4_price'], skiprows=5)
+                df = df[['Date', 'China P4 price', 'China P4 cash spread']]
+                df.columns = ['day', 'ChinaP4Price', 'ChinaP4CashSpread']
+                
+                return df
+            
+            def load_urea_data():
+                df_dcm: pd.DataFrame = pd.read_excel(**Fns.sectors_rawdata['fertilizer']['DCM_urea'])
+                df_future: pd.DataFrame = pd.read_excel(**Fns.sectors_rawdata['fertilizer']['urea_future'])
+                df_dpm: pd.DateOffset = pd.read_excel(**Fns.sectors_rawdata['fertilizer']['DPM_urea'])
+
+                df_future = df_future[df_future['Date'] >= '2018-01-01']
+                df = pd.merge(df_future, df_dcm, how='outer', on='Date')
+                df = pd.merge(df, df_dpm, how='outer', on='Date')
+                df.columns = ['day', 'future', 'DCM', 'DPM']
+                return df
+            
+            df_p4 = load_china_p4()
+            df_urea = load_urea_data()
+            
+            df = pd.merge(df_p4, df_urea, how='outer', on='day')
+
+                
             df['day'] = df['day'].astype(str)
             df['day'] = df['day'].str[:10]
             df['day'] = df['day'].str.replace('-', '_')
@@ -852,7 +974,7 @@ class Adapters:
             })
             df_cate['categories'] = 'Input'
             df_cate['available'] = True
-
+            
             return {
                 'categories': df_cate,
                 'io_data': df

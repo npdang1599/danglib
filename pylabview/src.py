@@ -31,8 +31,23 @@ class Fns:
             }
         },
         'fertilizer':{
-            'p4_price':{
+            'p4_price': {
                 'io': '/home/ubuntu/Dang/data/P4 Price (Fertilizer).xlsx'
+            },
+            'DCM_urea': {
+                'io': '/home/ubuntu/Dang/data/Urea Data.xlsx',
+                'sheet_name': 'DCM',
+                'usecols': [0,2]
+            },
+            'urea_future': {
+                'io': '/home/ubuntu/Dang/data/Urea Data.xlsx',
+                'sheet_name': 'Urea Future',
+                'usecols': [0,1]
+            },
+            'DPM_urea': {
+                'io': '/home/ubuntu/Dang/data/Urea Data.xlsx',
+                'sheet_name': 'DPM',
+                'usecols': [0,2]
             }
         }
     }

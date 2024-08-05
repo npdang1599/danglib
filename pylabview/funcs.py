@@ -49,6 +49,9 @@ class Globs:
             "net_income": Conds.Fa.net_income,
             "revenue": Conds.Fa.revenue,
             "inventory": Conds.Fa.inventory,
+            "inventory_day": Conds.Fa.inventory_day,
+            "capex_gross": Conds.Fa.capex_gross,
+            "cash_debt_mktcap": Conds.Fa.cash_debt_mktcap,
             "PE": Conds.Fa.PE,
             "PB": Conds.Fa.PB,
             "index_cond": Conds.index_cond,
@@ -71,6 +74,9 @@ class Globs:
             "hog_cash_spread": Conds.Sectors.hog_cash_spread,
             "china_p4_price": Conds.Sectors.china_p4_price,
             "china_p4_cash_spread": Conds.Sectors.china_p4_cash_spread,
+            "dcm_ure": Conds.Sectors.dcm_ure,
+            "dpm_ure": Conds.Sectors.dpm_ure,
+            "ure_future": Conds.Sectors.ure_future,
         }
         self.sectors = {}
 
@@ -180,15 +186,24 @@ class Globs:
         self.sectors = Adapters.load_sectors_data()
 
     def get_sectors_stocks(self):
-        sectors = {
-            'Steel': ['HPG', 'NKG', 'HSG'],
-            'Hog': ['DBC','BAF','MML'],
-            'Fish': ['VHC','ANV','IDI'], 
-            'Textile': ['TNG','MSH','STK'], 
-            'Homebuilder':['PTB','VCS','GDT'], 
-            'Chemicals1': ['DGC','DPM','DCM'],
-            'Chemicals2': ['CSV','LAS','BFC']
-        }
+        # sectors = {
+        #     'Steel': ['HPG', 'NKG', 'HSG'],
+        #     'Brokerage': ['VND', 'HCM', 'SSI', 'VCI', 'BSI', 'SHS', 'FTS', 'MBS'],
+        #     'Hog': ['DBC','BAF','MML'],
+        #     'Fish': ['VHC','ANV','IDI'], 
+        #     'Textile': ['TNG','MSH','STK'], 
+        #     'Homebuilder':['PTB','VCS','GDT'], 
+        #     'Chemicals1': ['DGC','DPM','DCM'],
+        #     'Chemicals2': ['CSV','LAS','BFC']
+        # }
+        import ast
+        
+        db = MongoClient("localhost", 27022)["pylabview_db"]
+        col = db['watchlist']
+        df_raw = pd.DataFrame(col.find({},{'_id':0}))
+        df_raw = df_raw[df_raw.index < 20]
+        sectors = dict(zip(df_raw['watchlist_name'], df_raw['watchlist_params'].map(ast.literal_eval)))
+        
 
         data_list = []
         for sector, stocks in sectors.items():
@@ -202,6 +217,8 @@ class Globs:
                 data_list.append({'stock':stock, 'sector':'other'})
 
         df = pd.DataFrame(data_list)
+        
+
 
         return df
     
@@ -1142,63 +1159,28 @@ class Conds:
         @staticmethod
         def inventory(
             df: pd.DataFrame,
-            # trend_calc_type: str= "QoQ",
-            # trend_rolling_len: int = 1, 
-            # trend_direction: str = "increase",
-            # trend_n_quarters: float = 3,
-            # trend_growth: str = 'acceleration', # deceleration
-            # trend_use_flag: bool = False,
-
-            # growth_use_flag: bool = False,
-            # growth_calc_type: str = "QoQ",
-            # growth_rolling_len: int = 1,
-            # growth_direction: str = 'increase', 
-            # growth_percentage: float = 0,
-            
             hlest_use_flag: bool = False,
             hlest_direction: str = 'highest', 
-            hlest_n_quarters: int = 3
+            hlest_n_quarters: int = 3,
+            
+            std_use_flag: bool = False,
+            std_dir: str = 'higher', 
+            std_mult: float = 2,
+            std_periods: int = 10
         ):
             def test():
                 df = glob_obj.get_one_stock_data("HPG")
-                trend_calc_type: str= "QoQ"
-                trend_rolling_len: int = 1 
-                trend_direction: str = "increase"
-                trend_n_quarters: float = 3
-                trend_growth: str = 'acceleration' # deceleration
-                trend_use_flag: bool = True
-
-                growth_use_flag: bool = False
-                growth_calc_type: str = "QoQ"
-                growth_rolling_len: int = 1
-                growth_direction: str = 'increase' 
-                growth_percentage: float = 0
                 
                 hlest_use_flag: bool = False
                 hlest_direction: str = 'highest' 
                 hlest_n_quarters: int = 3
                 
+                std_use_flag: bool = True
+                std_dir: str = 'higher' 
+                std_mult: float = 2
+                std_periods: int = 10
+                
             df_inv = df.groupby('mapYQ').agg({'inventory':'last'})
-            # trend_cond = Conds.Fa.trend(
-            #     df_inv,
-            #     src_name='inventory', 
-            #     calc_type=trend_calc_type,
-            #     rolling_len=trend_rolling_len,
-            #     direction=trend_direction,
-            #     number_of_quarters=trend_n_quarters,
-            #     growth=trend_growth,
-            #     use_flag=trend_use_flag
-            # )
-            
-            # growth_cond = Conds.Fa.growth(
-            #     df_inv,
-            #     src_name='inventory',
-            #     use_flag=growth_use_flag,
-            #     calc_type=growth_calc_type,
-            #     rolling_len=growth_rolling_len,
-            #     direction=growth_direction,
-            #     percentage=growth_percentage
-            # )
             
             hlest_cond = Conds.Standards.hlest_cond(
                 df_inv,
@@ -1208,14 +1190,106 @@ class Conds:
                 use_flag=hlest_use_flag
             )
             
-            # matched = Utils.combine_conditions([trend_cond, growth_cond, hlest_cond])
+            std_cond = Conds.Standards.std_cond(
+                df = df_inv,
+                src_name='inventory',
+                n_bars= std_periods,
+                mult=std_mult,
+                position=std_dir,
+                use_flag=std_use_flag
+            )
             
-            if hlest_cond is not None:
-                df_inv['cond'] = hlest_cond
+            matched = Utils.combine_conditions([hlest_cond, std_cond])
+            
+            if matched is not None:
+                df_inv['cond'] = matched
                 df['cond'] = df['mapYQ'].map(df_inv['cond'])
                 return df['cond']
             
             return None
+        
+        @staticmethod
+        def inventory_day(
+            df: pd.DataFrame,
+            hlest_use_flag: bool = False,
+            hlest_direction: str = 'highest', 
+            hlest_n_quarters: int = 3,
+            
+            std_use_flag: bool = False,
+            std_dir: str = 'higher', 
+            std_mult: float = 2,
+            std_periods: int = 10
+        ):
+            def test():
+                df = glob_obj.get_one_stock_data("HPG")
+                
+                hlest_use_flag: bool = False
+                hlest_direction: str = 'highest' 
+                hlest_n_quarters: int = 3
+                
+                std_use_flag: bool = True
+                std_dir: str = 'higher' 
+                std_mult: float = 2
+                std_periods: int = 10
+                
+            df_inv = df.groupby('mapYQ').agg({'inventoryDay':'last'})
+            
+            hlest_cond = Conds.Standards.hlest_cond(
+                df_inv,
+                src_name='inventoryDay', 
+                hl_options=hlest_direction,
+                n_bars=hlest_n_quarters,
+                use_flag=hlest_use_flag
+            )
+            
+            std_cond = Conds.Standards.std_cond(
+                df = df_inv,
+                src_name='inventoryDay',
+                n_bars= std_periods,
+                mult=std_mult,
+                position=std_dir,
+                use_flag=std_use_flag
+            )
+            
+            matched = Utils.combine_conditions([hlest_cond, std_cond])
+            
+            if matched is not None:
+                df_inv['cond'] = matched
+                df['cond'] = df['mapYQ'].map(df_inv['cond'])
+                return df['cond']
+            
+            return None
+        
+        @staticmethod
+        def capex_gross(
+            df: pd.DataFrame,
+            use_flag: bool = False,
+            low_range: float = -999,
+            high_range: float = 999
+        ):
+            src = -df['CAPEX'] / df['gross']
+            return Conds.Standards.range_cond(
+                src,
+                lower_thres=low_range,
+                upper_thres=high_range,
+                use_flag=use_flag
+            )
+            
+        @staticmethod
+        def cash_debt_mktcap(
+            df: pd.DataFrame,
+            use_flag: bool = False,
+            low_range: float = -999,
+            high_range: float = 999
+        ):
+            src = (df['cash'] - df['debt']) / (df['marketCap'] * 1e9)
+            return Conds.Standards.range_cond(
+                src,
+                lower_thres=low_range,
+                upper_thres=high_range,
+                use_flag=use_flag
+            )
+            
             
     class Sectors:
         @staticmethod
@@ -1460,29 +1534,6 @@ class Conds:
                 hl_lower = hl_lower,
                 hl_upper = hl_upper,
             )
-
-        # MARGIN_MA_useMA = input.bool(defval = false, title = 'MA combination', group = 'MARGIN MA conditions')
-        # MARGIN_MA_MAType = input.string(defval = 'SMA', title = 'MA Method', inline = 'MA1', options = ['SMA'], group = 'MARGIN MA conditions')
-        # MARGIN_MA_MALen1 = input.int(defval = 5, title = 'Line 1 MA Length', inline = 'MA2', group = 'MARGIN MA conditions')
-        # MARGIN_MA_MALen2 = input.int(defval = 15, title = 'Line 2 MA Length', inline = 'MA3', group = 'MARGIN MA conditions')
-        # MARGIN_MA_EntryCond = input.string(defval = 'crossover', title = 'Entry Conditions',options = ['crossover', 'crossunder', 'above', 'below'],inline = 'MA7', group = 'MARGIN MA conditions')
-        # MARGIN_MA_useRange = input.bool(defval = false, title = 'Limit Range;', inline = 'MA4', group = 'MARGIN MA conditions')
-        # MARGIN_MA_lower = input.float(defval = -99999999999, title = 'lower', inline = 'MA4', group = 'MARGIN MA conditions')
-        # MARGIN_MA_upper = input.float(defval = 99999999999, title = 'upper', inline = 'MA4', group = 'MARGIN MA conditions')
-        # MARGIN_hl_use_highest = input.bool(defval = false, title = 'Enter when margin is highest', group = 'MARGIN high/low conditions')
-        # MARGIN_hl_use_lowest = input.bool(defval = false, title = 'Enter when margin is lowest', group = 'MARGIN high/low conditions')
-        # MARGIN_hl_len = input.int(defval = 4, title = 'N Bar', group= 'MARGIN high/low conditions')
-        # MARGIN_plot = input.bool(false, title = 'Plot Margin')
-        
-        # f_MARGIN_cond(margin) =>
-        #     MARGIN_ma1 = dlib.f_ma(margin, MARGIN_MA_MALen1, MARGIN_MA_MAType)    
-        #     MARGIN_ma2 = dlib.f_ma(margin, MARGIN_MA_MALen2, MARGIN_MA_MAType)    
-        #     MARGIN_ma_cond = not MARGIN_MA_useMA or (dlib.f_define_2line_cond(MARGIN_ma1, MARGIN_ma2, MARGIN_MA_EntryCond) and 
-        #                       (not MARGIN_MA_useRange or dlib.f_inrange(MARGIN_ma1, MARGIN_MA_lower, MARGIN_MA_upper) ))
-        #     [isMax, isMin] = f_checkHLMargin(margin, MARGIN_hl_len)
-        #     MARGIN_hl_cond = (not MARGIN_hl_use_highest or isMax) and (not MARGIN_hl_use_lowest or isMin)
-        #     MRGINCond = MARGIN_ma_cond and MARGIN_hl_cond
-        #     MRGINCond
         
         @staticmethod
         def brokerage_margin(
@@ -1499,9 +1550,27 @@ class Conds:
             hl_options: str = 'highest',
             hl_nbars: int = 4,
         ):
+            def test():
+                df = glob_obj.get_one_stock_data("VND")
+                ma_use_flag: bool = True 
+                ma_type: str = 'SMA' 
+                ma_len1: int = 5
+                ma_len2: int = 15
+                ma_dir: str = 'crossover'
+                range_use_flag: bool = False
+                range_lower: float = -999
+                range_upper: float = 999
+                hl_use_flag: bool = False
+                hl_options: str = 'highest'
+                hl_nbars: int = 4
+            
+            df = df.copy()
+            df_mg = df.groupby("mapYQ")[["marginLending"]].max()
+            
             src = df['marginLending']
-            ma1 = Ta.ma(src=src, length=ma_len1, ma_type=ma_type)
-            ma2 = Ta.ma(src=src, length=ma_len2, ma_type=ma_type)
+            
+            ma1 = Ta.ma(src=df_mg, length=ma_len1, ma_type=ma_type)
+            ma2 = Ta.ma(src=df_mg, length=ma_len2, ma_type=ma_type)
             ma_cond = Conds.Standards.two_line_conditions(
                 line1=ma1, 
                 line2=ma2, 
@@ -1514,35 +1583,20 @@ class Conds:
             
             def hl_cond():
                 if hl_use_flag:
-                    df_mg = df.groupby("mapYQ")[["marginLending"]].max()
                     func = Ta.is_highest if hl_options == 'highest' else Ta.is_lowest
                     df_mg['matched'] = func(df_mg['marginLending'], hl_nbars)
-                    matched = df["mapYQ"].map(df_mg["matched"])
                     return matched
 
                 return None
             
-            cond = Utils.combine_conditions([ma_cond, hl_cond()])
-            return cond
+            matched = Utils.combine_conditions([ma_cond, hl_cond()])
+            if matched is not None:
+                df_mg['cond'] = matched
+                df['cond'] = df['mapYQ'].map(df_mg['cond'])
+                return df['cond']
+            
+            return None
         
-# DR_MA_useMA = input.bool(defval = false, title = 'MA combination', group = 'Deposit Rate MA conditions')
-# DR_MA_MAType = input.string(defval = 'EMA', title = 'MA Method', inline = 'MA1', options = ['EMA', 'SMA'], group = 'Deposit Rate MA conditions')
-# DR_MA_MALen1 = input.int(defval = 5, title = 'Line 1 MA Length', inline = 'MA2', group = 'Deposit Rate MA conditions')
-# DR_MA_MALen2 = input.int(defval = 15, title = 'Line 2 MA Length', inline = 'MA3', group = 'Deposit Rate MA conditions')
-# DR_MA_EntryCond = input.string(defval = 'crossover', title = 'Entry Conditions',options = ['crossover', 'crossunder', 'above', 'below'],inline = 'MA7', group = 'Deposit Rate MA conditions')
-# DR_MA_useRange = input.bool(defval = false, title = 'Limit Range;', inline = 'MA4', group = 'Deposit Rate MA conditions')
-# DR_MA_lower = input.float(defval = -99999999999, title = 'lower', inline = 'MA4', group = 'Deposit Rate MA conditions')
-# DR_MA_upper = input.float(defval = 99999999999, title = 'upper', inline = 'MA4', group = 'Deposit Rate MA conditions')
-
-# DR_sett_emaLen1 = input.int(5, title = 'EMA Len 1', group = 'Deposit Rate Percentile')
-# DR_sett_emaLen2 = input.int(15, title = 'EMA Len 2', group ='Deposit Rate Percentile')
-# DR_sett_percentilePeriod = input.int(128, title = 'Percentile Period', group = 'Deposit Rate Percentile')
-# DR_input_usePerc = input.bool(defval = false, title = '', inline = 'vnivperc', group = 'Deposit Rate Percentile')
-# DR_input_percentile = input.float(defval = 90, title = 'percentile', inline = 'vnivperc', group = 'Deposit Rate Percentile') / 100
-# DR_input_direct = input.string('higher', options = ['higher', 'lower'], title = '' ,inline = 'vnivperc', group = 'Deposit Rate Percentile')
-# DR_input_usePercDirect = input.bool(false, title = '', inline = 'vnivperc1', group = 'Deposit Rate Percentile')
-# DR_input_percDirect = input.string('EMA1 > EMA2', options = ['EMA1 > EMA2', 'EMA2 > EMA1'], title = 'Compare Dir', inline = 'vnivperc1', group = 'Deposit Rate Percentile')
-
         @staticmethod
         def brokerage_deposit_rate(
             df: pd.DataFrame,
@@ -1685,7 +1739,8 @@ class Conds:
                 std_mult: float = 2
                 std_periods: int = 10
                 
-            df_sector = glob_obj.sectors[sector]['io_data'].copy()
+            df_sector: pd.DataFrame = glob_obj.sectors[sector]['io_data'].copy()
+            df_sector = df_sector[~df_sector[field].isna()]
             
             
             ma_cond = Conds.Standards.two_ma_lines(
@@ -1734,27 +1789,6 @@ class Conds:
                 return cond
             
             return  None
-        
-        # useFishPriceMA = input.bool(defval = false, title = 'Check Fish Price MA', group = '-----------Fish Macro Data')
-        # FishPrice_MAlength1 = input.int(defval = 5, title = 'MA length 1',group = '-----------Fish Macro Data')
-        # FishPrice_MAlength2 = input.int(defval = 15, title = 'MA length 2',group = '-----------Fish Macro Data')
-        # FishPrice_MAlinepos = input.string(defval = 'above', title = 'Chọn vị trí giữa 2 đường MA', options = ['crossover','crossunder','above','below'],group = '-----------Fish Macro Data')
-        # FishPrice_MAplot = input.bool(defval = false, title = 'Plot Fish Price', group = '-----------Fish Macro Data')
-        
-        # useFishPriceChange = input.bool(defval = false, title = 'Check Fish Price Change over N periods', group = '-----------Fish Macro Data')
-        # FishPriceChange_NPeriods = input.int(defval = 5, title = 'N periods', group = '-----------Fish Macro Data')
-        # FishPriceChange_dir      = input.string(defval = 'increase', options = ['increase', 'decrease'], title = 'Direction', group = '-----------Fish Macro Data')
-        # FishPriceChange_lowrange = input.float(defval = 0, title = 'Low Range', inline = 'hog1', group = '-----------Fish Macro Data')
-        # FishPriceChange_highrange = input.float(defval = 10, title = 'High Range', inline = 'hog1',group = '-----------Fish Macro Data' )
-
-        # useFishPriceHLest = input.bool(defval = false, title = 'Check Fish Price Highest / Lowest', group = '-----------Fish Macro Data')
-        # FishPriceHLest            = input.string(defval = 'highest', title = 'Use Highest/Lowest over x periods', options = ['highest','lowest'], inline = 'hog2', group = '-----------Fish Macro Data')
-        # FishPriceXPeriods            = input.int(defval = 4, title = 'periods', inline = 'hog2', group = '-----------Fish Macro Data')
-
-        # useFishPriceStd           = input.bool(defval = false, title = 'Check Fish Price Standard Deviation',  group = '-----------Fish Macro Data')
-        # FishPriceStdPos           = input.string(defval = 'higher', title = '', options = ['higher','lower'], inline = 'hog3', group = '-----------Fish Macro Data')
-        # FishPriceStdLength        = input.int(defval = 10, title ='Length', inline = 'hog3', group = '-----------Fish Macro Data')
-        # FishPriceStdMult          = input.float(defval = 1.0, title = 'Multiplier',inline = 'hog3', group = '-----------Fish Macro Data' )
 
         @staticmethod
         def vhc_us_asp(*args, **kwargs):
@@ -1791,6 +1825,18 @@ class Conds:
         @staticmethod
         def china_p4_cash_spread(*args, **kwargs):
             return Conds.Sectors.check_5sectors_macrodata( *args, sector='fertilizer', field='ChinaP4CashSpread', **kwargs)
+        
+        @staticmethod
+        def dcm_ure(*args, **kwargs):
+            return Conds.Sectors.check_5sectors_macrodata( *args, sector='fertilizer', field='DCM', **kwargs)
+        
+        @staticmethod
+        def dpm_ure(*args, **kwargs):
+            return Conds.Sectors.check_5sectors_macrodata( *args, sector='fertilizer', field='DPM', **kwargs)
+        
+        @staticmethod
+        def ure_future(*args, **kwargs):
+            return Conds.Sectors.check_5sectors_macrodata( *args, sector='fertilizer', field='future', **kwargs)
 
 
     @staticmethod
@@ -1817,26 +1863,8 @@ class Conds:
 
         return None
 
-
     @staticmethod
     def index_cond(df: pd.DataFrame, **index_params):
-        """Compute index condition"""
-        df2 = glob_obj.df_vnindex.copy()
-
-        index_cond = Conds.compute_any_conds(df2, index_params)
-        if index_cond is not None:
-            df2["index_cond"] = index_cond
-            df = pd.merge(df, df2, how="left", on="day")
-            df["index_cond"] = np.where(
-                df["index_cond"].isna(), False, df["index_cond"]
-            )
-            df = df.infer_objects()
-            return df["index_cond"]
-
-        return None
-    
-    @staticmethod
-    def index_cond2(df: pd.DataFrame, index_params):
         """Compute index condition"""
         df2 = glob_obj.df_vnindex.copy()
 
@@ -1944,37 +1972,44 @@ class Simulator:
         loss_thres=5
     ):
 # %%
-        # entry_condition = {
-        #     'price_comp_ma':{
-        #         "ma_len1":5,
-        #         "ma_len2":15,
-        #         "ma_type":"EMA",
-        #         "ma_dir":"crossover",
-        #         "use_flag": True,
-        #     }
-        # }
+        def test():
+            entry_condition = {
+                'price_comp_ma':{
+                    "ma_len1":5,
+                    "ma_len2":15,
+                    "ma_type":"EMA",
+                    "ma_dir":"crossover",
+                    "use_flag": True,
+                }
+            }
 
-        # exit_condition = {
-        #     'price_comp_ma':{
-        #         "ma_len1":5,
-        #         "ma_len2":15,
-        #         "ma_type":"EMA",
-        #         "ma_dir":"below",
-        #         "use_flag": True,
-        #     }
-        # }
+            exit_condition = {
+                'price_comp_ma':{
+                    "ma_len1":5,
+                    "ma_len2":15,
+                    "ma_type":"EMA",
+                    "ma_dir":"below",
+                    "use_flag": False,
+                }
+            }
 
-        # df = df_raw.copy()
-        
-        # day = df['day'].astype(int).values
-        # open_p = df['open'].values
-        # high_p = df['high'].values
-        # low_p = df['low'].values
-        # entry_signals = Conds.compute_any_conds(df, entry_condition)
-        # exit_signals = Conds.compute_any_conds(df, exit_condition)
-        
-        # direction = 1
-        # holding_periods = 15
+            df = df_raw.copy()
+            
+            day = df['day'].astype(int).values
+            open_p = df['open'].values
+            high_p = df['high'].values
+            low_p = df['low'].values
+            entry_signals = Conds.compute_any_conds(df, entry_condition)
+            exit_signals = Conds.compute_any_conds(df, exit_condition)
+            
+            direction = 1
+            
+            use_holding_periods=False
+            holding_periods = 15
+            
+            use_takeprofit_cutloss=False
+            profit_thres=5
+            loss_thres=5
         
         num_trades = 0
         num_win = 0
@@ -2314,11 +2349,11 @@ class Simulator:
             trade_direction="Long"
             use_shift = False,
             n_shift = 15,
-            use_holding_periods = True
+            use_holding_periods = False
             holding_periods=15
             profit_thres=5,
             loss_thres=5
-            use_takeprofit_cutloss = False
+            use_takeprofit_cutloss = True
             compute_start_time="2018_01_01"
             df = df_raw.copy()
             func = Conds.compute_any_conds
@@ -2332,7 +2367,7 @@ class Simulator:
                 'use_range': False,
                 'low_range': 80,
                 'high_range': 100,
-                'use_cross': False,
+                'use_cross': True,
                 'direction': 'crossover',
                 'cross_line': 'Upper band'
                 }
@@ -2352,7 +2387,6 @@ class Simulator:
             df["signal"] = df["signal"].shift(n_shift)
             df["signal"] = df['signal'].fillna(value=False)
                     
-
         exit_signals = Conds.compute_any_conds(df, exit_params)
         df["exitSignal"] = Utils.new_1val_series(False, df) if exit_signals is None else exit_signals
         
