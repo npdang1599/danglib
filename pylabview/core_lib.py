@@ -13,11 +13,11 @@ from danglib.pylabview.src import Fns, sectors_paths
 if "ACCEPT_TC" not in os.environ:
     os.environ["ACCEPT_TC"] = "tôi đồng ý"
 
-today = dt.now().strftime(format="%Y-%m-%d")
-
+HOST = "localhost"
 
 class Adapters:
     """Adapter functions to get data from resources"""
+    
 
     @staticmethod
     def load_stocks_data_from_pickle():
@@ -28,7 +28,7 @@ class Adapters:
     def load_stocks_data_from_main_db():
         """Load stocks data from main db"""
         try:
-            db = MongoClient('ws', 27022)['stockdata']
+            db = MongoClient(HOST, 27022)['stockdata']
             col = db['pylabview_stocks_data']
 
             df = pd.DataFrame(list(col.find({}, {"_id":0})))
@@ -89,7 +89,7 @@ class Adapters:
         Returns:
             pd.DataFrame: ohlcv data of stocks
         """
-        db = MongoClient("ws", 27022)["stockdata"]
+        db = MongoClient(HOST, 27022)["stockdata"]
         col = db["price_cafef_data"]
 
         df = pd.DataFrame(
@@ -142,7 +142,7 @@ class Adapters:
         Returns:
             pd.DataFrame: ohlcv data of stocks
         """
-        db = MongoClient("ws", 27022)["stockdata"]
+        db = MongoClient(HOST, 27022)["stockdata"]
         col = db["price_data"]
 
         df = pd.DataFrame(
@@ -179,7 +179,7 @@ class Adapters:
             pd.DataFrame: ohlcv data
         """
         stock = Vnstock().stock(symbol=ticker, source="VCI")
-        df: pd.DataFrame = stock.quote.history(start="2014-01-01", end=today)
+        df: pd.DataFrame = stock.quote.history(start="2014-01-01", end=dt.now().strftime(format="%Y-%m-%d"))
         df = df.rename(columns={"time": "day"})
         df["day"] = df["day"].astype(str).str.replace("-", "_")
         df = df[df["day"] >= from_day].reset_index(drop=True)
@@ -195,7 +195,7 @@ class Adapters:
         Returns:
             pd.DataFrame: ohlcv data of stocks
         """
-        db = MongoClient("ws", 27022)["stockdata"]
+        db = MongoClient(HOST, 27022)["stockdata"]
         col = db["price_curated"]
 
         # df = pd.DataFrame(list(col.find({},{"_id":0}).limit(20)))
@@ -250,7 +250,7 @@ class Adapters:
         Returns:
             pd.DataFrame: ohlcv data of stocks
         """
-        db = MongoClient("ws", 27022)["stockdata"]
+        db = MongoClient(HOST, 27022)["stockdata"]
         col = db["price_tradingview_2"]
 
         # df = pd.DataFrame(list(col.find({},{"_id":0}).limit(20)))
@@ -297,7 +297,7 @@ class Adapters:
 
     @staticmethod
     def get_stocks_data_from_db_fiinpro(stocks: list, from_day: str = '2017_01_01'):
-        db = MongoClient("ws", 27022)["stockdata"]
+        db = MongoClient(HOST, 27022)["stockdata"]
         col_fiinpro = db['price_fiinpro_data']
         
         dft = pd.DataFrame(list(
@@ -389,7 +389,7 @@ class Adapters:
     
     @staticmethod
     def load_quarter_netincome_from_db_VCI(symbols: list):
-        db = MongoClient("ws", 27022)["stockdata"]
+        db = MongoClient(HOST, 27022)["stockdata"]
         col = db['VCI_income_statement_quarter']
         df = pd.DataFrame(
             list(
@@ -426,7 +426,7 @@ class Adapters:
     @staticmethod
     def load_fiinpro_PE_PB_ttm_daily(stocks, from_day="2016_01_01"):
         from_day = from_day.replace('_','-')
-        db = MongoClient("ws", 27022)["stockdata"]
+        db = MongoClient(HOST, 27022)["stockdata"]
         col = db['fiinpro_ratio_ttm_daily']
         
         df = pd.DataFrame(list(col.find(
@@ -451,7 +451,7 @@ class Adapters:
     @staticmethod
     def load_inventory_data_from_db(stocks, from_day="2016_01_01"):
         from_day = from_day.replace('_','-')
-        db = MongoClient("ws", 27022)["stockdata"]
+        db = MongoClient(HOST, 27022)["stockdata"]
         col = db['combined_price_fa']
         
         df = pd.DataFrame(list(col.find(
@@ -481,7 +481,7 @@ class Adapters:
             stocks = ['HPG', 'SSI', 'VND', 'STB']
             from_day = '2016_01_01'
             
-        db = MongoClient("ws", 27022)['stockdata']
+        db = MongoClient(HOST, 27022)['stockdata']
         
         # get YQ mapped data
         col1 = db['combined_price_fa']
@@ -610,7 +610,7 @@ class Adapters:
             dfres.to_pickle(fn)
         if to_mongo:
             if db_collection is None:
-                db = MongoClient('ws', 27022)['stockdata']
+                db = MongoClient(HOST, 27022)['stockdata']
                 db_collection = db['pylabview_stocks_data']
             db_collection.drop()
             db_collection.insert_many(dfres.to_dict("records"))
