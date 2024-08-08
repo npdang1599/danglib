@@ -167,6 +167,11 @@ class Globs:
     def load_sectors_data(self):
         self.sectors = Adapters.load_sectors_data()
 
+    def load_all_data(self):
+        self.load_stocks_data()
+        self.load_vnindex()
+        self.load_sectors_data() 
+
 
 class Conds:
     """Custom condition funcitions"""
@@ -1558,15 +1563,7 @@ def run():
     Vectorized.compute_all(df, recompute_signals=True)
         
 
-
 glob_obj = Globs()
-
-glob_obj.load_stocks_data()
-glob_obj.load_vnindex()
-glob_obj.load_sectors_data()
-
-df_raw = glob_obj.df_stocks.copy()
-df = df_raw.copy()
 
 
 def get_from_day(df: pd.DataFrame, from_day, col = None):
@@ -1575,3 +1572,8 @@ def get_from_day(df: pd.DataFrame, from_day, col = None):
     else:
         df = df[df.index >= from_day]
     return df
+
+if __name__ == "__main__":
+    glob_obj.load_all_data()
+    df_raw = glob_obj.df_stocks.copy()
+    df = df_raw.copy()

@@ -233,6 +233,12 @@ class Globs:
                 params['stock_scanner']['use_shift'] = use_shift
                 params['stock_scanner']['n_shift'] = n_shift
         return params  
+    
+    def load_all_data(self):
+        self.load_stocks_data()
+        self.load_vnindex()
+        self.load_sectors_data() 
+
 
 class Conds:
     """Custom condition funcitions"""
@@ -3510,8 +3516,8 @@ class Scanner:
 
 glob_obj = Globs()
 # glob_obj.load_stocks_data()
-glob_obj.load_vnindex()
-glob_obj.load_sectors_data()
+# glob_obj.load_vnindex()
+# glob_obj.load_sectors_data()
 
 def test():
     df = glob_obj.get_one_stock_data("HPG")
@@ -3538,6 +3544,7 @@ def test():
     
     
 if __name__ == "__main__":
+    glob_obj.load_all_data()
 
     df_raw = glob_obj.get_one_stock_data("SSI")
     try:
