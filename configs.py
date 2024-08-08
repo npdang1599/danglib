@@ -1,1 +1,2 @@
-SERVER_NAME = 'RZ'
+import socket
+SERVER_NAME = socket.gethostname()

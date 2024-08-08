@@ -3436,6 +3436,78 @@ class Scanner:
         trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
         return res_df, trades_df
 
+
+    @staticmethod
+    def scan_multiple_stocks_v4(
+        func, 
+        params, 
+        stocks=None,
+        trade_direction="Long", 
+        use_shift=False,
+        n_shift=15,
+        holding_periods=60):
+        """Backtest on multiple stocks"""
+        from danglib.pylabview.celery_worker import scan_one_stock_v3, clean_redis
+
+        df_all_stocks = glob_obj.df_stocks
+        if stocks is None:
+            stocks = glob_obj.df_stocks
+        else:
+            df_all_stocks= df_all_stocks[df_all_stocks['stock'].isin(stocks)]
+
+        clean_redis()
+        
+        sum_ls = []
+        trades_ls = []
+        err_stocks = {}
+        task_dic = {}
+        
+        params = Globs.old_saved_adapters(params)
+        
+        for stock, df_stock in df_all_stocks.groupby("stock"):
+            df_stock = df_stock.reset_index(drop=True)
+
+            task = scan_one_stock_v3.delay(
+                df_stock, 
+                func, 
+                params=params,
+                name=stock,
+                trade_direction=trade_direction,
+                use_shift=use_shift,
+                n_shift=n_shift,
+                holding_periods=holding_periods
+            )
+            
+            task_dic[stock] = task
+            
+        while any(t.status!='SUCCESS' for t in task_dic.values()):
+            pass
+
+        for k, v in task_dic.items():
+            bt = v.result
+            if bt is not None:
+                sum_ls.append(bt.result)
+                trades_ls.append(bt.df)
+                
+            
+        res_df = pd.DataFrame(sum_ls)
+        res_df = res_df[
+            [
+                "name",
+                "numTrade",
+                "winrate",
+                "profitFactor",
+                "avgReturn",
+                "avgUpside",
+                "avgDownside",
+            ]
+        ].round(2)
+        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups)
+
+        trades_df = pd.concat(trades_ls)    
+        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
+        return res_df, trades_df
+
 glob_obj = Globs()
 # glob_obj.load_stocks_data()
 glob_obj.load_vnindex()
