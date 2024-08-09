@@ -2,9 +2,9 @@
 
 from celery import Celery
 from redis import Redis
-from danglib.pylabview.funcs import Simulator, pd
+from danglib.pylabview.funcs import Simulator, pd, glob_obj
 import logging
-
+glob_obj.load_all_data()
 class CELERY_RESOURCES:
     HOST = 'localhost'
     CELERY_INPUT_REDIS = 8
