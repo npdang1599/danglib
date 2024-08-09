@@ -59,8 +59,44 @@ class Globs:
             "s_bbpctb": Series_Conds.bbpctb,
             "s_ursi": Series_Conds.ursi,
             "s_macd": Series_Conds.macd,
+
+            "filter_sector": FilteringStocks.filter_sector,
+            "filter_beta": FilteringStocks.filter_beta,
+            "filter_marketcap_index": FilteringStocks.filter_marketcap_index,
+            "filter_marketcap": FilteringStocks.filter_marketcap,
+            "filter_ta_fa": FilteringStocks.filter_ta_fa
         }
         self.sectors = {}
+        self.stocks_classified_df = None
+
+    def get_sectors_stocks(self):
+
+        def test():
+            def_stocks = glob_obj.stocks
+        def_stocks = self.stocks
+        import ast
+        
+        db = MongoClient("localhost", 27022)["pylabview_db"]
+        col = db['watchlist']
+        df_raw = pd.DataFrame(col.find({},{'_id':0}))
+        df_raw = df_raw[df_raw.index < 20]
+        sectors = dict(zip(df_raw['watchlist_name'], df_raw['watchlist_params'].map(ast.literal_eval)))
+
+        data_list = []
+        for sector, stocks in sectors.items():
+            for stock in stocks:
+                if stock in def_stocks:
+                    data_list.append({'stock': stock, 'sector': sector})
+
+        df = pd.DataFrame(data_list)
+
+        for stock in def_stocks:
+            if stock not in df['stock'].tolist():
+                data_list.append({'stock':stock, 'sector':'other'})
+
+        df = pd.DataFrame(data_list)
+        
+        return df
 
     def load_stocks_data(self):
         """run to load stocks data"""
@@ -167,10 +203,25 @@ class Globs:
     def load_sectors_data(self):
         self.sectors = Adapters.load_sectors_data()
 
+    def classify_stocks(self):
+        df = self.get_sectors_stocks()
+        dic_group = self.dic_groups
+        stocks = self.stocks
+        def test():
+            df = glob_obj.get_sectors_stocks()
+            dic_group = glob_obj.dic_groups
+            stocks = glob_obj.stocks
+
+        df['beta'] = df['stock'].map(dic_group)
+        df['marketCapIndex'] = df['stock'].map(Adapters.classify_by_marketcap(stocks))
+        self.stocks_classified_df = df
+
+
     def load_all_data(self):
         self.load_stocks_data()
         self.load_vnindex()
         self.load_sectors_data() 
+        self.classify_stocks()
 
 
 class Conds:
@@ -832,14 +883,6 @@ class Conds:
         df2 = glob_obj.df_vnindex.copy()
 
         df2['cond']= Conds.compute_any_conds(df2, function2, *args, **kwargs)
-        # params = {'lower_thres': 80.0,
-        #             'direction': 'below',
-        #             'function': 's_ursi',
-        #             'use_vs_signal': True,
-        #             'use_range': True,
-        #             'upper_thres': 100.0,
-        #             'use_flag': True}
-        # df2['cond'] = Conds.compute_any_conds(df2, **params)
 
         df2 = pd.merge(df['day'].reset_index(drop=True), df2, on='day', how='left' )
         df2['cond'] = df2['cond'].fillna(False)
@@ -862,6 +905,142 @@ class Conds:
         func = glob_obj.function_map[function]
         cond = func(df, *args, **kwargs)
         return cond
+
+    @staticmethod
+    def compute_any_conds2(df: pd.DataFrame, functions_params_dic: dict, *args):
+        """Compute and combine any conditions"""
+        # df = df.copy()
+        conds = []
+        try:
+            for func_name, params in functions_params_dic.items():
+                if func_name == 'stock_scanner':
+                    continue
+                if(func_name not in glob_obj.function_map): 
+                    continue
+                func = glob_obj.function_map[func_name]
+                cond = func(df, **params)
+                if cond is not None:
+                    conds.append(cond)
+        except Exception as e:
+            conds = []
+            logging.error(f"function `compute_any_conds` error: {e}")
+
+        if len(conds) > 0:
+            return Utils.combine_conditions(conds)
+
+        return None
+    
+class FilteringStocks:
+
+    @staticmethod
+    def filter_sector(
+        values: list = None,
+        use_flag: bool = False,
+    ):
+        if use_flag:
+            df = glob_obj.stocks_classified_df
+            df = df[df['sector'].isin(values)]
+            return df['stock'].to_list()
+        
+        return None
+    
+    @staticmethod
+    def filter_beta(
+        values: list = None,
+        use_flag: bool = False
+    ):
+        if use_flag:
+            df = glob_obj.stocks_classified_df
+            df = df[df['beta'].isin(values)]
+            return df['stock'].to_list()
+        
+        return None
+    
+    @staticmethod
+    def filter_marketcap_index(
+        values: list = None,
+        use_flag: bool = False
+    ):
+        if use_flag:
+            df = glob_obj.stocks_classified_df
+            df = df[df['marketCapIndex'].isin(values)]
+            return df['stock'].to_list()
+        
+        return None
+    
+    @staticmethod
+    def filter_marketcap(
+        day = None,
+        lower_range = 0,
+        upper_range = 999999999,
+        use_flag: bool = False
+    ):
+        def test():
+            lower_range = 0
+            upper_range = 3000
+            day = '2024_08_08'
+
+        if use_flag:
+            marketcap: pd.Series = glob_obj.df_stocks.loc[day, 'marketCap']
+            res = marketcap[(marketcap > lower_range )& (marketcap < upper_range)]
+            return list(res.index)
+        
+        return None
+    
+    @staticmethod
+    def filter_ta_fa(day, use_flag = False, **functions_params_dic):
+        def test():
+            functions_params_dic={
+                'price_change': {
+                    'use_flag': True,
+                    'lower_thres': 2
+                }
+            }
+        if use_flag:
+            df = glob_obj.df_stocks
+
+            matched: pd.Series = Conds.compute_any_conds2(df, functions_params_dic).loc[day]
+            res = matched[matched == True]
+            return list(res.index)
+        
+        return None
+    
+    @staticmethod
+    def filter_all(filter_functions_params_dic: dict):
+        def test():
+            filter_functions_params_dic = {
+                'filter_ta_fa':{
+                    'day': '2024_08_08',
+                    'use_flag':True,
+                    'price_change': {
+                        'use_flag': True,
+                        'lower_thres': 2
+                    },
+                    'index_cond': {
+                        'price_change':{
+                            'use_flag': True,
+                            'lower_thres': 3
+                        }
+                    }
+                }
+            }
+
+        stocks_list = glob_obj.stocks
+        try:
+            for func_name, params in filter_functions_params_dic.items():
+                if func_name == 'stock_scanner':
+                    continue
+                if(func_name not in glob_obj.function_map): 
+                    continue
+                func = glob_obj.function_map[func_name]
+                tmp_ls = func(**params)
+                if tmp_ls is not None:
+                    stocks_list = list(set(stocks_list).intersection(tmp_ls))
+
+        except Exception as e:
+            logging.error(f"function `filter_all` error: {e}")
+
+        return stocks_list
 
 
 class Vectorized:
@@ -1461,10 +1640,7 @@ class Vectorized:
 
         stocks_map = {k: v for k, v in enumerate(df_return.columns)}
 
-
         psave("return_array", return_num)
-
-
 
         def compute_signals():
             params_df: pd.DataFrame = Vectorized.create_params_sets()

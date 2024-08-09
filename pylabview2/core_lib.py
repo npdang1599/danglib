@@ -19,6 +19,44 @@ class Adapters:
     """Adapter functions to get data from resources"""
 
     @staticmethod
+    def get_marketcap_stocks(symbol):
+
+        import requests
+        IBOARD_API = 'https://iboard-query.ssi.com.vn/v2'
+        # path = '/stock/group/VNSML'
+        headers = {
+            "user-agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36",
+            "Host":"iboard-query.ssi.com.vn",
+            "Origin": "https://iboard.ssi.com.vn",
+        }
+
+        resp = requests.get(IBOARD_API + f'/stock/group/{symbol}', headers=headers)
+        data = resp.json()
+        stocks = []
+        
+        if data['code'] == 'SUCCESS':
+            for item in data['data']:
+                if 'ss' in item:
+                    stocks.append(item['ss'])
+        return stocks
+    
+    @staticmethod
+    def classify_by_marketcap(stocks):
+        classify_types = ['VNSML', 'VNMID', 'VN30']
+
+        df = pd.DataFrame(stocks, columns=['stock'])
+
+        dic = {}
+        for t in classify_types:
+            for i in Adapters.get_marketcap_stocks(t):
+                dic[i] = t
+
+        df["marketCapIndex"] = df['stock'].map(dic)
+        df['marketCapIndex'] = df['marketCapIndex'].fillna('other')
+
+        return dict(zip(df['stock'], df['marketCapIndex']))
+
+    @staticmethod
     def load_stocks_data_from_pickle():
         """Load stocks data from pickle file"""
         return pd.read_pickle(Fns.pickle_stocks_data)

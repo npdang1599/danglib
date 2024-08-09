@@ -3238,59 +3238,7 @@ class Scanner:
         profit_thres=5,
         loss_thres=5
         ):
-        # %%
-        # func = Conds.compute_any_conds
-        # stocks=None
-        # trade_direction="Long"
-        # holding_periods=15
-        # params = {
-        #     'china_hrc': {
-        #         'ma_use_flag': True,
-        #         'ma_len1': 5,
-        #         'ma_len2': 15,
-        #         'ma_type': 'EMA',
-        #         'ma_dir': 'crossover',
-        #         'hl_use_flag': False,
-        #         'hl_dir': 'Increase',
-        #         'hl_nbars': 10,
-        #         'hl_lower': 5,
-        #         'hl_upper': 100
-        #     },
-        #     'coking_coal': {
-        #         'ma_use_flag': False,
-        #         'ma_len1': 5,
-        #         'ma_len2': 15,
-        #         'ma_type': 'EMA',
-        #         'ma_dir': 'crossover',
-        #         'hl_use_flag': False,
-        #         'hl_dir': 'Increase',
-        #         'hl_nbars': 10,
-        #         'hl_lower': 5,
-        #         'hl_upper': 100
-        #     },
-        #     'iron_ore': {
-        #         'ma_use_flag': False,
-        #         'ma_len1': 5,
-        #         'ma_len2': 15,
-        #         'ma_type': 'EMA',
-        #         'ma_dir': 'crossover',
-        #         'hl_use_flag': False,
-        #         'hl_dir': 'Increase',
-        #         'hl_nbars': 10,
-        #         'hl_lower': 5,
-        #         'hl_upper': 100
-        #     },
-        #     # 'exit_cond':{
-        #     #     'price_comp_ma':{
-        #     #         "ma_len1":5,
-        #     #         "ma_len2":15,
-        #     #         "ma_type":"EMA",
-        #     #         "ma_dir":"crossunder",
-        #     #         "use_flag": True,
-        #     #     }
-        #     # }
-        # }
-        
+
         # exit_params = params.pop('exit_cond') if 'exit_cond' in params else {}
         """Backtest on multiple stocks"""  
         from danglib.pylabview.celery_worker import scan_one_stock_v2, clean_redis
@@ -3455,12 +3403,12 @@ class Scanner:
         """Backtest on multiple stocks"""
         from danglib.pylabview.celery_worker import scan_one_stock_v3, clean_redis
 
-        df_all_stocks = glob_obj.df_stocks
+        df_all_stocks = glob_obj.df_stocks.copy()
         if stocks is None:
             stocks = glob_obj.df_stocks
         else:
             df_all_stocks= df_all_stocks[df_all_stocks['stock'].isin(stocks)]
-
+        df_all_stocks = df_all_stocks.pivot(index = 'day', columns = 'stock')
         clean_redis()
         
         sum_ls = []
@@ -3470,9 +3418,11 @@ class Scanner:
         
         params = Globs.old_saved_adapters(params)
         
-        for stock, df_stock in df_all_stocks.groupby("stock"):
-            df_stock = df_stock.reset_index(drop=True)
-
+        # for stock, df_stock in df_all_stocks.groupby("stock"):
+        for stock in df_all_stocks.columns.get_level_values(level='stock'):
+            df_stock = df_all_stocks.xs(stock,level = 'stock', axis=1)
+            df_stock = df_stock.reset_index(drop=False)
+            df_stock['stock'] = stock
             task = scan_one_stock_v3.delay(
                 df_stock, 
                 func, 
@@ -3530,22 +3480,26 @@ def test():
             }
         }
     )
-    res, df = Scanner.scan_multiple_stocks3(
+
+    Conds.compute_any_conds(df, params)
+
+    res, df = Scanner.scan_multiple_stocks_v4(
             func=Conds.compute_any_conds,
             params=params,
             stocks=['HPG', 'SSI', 'CTR'],
             trade_direction='Long', 
-            use_holding_periods=True,
+            # use_holding_periods=True,
             holding_periods=15,
-            use_takeprofit_cutloss=False,
-            profit_thres=5,
-            loss_thres=5
+            # use_takeprofit_cutloss=False,
+            # profit_thres=5,
+            # loss_thres=5
         )
     
-    
+
+
 if __name__ == "__main__":
     glob_obj.load_all_data()
-
+    
     df_raw = glob_obj.get_one_stock_data("SSI")
     try:
         # Tạo một đối tượng ArgumentParser
