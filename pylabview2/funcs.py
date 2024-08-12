@@ -44,6 +44,7 @@ class Globs:
             "ursi": Conds.ursi,
             "macd": Conds.macd,
             "index_cond": Conds.index_cond,
+            "index_cond2": Conds.index_cond2,
             "lookback_cond": Conds.lookback_cond,
 
             "s_price_change": Series_Conds.price_change,
@@ -64,7 +65,6 @@ class Globs:
             "filter_beta": FilteringStocks.filter_beta,
             "filter_marketcap_index": FilteringStocks.filter_marketcap_index,
             "filter_marketcap": FilteringStocks.filter_marketcap,
-            "filter_ta_fa": FilteringStocks.filter_ta_fa
         }
         self.sectors = {}
         self.stocks_classified_df = None
@@ -123,9 +123,10 @@ class Globs:
         return df
     
     def load_vnindex(self):
-        self.df_vnindex: pd.DataFrame = Adapters.get_stock_from_vnstock(
-            "VNINDEX", from_day=self.data_from_day
-        )
+        # self.df_vnindex: pd.DataFrame = Adapters.get_stock_from_vnstock(
+        #     "VNINDEX", from_day=self.data_from_day
+        # )
+        self.df_vnindex: pd.DataFrame = Adapters.get_vnindex_from_db()
 
     def gen_stocks_data(self, fn=Fns.pickle_stocks_data, collection=None, send_viber=False):
         try:
@@ -894,6 +895,23 @@ class Conds:
         return matched
     
     @staticmethod
+    def index_cond2(df: pd.DataFrame, **kwargs):
+        df2 = glob_obj.df_vnindex.copy()
+
+        df2['cond']= Conds.compute_any_conds2(df2, kwargs)
+
+        df2 = pd.merge(df['day'].reset_index(drop=True), df2, on='day', how='left' )
+        df2['cond'] = df2['cond'].fillna(False)
+        df2 = df2.set_index('day')  
+
+        matched = df['close'].notna()
+        matched = matched.apply(lambda col: col & df2['cond'])
+
+        return matched
+
+
+    
+    @staticmethod
     def lookback_cond(df: pd.DataFrame, function2, *args, **kwargs):
         """Compute lookback condition"""
         lookback_cond: pd.DataFrame = Conds.compute_any_conds(df, function2, *args, **kwargs)
@@ -934,7 +952,7 @@ class FilteringStocks:
 
     @staticmethod
     def filter_sector(
-        values: list = None,
+        values: list,
         use_flag: bool = False,
     ):
         if use_flag:
@@ -987,58 +1005,62 @@ class FilteringStocks:
         
         return None
     
-    @staticmethod
-    def filter_ta_fa(day, use_flag = False, **functions_params_dic):
-        def test():
-            functions_params_dic={
-                'price_change': {
-                    'use_flag': True,
-                    'lower_thres': 2
-                }
-            }
-        if use_flag:
-            df = glob_obj.df_stocks
+    # @staticmethod
+    # def filter_ta_fa(day, use_flag = False, **functions_params_dic):
+    #     def test():
+    #         functions_params_dic={
+    #             'index_cond2': {
+    #                 'price_change':{
+    #                     'use_flag': True,
+    #                     'lower_thres': 0.5
+    #                 }
+    #             }
+    #         }
+    #     if use_flag:
+    #         df = glob_obj.df_stocks
 
-            matched: pd.Series = Conds.compute_any_conds2(df, functions_params_dic).loc[day]
-            res = matched[matched == True]
-            return list(res.index)
+    #         matched: pd.Series = Conds.compute_any_conds2(df, functions_params_dic).loc[day]
+    #         res = matched[matched == True]
+    #         return list(res.index)
         
-        return None
+    #     return None
     
     @staticmethod
-    def filter_all(filter_functions_params_dic: dict):
+    def filter_all(filter_functions_params_dic: dict, day=None):
         def test():
+            Conds.FA
             filter_functions_params_dic = {
-                'filter_ta_fa':{
-                    'day': '2024_08_08',
-                    'use_flag':True,
-                    'price_change': {
-                        'use_flag': True,
-                        'lower_thres': 2
-                    },
-                    'index_cond': {
-                        'price_change':{
-                            'use_flag': True,
-                            'lower_thres': 3
-                        }
-                    }
+                'net_income': {
+                    'values': ['Medium'],
+                    'use_flag': True
                 }
             }
+            day = '2024_08_09'
+
+
 
         stocks_list = glob_obj.stocks
-        try:
-            for func_name, params in filter_functions_params_dic.items():
+        for func_name, params in filter_functions_params_dic.items():
+            try:
                 if func_name == 'stock_scanner':
                     continue
                 if(func_name not in glob_obj.function_map): 
                     continue
                 func = glob_obj.function_map[func_name]
-                tmp_ls = func(**params)
-                if tmp_ls is not None:
-                    stocks_list = list(set(stocks_list).intersection(tmp_ls))
+                if "FilteringStocks" in str(func):
+                    tmp = func(**params)
+                else:
+                    df = glob_obj.df_stocks
+                    tmp = func(df, **params)
+                    if tmp is not None:
+                        tmp = tmp.loc[day]
+                        tmp = list(tmp[tmp==True].index)
 
-        except Exception as e:
-            logging.error(f"function `filter_all` error: {e}")
+                if tmp is not None:
+                    stocks_list = list(set(stocks_list).intersection(tmp))
+
+            except Exception as e:
+                logging.error(f"function `filter_all` error: {func_name}: {e}", exc_info=True)
 
         return stocks_list
 
@@ -1740,7 +1762,24 @@ def run():
         
 
 glob_obj = Globs()
+glob_obj.load_all_data()
 
+def test_tai():
+    params_df: pd.DataFrame = Vectorized.create_params_sets()
+    condition1 = params_df.iloc[774].dropna()
+    condition1['use_flag'] = True
+
+    condition2 = params_df.iloc[1325].dropna()
+    condition2['use_flag'] = True
+
+    signals1: pd.DataFrame = Conds.compute_any_conds(df, **condition1)
+    signals1 = signals1[signals1.index >= '2018_01_01']
+
+    signals2: pd.DataFrame = Conds.compute_any_conds(df, **condition2)
+    signals2 = signals2[signals2.index >= '2018_01_01']
+
+    signals = signals1 & signals2
+    signals = signals[signals.index >= '2018_01_01']
 
 def get_from_day(df: pd.DataFrame, from_day, col = None):
     if col is not None:
