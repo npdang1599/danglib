@@ -1893,11 +1893,59 @@ class Conds:
     @staticmethod
     def lookback_cond(df: pd.DataFrame, n_bars: int, **lookback_params: dict):
         """Compute lookback condition"""
-        lookback_cond = Conds.compute_any_conds(df, lookback_params)
-        if lookback_cond is not None:
-            return lookback_cond.rolling(n_bars, closed = 'left').max().fillna(False).astype(bool)
+        def test():
+            df: pd.DataFrame = df_raw.copy()
+            n_bars = 5
+            lookback_params =  {
+                'lookback_cond':{
+                    'price_change':{
+                        'periods':  2,
+                        'direction':  "increase",
+                        'lower_thres':  6,
+                        'upper_thres':  100,
+                        'use_flag':  True
+                    },
+                    'bbpctb':{
+                        'length': 20,
+                        'mult':  2.5,
+                        'use_range':  False,
+                        'low_range':  80,
+                        'high_range':  100,
+                        'use_cross':  True,
+                        'direction':  "crossover",
+                        'cross_line':  "Lower band",
+                        'use_flag':  True
+                    }
+                }
+            }
+
+        conds = []
+        for func_name, func_params in lookback_params.items():
+            if func_name == 'stock_scanner':
+                continue
+            if(func_name not in glob_obj.function_map): 
+                continue
+            func = glob_obj.function_map[func_name]
+            cond: pd.Series = func(df, **func_params)
+            if cond is not None:
+                cond = cond.rolling(n_bars, closed = 'left').max().fillna(False).astype(bool)
+                conds.append(cond)
+
+        if len(conds) > 0:
+            return Utils.combine_conditions(conds)
 
         return None
+    
+# def test():
+#     import json
+#     a = '{"stock_scanner": {"trade_direction": "Long", "use_shift": false, "n_shift": 15, "holding_periods": 15}, "price_change": {"use_flag": false, "periods": 1, "direction": "increase", "lower_thres": 0, "upper_thres": 100}, "price_comp_ma": {"use_flag": false, "ma_len1": 5, "ma_len2": 15, "ma_type": "EMA", "ma_dir": "crossover"}, "price_change_vs_hl": {"use_flag": false, "direction": "Increase", "nbars": 10, "low_range": 5, "high_range": 100}, "price_gap": {"use_flag": false, "gap_dir": "Use Gap Up"}, "price_highest_lowest": {"use_flag": false, "method": "Highest", "num_bars": 10}, "consecutive_conditional_bars": {"use_flag": false, "src1_name": "close", "src2_name": "close", "direction": "Increase", "num_bars": 5, "num_matched": 4}, "vol_comp_ma": {"use_flag": false, "n_bars": 1, "ma_len": 20, "comp_ma_dir": "higher", "comp_ma_perc": 20}, "vol_percentile": {"use_flag": false, "ma_length": 10, "ranking_window": 128, "low_range": 0, "high_range": 100}, "consecutive_squeezes": {"bb_length": 20, "length_kc": 20, "mult_kc": 1.5, "use_true_range": true, "use_flag": false, "num_bars": 1}, "ursi": {"length": 14, "smo_type1": "RMA", "smooth": 14, "smo_type2": "EMA", "use_flag": false, "use_vs_signal": false, "direction": "crossover", "use_range": false, "lower_thres": 0, "upper_thres": 0}, "macd": {"r2_period": 20, "fast": 10, "slow": 20, "signal_length": 9, "use_flag": false, "use_vs_signal": false, "direction": "crossover", "use_range": false, "lower_thres": 0, "upper_thres": 0}, "bbwp": {"src_name": "close", "basic_type": "SMA", "bbwp_len": 13, "bbwp_lkbk": 128, "use_flag": false, "use_low_thres": false, "low_thres": 20, "use_high_thres": false, "high_thres": 80}, "bbpctb": {"src_name": "close", "length": 20, "mult": 2, "use_flag": false, "use_range": false, "low_range": 80, "high_range": 100, "use_cross": false, "direction": "crossover", "cross_line": "Upper band"}, "net_income": {"use_flag": false, "calc_type": "QoQ", "roll_len": 2, "direction": "positive", "percentage": 0}, "index_cond": {"price_comp_ma": {"use_flag": false, "ma_len1": 5, "ma_len2": 15, "ma_type": "EMA", "ma_dir": "crossover"}, "ursi": {"length": 14, "smo_type1": "RMA", "smooth": 14, "smo_type2": "EMA", "use_flag": false, "use_vs_signal": false, "direction": "crossover", "use_range": false, "lower_thres": 0, "upper_thres": 0}, "bbwp": {"src_name": "close", "basic_type": "SMA", "bbwp_len": 13, "bbwp_lkbk": 128, "use_flag": false, "use_low_thres": false, "low_thres": 20, "use_high_thres": false, "high_thres": 80}, "bbpctb": {"src_name": "close", "length": 20, "mult": 2, "use_flag": false, "use_range": false, "low_range": 80, "high_range": 100, "use_cross": false, "direction": "crossover", "cross_line": "Upper band"}}, "lookback_cond": {"n_bars": 5, "price_change": {"use_flag": true, "periods": 2, "direction": "increase", "lower_thres": 6, "upper_thres": 100}, "price_comp_ma": {"use_flag": false, "ma_len1": 5, "ma_len2": 15, "ma_type": "EMA", "ma_dir": "crossover"}, "price_gap": {"use_flag": false, "gap_dir": "Use Gap Up"}, "price_change_vs_hl": {"use_flag": false, "direction": "Increase", "nbars": 10, "low_range": 5, "high_range": 100}, "price_highest_lowest": {"use_flag": false, "method": "Highest", "num_bars": 10}, "consecutive_conditional_bars": {"use_flag": false, "src1_name": "close", "src2_name": "close", "direction": "Increase", "num_bars": 5, "num_matched": 4}, "vol_comp_ma": {"use_flag": false, "n_bars": 1, "ma_len": 20, "comp_ma_dir": "higher", "comp_ma_perc": 20}, "vol_percentile": {"use_flag": false, "ma_length": 10, "ranking_window": 128, "low_range": 0, "high_range": 100}, "consecutive_squeezes": {"bb_length": 20, "length_kc": 20, "mult_kc": 1.5, "use_true_range": true, "use_flag": false, "num_bars": 1}, "ursi": {"length": 14, "smo_type1": "RMA", "smooth": 14, "smo_type2": "EMA", "use_flag": false, "use_vs_signal": false, "direction": "crossover", "use_range": false, "lower_thres": 0, "upper_thres": 0}, "macd": {"r2_period": 20, "fast": 10, "slow": 20, "signal_length": 9, "use_flag": false, "use_vs_signal": false, "direction": "crossover", "use_range": false, "lower_thres": 0, "upper_thres": 0}, "bbwp": {"src_name": "close", "basic_type": "SMA", "bbwp_len": 13, "bbwp_lkbk": 128, "use_flag": false, "use_low_thres": false, "low_thres": 20, "use_high_thres": false, "high_thres": 80}, "bbpctb": {"src_name": "close", "length": 20, "mult": 2.5, "use_flag": true, "use_range": false, "low_range": 80, "high_range": 100, "use_cross": true, "direction": "crossover", "cross_line": "Lower band"}}, "default_selector_stocks": []}'
+#     b: dict = json.loads(a)
+#     b.pop('stock_scanner')
+#     b.pop('default_selector_stocks')
+#     b.keys()
+#     params = {"lookback_cond":b['lookback_cond']}
+    
+#     Conds.compute_any_conds(df_raw, params)
 
 class Simulator:
     """Backtest class"""
