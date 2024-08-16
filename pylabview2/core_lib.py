@@ -759,6 +759,21 @@ class Ta:
         return src.ewm(span=length, adjust=False).mean()
 
     @staticmethod
+    def rma(src: pd.Series, length):
+        """Moving average used in RSI.
+        It is the exponentially weighted moving average with alpha = 1 / length.
+
+        Args:
+            src (pd.Series): Series of values to process.
+            length (_type_): Number of bars (length).
+
+        Returns:
+            pd.Series: Exponential moving average of source with alpha = 1 / length.
+        """
+        length = int(length)
+        return src.ewm(alpha=1 / length, adjust=False).mean()
+
+    @staticmethod
     def ma(src: pd.Series, length, ma_type):
         """
         if ma_type == "EMA":
@@ -773,6 +788,8 @@ class Ta:
             return Ta.ema(src, length)
         if ma_type == "SMA":
             return Ta.sma(src, length)
+        if ma_type == "RMA":
+            return Ta.rma(src, length)
         return Ta.sma(src, length)
     
     @staticmethod
@@ -904,6 +921,16 @@ class Ta:
             columns=sqz_on.columns,
             index=sqz_on.index
         )
+        def test2():
+            dft = sqz_on['ABB'].copy().to_frame('sqz_on')
+            dft['sqz_ma'] = sqz_ma['ABB']
+            dft['sqz_range'] = sqz_range['ABB']
+            dft['rangema'] = rangema['ABB']
+            dft['lower_bb'] = lower_bb['ABB']
+            dft['lower_kc'] = lower_kc['ABB']
+            dft['upper_bb'] = upper_bb['ABB']
+            dft['upper_kc'] = upper_kc['ABB']
+            dft.loc['2021_01_25']
 
         return sqz_on, sqz_off, no_sqz
     

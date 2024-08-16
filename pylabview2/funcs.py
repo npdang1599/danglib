@@ -10,6 +10,7 @@ from danglib.chatbots.viberbot import F5bot
 from danglib.utils import write_pickle, walk_through_files
 from tqdm import tqdm
 from dc_server.lazy_core import gen_plasma_functions
+import ast
 
 pd.options.mode.chained_assignment = None
 
@@ -28,7 +29,8 @@ class Globs:
         self.strategies_dic = {}
         self.strategies = []
         self.stocks, self.dic_groups = Adapters.get_stocks_beta_group()
-        self.df_stocks = pd.DataFrame()
+        self.df_stocks: pd.DataFrame = None
+        self.days = None,
         self.function_map = {
             "price_change": Conds.price_change,
             "price_change_vs_hl": Conds.price_change_vs_hl,
@@ -46,6 +48,7 @@ class Globs:
             "index_cond": Conds.index_cond,
             "index_cond2": Conds.index_cond2,
             "lookback_cond": Conds.lookback_cond,
+            "lookback_cond2": Conds.lookback_cond2,
 
             "s_price_change": Series_Conds.price_change,
             "s_price_change_vs_hl": Series_Conds.price_change_vs_hl,
@@ -65,6 +68,7 @@ class Globs:
             "filter_beta": FilteringStocks.filter_beta,
             "filter_marketcap_index": FilteringStocks.filter_marketcap_index,
             "filter_marketcap": FilteringStocks.filter_marketcap,
+            "custom_stocks_list": FilteringStocks.custom_stocks_list,
         }
         self.sectors = {}
         self.stocks_classified_df = None
@@ -105,7 +109,9 @@ class Globs:
         df_stocks = df_stocks.pivot(index='day', columns='stock')
         df_stocks['day'] = df_stocks.index
 
+
         self.df_stocks = df_stocks
+        self.days = df_stocks['day'].to_list()
 
     def load_stocks_data_pickle(self):
         """Load data from pickle"""
@@ -632,11 +638,11 @@ class Conds:
         if use_flag:
             num_bars = int(num_bars)
             # Calculating squeeze
-            sqz_on, _, no_sqz  = Ta.squeeze(
+            sqz_on, sqz_off, no_sqz  = Ta.squeeze(
                 df, src_name, bb_length, length_kc, mult_kc, use_true_range
             )
             if use_no_sqz:
-                return no_sqz
+                return sqz_off
             else:
                 # Count consecutive squeeze on
                 cons_sqz_num = Utils.count_consecutive(sqz_on)
@@ -882,6 +888,17 @@ class Conds:
         """Compute index condition"""
 
         df2 = glob_obj.df_vnindex.copy()
+        def test():
+            df = df_raw.copy()
+            function2 = 's_ursi'
+            params = {
+
+                'use_flag':True,
+                'use_range': True,
+                'lower_thres': 80
+            }
+            df2['cond']= Conds.compute_any_conds(df2, function2, **params)
+
 
         df2['cond']= Conds.compute_any_conds(df2, function2, *args, **kwargs)
 
@@ -908,14 +925,19 @@ class Conds:
         matched = matched.apply(lambda col: col & df2['cond'])
 
         return matched
-
-
     
     @staticmethod
     def lookback_cond(df: pd.DataFrame, function2, *args, **kwargs):
         """Compute lookback condition"""
         lookback_cond: pd.DataFrame = Conds.compute_any_conds(df, function2, *args, **kwargs)
-        return lookback_cond.rolling(5, closed = 'left').max().astype(bool)
+        return lookback_cond.rolling(5, closed = 'left').max().fillna(False).astype(bool)
+    
+    @staticmethod
+    def lookback_cond2(df: pd.DataFrame, **kwargs):
+        """Compute lookback condition"""
+        lookback_cond: pd.DataFrame = Conds.compute_any_conds2(df, kwargs)
+
+        return lookback_cond.rolling(5, closed = 'left').max().fillna(False).astype(bool)
 
 
     @staticmethod
@@ -1005,7 +1027,29 @@ class FilteringStocks:
         
         return None
     
-    # @staticmethod
+    @staticmethod
+    def custom_stocks_list(stocks, use_flag: bool= False):
+        def test():
+            stocks = "'AGR', 'HOSE:ANV', 'HOSE:ASM', 'HOSE:BSI'"
+
+            stocks = ast.literal_eval(stocks)
+
+
+        if use_flag:
+            if isinstance(stocks, str):
+                stocks = ast.literal_eval(stocks)
+
+            res_ls = []
+            for s in stocks:
+                if ':' in s:
+                    res_ls.append(s.split(':')[1])
+                else:
+                    res_ls.append(s)
+
+            return res_ls
+        
+        return None
+        # @staticmethod
     # def filter_ta_fa(day, use_flag = False, **functions_params_dic):
     #     def test():
     #         functions_params_dic={
@@ -1218,36 +1262,36 @@ class Vectorized:
                     'num_bars': [3, 5, 10, 15, 20]
                 }
             },
-            'bbwp1' : {
+            # 'bbwp1' : {
+            #     'function': 'bbwp',
+            #     'params': {
+            #         ('use_low_thres', 'use_high_thres'):[(True, False), (False, True)],
+            #         'bbwp_len': [13, 30, 50],
+            #         'bbwp_lkbk': [64, 128, 256],
+            #         'low_thres': [2,5,10,20],
+            #         'high_thres': [80, 90, 95, 98]
+            #     }
+            # },
+            'bbwp2' : {
                 'function': 'bbwp',
                 'params': {
-                    ('use_low_thres', 'use_high_thres'):[(True, False), (False, True)],
+                    ('use_low_thres', 'use_high_thres'):[(True, False)],
                     'bbwp_len': [13, 30, 50],
                     'bbwp_lkbk': [64, 128, 256],
                     'low_thres': [2,5,10,20],
+                    'high_thres': [100]
+                }
+            },
+            'bbwp3' : {
+                'function': 'bbwp',
+                'params': {
+                    ('use_low_thres', 'use_high_thres'):[(False, True)],
+                    'bbwp_len': [13, 30, 50],
+                    'bbwp_lkbk': [64, 128, 256],
+                    'low_thres': [0],
                     'high_thres': [80, 90, 95, 98]
                 }
             },
-            # 'bbwp2' : {
-            #     'function': 'bbwp',
-            #     'params': {
-            #         ('use_low_thres', 'use_high_thres'):[(True, False), (False, True)],
-            #         'bbwp_len': [13, 30, 50],
-            #         'bbwp_lkbk': [64, 128, 256],
-            #         'low_thres': [0],
-            #         'high_thres': [2,5,10,20]
-            #     }
-            # },
-            # 'bbwp3' : {
-            #     'function': 'bbwp',
-            #     'params': {
-            #         ('use_low_thres', 'use_high_thres'):[(True, False), (False, True)],
-            #         'bbwp_len': [13, 30, 50],
-            #         'bbwp_lkbk': [64, 128, 256],
-            #         'low_thres': [80, 90, 95, 98],
-            #         'high_thres': [100]
-            #     }
-            # },
             'bbpctb1':{
                 'function': 'bbpctb',
                 'params':{
@@ -1299,14 +1343,36 @@ class Vectorized:
                     'ma_dir': ['above', 'below', 'crossover', 'crossunder']
                 }
             },
-            'index2': {
+            # 'index2': {
+            #     'function': 'index_cond',
+            #     'params': {
+            #         'function2': ['s_bbwp'],
+            #         ('use_low_thres', 'use_high_thres'):[(True, False), (False, True)],
+            #         'bbwp_len': [13, 30, 50],
+            #         'bbwp_lkbk': [64, 128, 256],
+            #         'low_thres': [2,5,10,20],
+            #         'high_thres': [80, 90, 95, 98]
+            #     }
+            # },
+            'index2.1': {
                 'function': 'index_cond',
                 'params': {
                     'function2': ['s_bbwp'],
-                    ('use_low_thres', 'use_high_thres'):[(True, False), (False, True)],
+                    ('use_low_thres', 'use_high_thres'):[(True, False)],
                     'bbwp_len': [13, 30, 50],
                     'bbwp_lkbk': [64, 128, 256],
                     'low_thres': [2,5,10,20],
+                    'high_thres': [100]
+                }
+            },
+            'index2.2': {
+                'function': 'index_cond',
+                'params': {
+                    'function2': ['s_bbwp'],
+                    ('use_low_thres', 'use_high_thres'):[(False, True)],
+                    'bbwp_len': [13, 30, 50],
+                    'bbwp_lkbk': [64, 128, 256],
+                    'low_thres': [0],
                     'high_thres': [80, 90, 95, 98]
                 }
             },
@@ -1533,10 +1599,22 @@ class Vectorized:
                 
                 'params': {
                     'function2': ['bbwp'],
-                    ('use_low_thres', 'use_high_thres'):[(True, False), (False, True)],
+                    ('use_low_thres', 'use_high_thres'):[(True, False)],
                     'bbwp_len': [13, 30, 50],
                     'bbwp_lkbk': [64, 128, 256],
                     'low_thres': [2,5,10,20],
+                    'high_thres': [100]
+                }
+            },
+            'lkbk181' : {
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['bbwp'],
+                    ('use_low_thres', 'use_high_thres'):[(False, True)],
+                    'bbwp_len': [13, 30, 50],
+                    'bbwp_lkbk': [64, 128, 256],
+                    'low_thres': [0],
                     'high_thres': [80, 90, 95, 98]
                 }
             },
@@ -1656,7 +1734,10 @@ class Vectorized:
 
         psave("df_stocks", df)
 
-        df_return: pd.DataFrame  = df['open'].pct_change(15).shift(-16) * 100
+        # df_return: pd.DataFrame  = df['open'].pct_change(15).shift(-16) * 100
+
+        df_return: pd.DataFrame  = (df['open'].shift(-16) / df['open'].shift(-1) - 1) * 100
+
         df_return = get_from_day(df_return, '2018_01_01')
         return_num = df_return.to_numpy()
 
@@ -1766,7 +1847,7 @@ glob_obj.load_all_data()
 
 def test_tai():
     params_df: pd.DataFrame = Vectorized.create_params_sets()
-    condition1 = params_df.iloc[774].dropna()
+    condition1 = params_df.iloc[53].dropna()
     condition1['use_flag'] = True
 
     condition2 = params_df.iloc[1325].dropna()
@@ -1780,6 +1861,21 @@ def test_tai():
 
     signals = signals1 & signals2
     signals = signals[signals.index >= '2018_01_01']
+
+def test_2():
+    params_df: pd.DataFrame = Vectorized.create_params_sets()
+    for conds in params_df['function'].unique():
+        try:
+            condition = params_df[params_df['function']==conds].sample(n=1).iloc[0].dropna()
+            condition['use_flag'] = True
+            print(condition.to_dict())
+            
+            signals: pd.DataFrame = Conds.compute_any_conds(df, **condition)
+            signals = signals[signals.index >= '2018_01_01']
+
+            print(signals.sum().head(20))
+        except:
+            print('Error')
 
 def get_from_day(df: pd.DataFrame, from_day, col = None):
     if col is not None:

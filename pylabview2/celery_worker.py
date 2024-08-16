@@ -73,7 +73,7 @@ def compute_signal(idx, params: dict):
 
         signals: pd.DataFrame = Conds.compute_any_conds(df, **params)
         signals = signals[signals.index >= '2018_01_01']
-
+        signals.iloc[-16:] = False
     except Exception as e:
         print(f"{idx} error: {e}")
         signals = None

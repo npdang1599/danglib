@@ -103,9 +103,10 @@ class Globs:
         return df
     
     def load_vnindex(self):
-        self.df_vnindex: pd.DataFrame = Adapters.get_stock_from_vnstock(
-            "VNINDEX", from_day=self.data_from_day
-        )
+        # self.df_vnindex: pd.DataFrame = Adapters.get_stock_from_vnstock(
+        #     "VNINDEX", from_day=self.data_from_day
+        # )
+        self.df_vnindex: pd.DataFrame = Adapters.get_vnindex_from_db()
 
     def gen_stocks_data(self, fn=None, collection=None, send_viber=False):
         try:
@@ -681,7 +682,7 @@ class Conds:
             length_kc = int(length_kc)
             num_bars = int(num_bars)
             # Calculating squeeze
-            sqz_on, _, no_sqz = Ta.squeeze(
+            sqz_on, sqz_off, no_sqz = Ta.squeeze(
                 df, src_name, bb_length, length_kc, mult_kc, use_true_range
             )
 
@@ -690,7 +691,7 @@ class Conds:
             # return cons_sqz_num >= num_bars
         
             if use_no_sqz:
-                return no_sqz
+                return sqz_off
             else:
                 # Count consecutive squeeze on
                 cons_sqz_num = Utils.count_consecutive(sqz_on)
@@ -1877,10 +1878,13 @@ class Conds:
         index_cond = Conds.compute_any_conds(df2, index_params)
         if index_cond is not None:
             df2["index_cond"] = index_cond
+            close = df['close']
             df = pd.merge(df, df2, how="left", on="day")
             df["index_cond"] = np.where(
                 df["index_cond"].isna(), False, df["index_cond"]
             )
+            
+            df["index_cond"] = np.where(close.isna(),False, df['index_cond'])
             df = df.infer_objects()
             return df["index_cond"]
 
@@ -1891,7 +1895,7 @@ class Conds:
         """Compute lookback condition"""
         lookback_cond = Conds.compute_any_conds(df, lookback_params)
         if lookback_cond is not None:
-            return lookback_cond.rolling(n_bars, closed = 'left').max().astype(bool)
+            return lookback_cond.rolling(n_bars, closed = 'left').max().fillna(False).astype(bool)
 
         return None
 
@@ -2979,6 +2983,8 @@ class Simulator:
         
             
         df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
+        df["signal"].iloc[-(holding_periods+1):] = False
+
         if use_shift:
             df["signal"] = df["signal"].shift(n_shift)
             df["signal"] = df['signal'].fillna(value=False)
@@ -3418,9 +3424,10 @@ class Scanner:
         
         params = Globs.old_saved_adapters(params)
         
-        # for stock, df_stock in df_all_stocks.groupby("stock"):
-        for stock in df_all_stocks.columns.get_level_values(level='stock'):
-            df_stock = df_all_stocks.xs(stock,level = 'stock', axis=1)
+        for stock, df_stock in df_all_stocks.groupby("stock", axis =1):
+        # for stock in df_all_stocks.columns.get_level_values(level='stock'):
+            # df_stock = df_all_stocks.xs(stock,level = 'stock', axis=1)
+            df_stock.columns = df_stock.columns.droplevel('stock')
             df_stock = df_stock.reset_index(drop=False)
             df_stock['stock'] = stock
             task = scan_one_stock_v3.delay(

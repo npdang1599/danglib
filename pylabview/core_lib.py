@@ -18,6 +18,12 @@ HOST = "localhost"
 class Adapters:
     """Adapter functions to get data from resources"""
     
+    @staticmethod
+    def get_vnindex_from_db():
+        db = MongoClient("localhost", 27022)["stockdata"]
+        col = db['price_data']
+        df_vnindex =pd.DataFrame(col.find({'stock':'VNINDEX','source':'VCI'},{'_id':0}))
+        return df_vnindex
 
     @staticmethod
     def load_stocks_data_from_pickle():
@@ -1174,20 +1180,29 @@ class Ta:
             sqz_off (pd.Series): Series of squeeze off or not
             no_sqz (pd.Series): Series of no squeeze (no on and no off)
         """
+
+        def test():
+            src_name: str = "close"
+            bb_length: int = 20
+            length_kc: int = 20
+            mult_kc: float = 1.5
+            use_true_range: bool = True
+            df = glob_obj.get_one_stock_data("ABB")
+
         p_h = df["high"]
         p_l = df["low"]
         p_c = df["close"]
         src = df[src_name]
 
-        basic = Ta.sma(src, bb_length)
+        basis = Ta.sma(src, bb_length)
         dev = mult_kc * Ta.stdev(src, bb_length)
-        upper_bb = basic + dev
-        lower_bb = basic - dev
+        upper_bb = basis + dev
+        lower_bb = basis - dev
 
         sqz_ma = Ta.sma(src, length_kc)
 
         sqz_range = (
-            Math.max([p_h - p_l, abs(p_h - p_c.shift(1)), abs(p_l - p_c.shift(1))])
+            Math.max([p_h - p_l, abs(p_h - p_c.shift(1)), abs(p_l - p_c.shift(1))], skipna=False)
             if use_true_range
             else (p_h - p_l)
         )
@@ -1199,6 +1214,20 @@ class Ta:
         sqz_on = (lower_bb > lower_kc) & (upper_bb < upper_kc)
         sqz_off = (lower_bb < lower_kc) & (upper_bb > upper_kc)
         no_sqz = pd.Series(np.where(sqz_on | sqz_off, False, True))
+
+        def test2():
+            dft = df['day'].to_frame('day')
+            dft['sqz_on'] = sqz_on
+            dft['sqz_ma'] = sqz_ma
+            dft['sqz_range'] = sqz_range
+            dft['rangema'] = rangema
+            
+            dft['lower_bb'] = lower_bb
+            dft['lower_kc'] = lower_kc
+            dft['upper_bb'] = upper_bb
+            dft['upper_kc'] = upper_kc
+            dft = dft.set_index('day')
+            dft.loc['2021_01_25']
 
         return sqz_on, sqz_off, no_sqz
 
@@ -1387,7 +1416,7 @@ class Math:
     """mathematical functions for pandas Series"""
 
     @staticmethod
-    def max(series_ls: list[pd.Series]):
+    def max(series_ls: list[pd.Series], skipna=True):
         """To calculate the maximum value for each row from multiple Pandas Series.
 
         Args:
@@ -1396,7 +1425,7 @@ class Math:
         Returns:
             pd.Series: The series of maximum values for each row of the input series
         """
-        return pd.concat(series_ls, axis=1).max(axis=1)
+        return pd.concat(series_ls, axis=1).max(axis=1, skipna=skipna)
 
     @staticmethod
     def sum(series: pd.Series, length: int):
