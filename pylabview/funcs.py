@@ -29,7 +29,7 @@ class Globs:
         self.df_vnindex: pd.DataFrame = None
         self.strategies_dic = {}
         self.strategies = []
-        self.stocks = Adapters.get_stocks_beta_group()
+        self.stocks, self.dic_groups = Adapters.get_stocks_beta_group()
         self.df_stocks = pd.DataFrame()
         self._df_stocks = None
         self.function_map = {

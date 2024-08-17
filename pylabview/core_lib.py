@@ -394,7 +394,11 @@ class Adapters:
         df = pd.read_excel(path, sheet_name="Sheet3")
         stocks = df["Ticker"].tolist()
         
-        return stocks
+        group_name_map = {1: "Super High Beta", 2: "High Beta", 3: "Medium", 4: "Low"}
+
+        df["group_name"] = df["Group"].map(group_name_map)
+        stocks_groups_map = dict(zip(df["Ticker"], df["group_name"]))
+        return stocks, stocks_groups_map
     
     @staticmethod
     def load_quarter_netincome_from_db_VCI(symbols: list):
