@@ -7,12 +7,17 @@ import pandas as pd
 import numpy as np
 from pymongo import MongoClient
 from vnstock3 import Vnstock
-from numba import njit
+
 from danglib.pylabview.src import Fns, sectors_paths
+
+from redis import StrictRedis
+import pickle
 
 if "ACCEPT_TC" not in os.environ:
     os.environ["ACCEPT_TC"] = "tôi đồng ý"
 
+HOST = "localhost"
+r = StrictRedis()
 today = dt.now().strftime(format="%Y-%m-%d")
 
 class Adapters:
@@ -74,6 +79,23 @@ class Adapters:
             logging.error(f"Couldn't load data from main db: {e}")
 
         return pd.DataFrame()
+    
+    @staticmethod
+    def load_stocks_data_from_plasma():
+        from danglib.lazy_core import gen_plasma_functions
+        _, disconnect, psave, pload = gen_plasma_functions()
+        
+        nummeric_data = pload("stocks_data_nummeric")
+        stocks_i2s = pickle.loads(r.get("pylabview_stocks_i2s"))
+        columns = pickle.loads(r.get("pylabview_stocks_data_columns"))
+        
+        
+        df = pd.DataFrame(nummeric_data, columns=columns)
+        df['stock'] = df['stock'].map(stocks_i2s)
+        df['day'] = df['day'].astype(int).astype(str).apply(lambda x: f"{x[0:4]}_{x[4:6]}_{x[6:8]}")
+        disconnect()
+        
+        return df
         
 
     @staticmethod

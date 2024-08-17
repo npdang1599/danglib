@@ -6,7 +6,7 @@ from danglib.pylabview2.funcs import Vectorized, Conds
 import logging
 import numpy as np
 import pandas as pd
-from dc_server.lazy_core import gen_plasma_functions
+from danglib.lazy_core import gen_plasma_functions
 import threading
 import pickle
 

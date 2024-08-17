@@ -7,13 +7,16 @@ import pandas as pd
 import numpy as np
 from pymongo import MongoClient
 from vnstock3 import Vnstock
-from numba import njit
 from danglib.pylabview.src import Fns, sectors_paths
+from redis import StrictRedis
+import pickle
 
 if "ACCEPT_TC" not in os.environ:
     os.environ["ACCEPT_TC"] = "tôi đồng ý"
 
 HOST = "localhost"
+r = StrictRedis()
+
 
 class Adapters:
     """Adapter functions to get data from resources"""
@@ -43,7 +46,24 @@ class Adapters:
             logging.error(f"Couldn't load data from main db: {e}")
 
         return pd.DataFrame()
+    
+    @staticmethod
+    def load_stocks_data_from_plasma():
+        from danglib.lazy_core import gen_plasma_functions
+        _, disconnect, psave, pload = gen_plasma_functions()
         
+        nummeric_data = pload("stocks_data_nummeric")
+        stocks_i2s = pickle.loads(r.get("pylabview_stocks_i2s"))
+        columns = pickle.loads(r.get("pylabview_stocks_data_columns"))
+        
+        
+        df = pd.DataFrame(nummeric_data, columns=columns)
+        df['stock'] = df['stock'].map(stocks_i2s)
+        df['day'] = df['day'].astype(int).astype(str).apply(lambda x: f"{x[0:4]}_{x[4:6]}_{x[6:8]}")
+        disconnect()
+        
+        return df
+    
 
     @staticmethod
     def map_net_income(df: pd.DataFrame, symbol: str):
@@ -170,10 +190,6 @@ class Adapters:
         return df
 
     @staticmethod
-    def get_vnindex_from():
-        pass
-
-    @staticmethod
     def get_stock_from_vnstock(ticker: str, from_day: str = "2018_01_01"):
         """load stock's ohlcv data from vnstock
 
@@ -204,9 +220,6 @@ class Adapters:
         db = MongoClient(HOST, 27022)["stockdata"]
         col = db["price_curated"]
 
-        # df = pd.DataFrame(list(col.find({},{"_id":0}).limit(20)))
-        # df.columns
-
         df = pd.DataFrame(
             list(
                 col.find(
@@ -217,9 +230,6 @@ class Adapters:
         )
         df = df.rename(
             columns={
-                # "openPrice": "open",
-                # "highestPrice": "high",
-                # "lowestPrice": "low",
                 "adjusted_close": "close",
                 "totalMatchVal": "volume",
                 "symbol": "stock",
@@ -306,9 +316,6 @@ class Adapters:
         db = MongoClient(HOST, 27022)["stockdata"]
         col_fiinpro = db['price_fiinpro_data']
         
-        dft = pd.DataFrame(list(
-            col_fiinpro.find({},{"_id":0}).limit(5)
-        ))
         ['HoseStockId', 'OrganCode', 'Ticker', 'TradingDate', 
          'StockType', 'CeilingPrice', 'FloorPrice', 'ReferencePrice', 
          'ReferenceDate', 'OpenPrice', 'ClosePrice', 'MatchPrice', 
@@ -386,12 +393,8 @@ class Adapters:
         path = Fns.stock_beta_group
         df = pd.read_excel(path, sheet_name="Sheet3")
         stocks = df["Ticker"].tolist()
-
-        group_name_map = {1: "Super High Beta", 2: "High Beta", 3: "Medium", 4: "Low"}
-
-        df["group_name"] = df["Group"].map(group_name_map)
-        stocks_groups_map = dict(zip(df["Ticker"], df["group_name"]))
-        return stocks, stocks_groups_map
+        
+        return stocks
     
     @staticmethod
     def load_quarter_netincome_from_db_VCI(symbols: list):
@@ -412,15 +415,14 @@ class Adapters:
                 )
             )
         )
-        # df.columns = ["stock", "year", "quarter", "netIncome", "revenue"]
-        # df.columns = ["stock", "year", "quarter", "revenue", "netIncome"]
+
         df = df.rename(columns = {
-            'ticker':'stock',
-            'yearreport': 'year',
-            'lengthreport' : 'quarter',
-            'revenue_bn_vnd' :'revenue',
-            'attributable_to_parent_company' :'netIncome'
-        }   
+                'ticker':'stock',
+                'yearreport': 'year',
+                'lengthreport' : 'quarter',
+                'revenue_bn_vnd' :'revenue',
+                'attributable_to_parent_company' :'netIncome'
+            }   
         )
 
         df['netIncome'] = df['netIncome'].fillna(0)
@@ -530,15 +532,6 @@ class Adapters:
         # Map YQ data:
         col2 =  db['VCI_balance_sheet_quarter']
         
-        # df2 = pd.DataFrame(list(col2.find({}, {"_id": 0}).limit(5)))
-        # df2.columns
-        # inventoryDay: days_inventory_outstanding
-        # CAPEX: purchase_of_fixed_assets
-        # MarketCap: MarketCap
-        # Gross: long_term_assets_bn_vnd
-        # Cash: cash_and_cash_equivalents_bn_vnd + short_term_investments_bn_vnd
-        # Debt: long_term_liabilities_bn_vnd + current_liabilities_bn_vnd
-        
         df2 = pd.DataFrame(
             list(
                 col2.find(
@@ -578,7 +571,19 @@ class Adapters:
         
     
     @staticmethod
-    def prepare_stocks_data(stocks, fn="stocks_data.pickle", db_collection=None, start_day='2017_01_01', to_pickle=False, to_mongo=True):
+    def prepare_stocks_data(
+            stocks,
+            fn="stocks_data.pickle",
+            db_collection=None,
+            start_day='2017_01_01',
+            to_pickle=False,
+            to_mongo=True,
+            to_plasma=False,
+        ):
+        def example_params():
+            stocks = ['HPG', 'SSI', 'VPB', 'TCB']
+            start_day = '2017_01_01'
+        
         df_stocks: pd.DataFrame = Adapters.get_stocks_data_from_db_fiinpro(stocks=stocks, from_day=start_day)
         df_stocks = Utils.compute_quarter_day_map(df_stocks)
         
@@ -594,12 +599,6 @@ class Adapters:
         dfres = pd.merge(dfres, df_pepb, how='left', on=['stock', 'day'])
         dfres[['PE', 'PB']] = dfres.groupby('stock')[['PE', 'PB']].ffill()
         
-        # # Inventory
-        # df_inv = Adapters.load_inventory_data_from_db(stocks, from_day=start_day)
-        # df_inv = df_inv.drop('mapYQ', axis=1)
-        # dfres = pd.merge(dfres, df_inv, how='left', on=['stock', 'day'])
-        # dfres['inventory'] = dfres['inventory'].ffill()
-        
         # Margin Lending:
         df_margin = Adapters.Sectors.load_brokerage_margin_lending(stocks)
         dfres = pd.merge(dfres, df_margin, how='left', on=['stock', 'mapYQ'])
@@ -612,6 +611,22 @@ class Adapters:
         
         dfres = pd.merge(dfres, dfbs2, how='left', on=['stock', 'mapYQ'])
         
+        stocks_i2s = {i: s for i , s in enumerate(dfres['stock'].unique())}
+        stocks_s2i = {s: i for i, s in stocks_i2s.items()}
+        columns = dfres.columns.tolist()
+        
+        r.set("pylabview_stocks_i2s", pickle.dumps(stocks_i2s))
+        r.set("pylabview_stocks_data_columns", pickle.dumps(columns))
+        
+        
+        def df_stocks_to_num(df):
+            df = dfres.copy()
+            df['stock'] = df['stock'].map(stocks_s2i)
+            df['day'] = df['day'].astype(int)
+            df.to_numpy()
+            return df.to_numpy()
+            
+        
         if to_pickle:
             dfres.to_pickle(fn)
         if to_mongo:
@@ -620,8 +635,16 @@ class Adapters:
                 db_collection = db['pylabview_stocks_data']
             db_collection.drop()
             db_collection.insert_many(dfres.to_dict("records"))
+        if to_plasma:
+            from danglib.lazy_core import gen_plasma_functions
 
-        return dfres
+            _, disconnect, psave, pload = gen_plasma_functions()
+            
+            dfp = df_stocks_to_num(dfres)
+            psave("stocks_data_nummeric", dfp)
+            disconnect()
+            
+    
     
     @staticmethod
     def get_stocks():

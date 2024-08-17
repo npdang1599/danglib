@@ -104,7 +104,7 @@ class Globs:
 
     def load_stocks_data(self):
         """run to load stocks data"""
-        df_stocks = Adapters.load_stocks_data_from_main_db()
+        df_stocks = Adapters.load_stocks_data_from_plasma()
 
         df_stocks = df_stocks.pivot(index='day', columns='stock')
         df_stocks['day'] = df_stocks.index
@@ -1707,7 +1707,7 @@ class Vectorized:
             try:
                 params = params.dropna().to_dict()
                 for k, v in params.items():
-                    for patt in ['len', 'bar', 'lkbk', 'mult', 'period', 'ranking']:
+                    for patt in ['len', 'bar', 'lkbk', 'period', 'ranking']:
                         k: str
                         if patt in k:
                             params[k] = int(v)
@@ -1888,3 +1888,6 @@ if __name__ == "__main__":
     glob_obj.load_all_data()
     df_raw = glob_obj.df_stocks.copy()
     df = df_raw.copy()
+
+    from danglib.utils import show_ram_usage_mb
+    show_ram_usage_mb()

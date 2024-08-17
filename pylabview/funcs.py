@@ -9,6 +9,7 @@ import logging
 import warnings
 import argparse
 from danglib.chatbots.viberbot import F5bot
+from danglib.utils import show_ram_usage_mb
 
 pd.options.mode.chained_assignment = None
 
@@ -28,7 +29,7 @@ class Globs:
         self.df_vnindex: pd.DataFrame = None
         self.strategies_dic = {}
         self.strategies = []
-        self.stocks, self.dic_groups = Adapters.get_stocks_beta_group()
+        self.stocks = Adapters.get_stocks_beta_group()
         self.df_stocks = pd.DataFrame()
         self._df_stocks = None
         self.function_map = {
@@ -90,7 +91,7 @@ class Globs:
     
     def load_stocks_data(self):
         """run to load stocks data"""
-        self._df_stocks = Adapters.load_stocks_data_from_main_db()
+        self._df_stocks = Adapters.load_stocks_data_from_plasma()
 
     def load_stocks_data_pickle(self):
         """Load data from pickle"""
@@ -113,13 +114,19 @@ class Globs:
             if fn is None:
                 fn = Fns.pickle_stocks_data
             stocks = self.stocks
-            Adapters.prepare_stocks_data(stocks, fn=fn, db_collection=collection, to_pickle=False, to_mongo=True)
+            Adapters.prepare_stocks_data(
+                stocks, 
+                fn=fn, 
+                db_collection=collection, 
+                to_pickle=False, 
+                to_mongo=True, 
+                to_plasma=True
+            )
 
             df = Adapters.load_stocks_data_from_main_db()
             latest_day = df['day'].max()
             
             msg = f"Stocks data update for Pylabview has been completed! Latest day: {latest_day}"
-
         except Exception as e:
             msg = f"Failed to update data for Pylabview, error: {e}"
             logging.error(msg)
@@ -186,17 +193,9 @@ class Globs:
     def load_sectors_data(self):
         self.sectors = Adapters.load_sectors_data()
 
-    def get_sectors_stocks(self):
-        # sectors = {
-        #     'Steel': ['HPG', 'NKG', 'HSG'],
-        #     'Brokerage': ['VND', 'HCM', 'SSI', 'VCI', 'BSI', 'SHS', 'FTS', 'MBS'],
-        #     'Hog': ['DBC','BAF','MML'],
-        #     'Fish': ['VHC','ANV','IDI'], 
-        #     'Textile': ['TNG','MSH','STK'], 
-        #     'Homebuilder':['PTB','VCS','GDT'], 
-        #     'Chemicals1': ['DGC','DPM','DCM'],
-        #     'Chemicals2': ['CSV','LAS','BFC']
-        # }
+    def get_sectors_stocks(self):        
+        self_stocks = self.stocks
+        
         import ast
         
         db = MongoClient("localhost", 27022)["pylabview_db"]
@@ -205,22 +204,21 @@ class Globs:
         df_raw = df_raw[df_raw.index < 20]
         sectors = dict(zip(df_raw['watchlist_name'], df_raw['watchlist_params'].map(ast.literal_eval)))
         
-
         data_list = []
         for sector, stocks in sectors.items():
             for stock in stocks:
-                data_list.append({'stock': stock, 'sector': sector})
+                if stock in self_stocks:
+                    data_list.append({'stock': stock, 'sector': sector})
 
         df = pd.DataFrame(data_list)
 
-        for stock in self.stocks:
-            if stock not in df['stock']:
+        for stock in self_stocks:
+            if stock not in df['stock'].tolist():
                 data_list.append({'stock':stock, 'sector':'other'})
 
-        df = pd.DataFrame(data_list)
-        
-
-
+        df = pd.DataFrame(data_list)    
+        df = df.drop_duplicates()
+    
         return df
     
     @staticmethod
@@ -1571,10 +1569,7 @@ class Conds:
                 hl_options: str = 'highest'
                 hl_nbars: int = 4
             
-            df = df.copy()
             df_mg = df.groupby("mapYQ")[["marginLending"]].max()
-            
-            src = df['marginLending']
             
             ma1 = Ta.ma(src=df_mg, length=ma_len1, ma_type=ma_type)
             ma2 = Ta.ma(src=df_mg, length=ma_len2, ma_type=ma_type)
@@ -1667,14 +1662,7 @@ class Conds:
                 lower_thres=range_lower,
                 upper_thres=range_upper,
             )
-            # DR_EMAV1 = ffill(ta.ema(DR, DR_sett_emaLen1))
-            # DR_EMAV2 = ffill(ta.ema(DR, DR_sett_emaLen2))
-            # DRVGap = DR_EMAV1 - DR_EMAV2
-            # DRVGPer = rolling_rank(math.abs(DRVGap), DR_sett_percentilePeriod)
-
-            # DR_percDirect = DR_input_percDirect == 'EMA1 > EMA2' ? DRVGap > 0 : DRVGap < 0 
-            # DRVCond1 = not DR_input_usePerc or (f_compare_threshold(DRVGPer, DR_input_percentile, DR_input_direct) and (not DR_input_usePercDirect or DR_percDirect))
-
+            
             df['gap'] =  df['drema1'] - df['drema2']
             df['per'] = Ta.rolling_rank(abs(df['gap']), pct_period)
             def thres_cond():
@@ -1695,14 +1683,6 @@ class Conds:
             
             return cond
         
-# f_check_macrodata(financial, usema, malen1, malen2, malines_pos, usechange, change_nperiod, change_dir, change_lrange, change_hrange, 
-# usehlest, hlest, hlestperiods, usestd, stdpos, stdlen, stdmult) =>
-# ma_cond = f_check_ma_cond(financial, usema, malen1, malen2, malines_pos)
-# change_cond = f_check_change_cond(financial, usechange, change_nperiod, change_dir, change_lrange , change_hrange)
-# hlest_cond = f_check_highest_lowest_cond(financial, hlestperiods, usehlest, hlest)
-# std_cond = f_check_std_cond(financial, stdlen, stdmult, usestd, stdpos)
-
-# ma_cond and change_cond and hlest_cond and std_cond
         @staticmethod
         def check_5sectors_macrodata(
             df: pd.DataFrame,
@@ -3569,5 +3549,7 @@ if __name__ == "__main__":
             glob_obj.gen_stocks_data(send_viber=True)
     except:
         pass
+    
+    show_ram_usage_mb()
     
 # celery -A celery_worker worker --concurrency=10 --loglevel=INFO -n celery_worker@pylabview 
