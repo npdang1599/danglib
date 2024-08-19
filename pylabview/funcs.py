@@ -1306,6 +1306,11 @@ class Conds:
             ma_type = 'EMA', # Method
             ma_len1 = 5, # MA1
             ma_len2 = 15, # MA2
+            range_use_flag: bool = False,
+            range_ma_type = 'EMA',
+            range_ma_len = 5,
+            range_lower = -999,
+            range_upper = 999,
             ma_dir = 'crossover', # Direction
             hl_use_flag: bool = False, # Increase/Decrease over N bars
             hl_nbars = 5, # N Bars
@@ -1344,6 +1349,14 @@ class Conds:
                 ma_dir = ma_dir,
                 use_flag=ma_use_flag
             )
+            
+            range_line = Ta.ma(df_steel[steel_src], range_ma_len, range_ma_type)
+            range_cond = Conds.Standards.range_cond(
+                line = range_line,
+                lower_thres= range_lower,
+                upper_thres= range_upper,
+                use_flag= range_use_flag
+            )
 
             hl_cond = Conds.price_change_vs_hl(
                 df_steel,
@@ -1355,7 +1368,7 @@ class Conds:
                 high_range=hl_upper
             )
 
-            steel_cond = Utils.combine_conditions([ma_cond, hl_cond])
+            steel_cond = Utils.combine_conditions([ma_cond, hl_cond, range_cond])
             if steel_cond is not None:
                 df_steel['cond'] = steel_cond
                 return Utils.merge_condition(df, dict(zip(df_steel['day'], df_steel['cond'])))
@@ -1363,183 +1376,29 @@ class Conds:
             return None
         
         @staticmethod
-        def coking_coal(
-            df: pd.DataFrame, 
-            show_src: bool = False,
-            ma_use_flag: bool = False, # Coking Coal MA combination
-            ma_type = 'EMA', # Method
-            ma_len1 = 5, # MA1
-            ma_len2 = 15, # MA2
-            ma_dir = 'crossover', # Direction
-            hl_use_flag: bool = False, # Increase/Decrease over N bars
-            hl_nbars = 5, # N Bars
-            hl_dir = 'Increase', # Direction
-            hl_lower = -999, # Lower
-            hl_upper = 999 # Upper
-        ):
-            return Conds.Sectors.steel_ma_and_hl(
-                df = df,
-                steel_src='Aus Coal',
-                show_src=show_src,
-                ma_use_flag = ma_use_flag,
-                ma_type = ma_type,
-                ma_len1 = ma_len1,
-                ma_len2 = ma_len2,
-                ma_dir = ma_dir,
-                hl_use_flag = hl_use_flag,
-                hl_nbars = hl_nbars,
-                hl_dir = hl_dir,
-                hl_lower = hl_lower,
-                hl_upper = hl_upper,
-            )
+        def coking_coal(*args, **kwargs):
+            return Conds.Sectors.steel_ma_and_hl(*args, steel_src='Aus Coal', **kwargs)
         
         @staticmethod
-        def iron_ore(
-            df: pd.DataFrame, 
-            show_src: bool = False,
-            ma_use_flag: bool = False, # Coking Coal MA combination
-            ma_type = 'EMA', # Method
-            ma_len1 = 5, # MA1
-            ma_len2 = 15, # MA2
-            ma_dir = 'crossover', # Direction
-            hl_use_flag: bool = False, # Increase/Decrease over N bars
-            hl_nbars = 5, # N Bars
-            hl_dir = 'Increase', # Direction
-            hl_lower = -999, # Lower
-            hl_upper = 999 # Upper
-        ):
-            return Conds.Sectors.steel_ma_and_hl(
-                df = df,
-                steel_src='Ore 62',
-                show_src=show_src,
-                ma_use_flag = ma_use_flag,
-                ma_type = ma_type,
-                ma_len1 = ma_len1,
-                ma_len2 = ma_len2,
-                ma_dir = ma_dir,
-                hl_use_flag = hl_use_flag,
-                hl_nbars = hl_nbars,
-                hl_dir = hl_dir,
-                hl_lower = hl_lower,
-                hl_upper = hl_upper,
-            )
+        def iron_ore(*args, **kwargs):
+            return Conds.Sectors.steel_ma_and_hl(*args, steel_src='Ore 62', **kwargs)
         
         @staticmethod
-        def china_hrc(
-            df: pd.DataFrame, 
-            ma_use_flag: bool = False, # Coking Coal MA combination
-            ma_type = 'EMA', # Method
-            ma_len1 = 5, # MA1
-            ma_len2 = 15, # MA2
-            ma_dir = 'crossover', # Direction
-            hl_use_flag: bool = False, # Increase/Decrease over N bars
-            hl_nbars = 5, # N Bars
-            hl_dir = 'Increase', # Direction
-            hl_lower = -999, # Lower
-            hl_upper = 999 # Upper
-        ):
-            return Conds.Sectors.steel_ma_and_hl(
-                df = df,
-                steel_src='China HRC',
-                ma_use_flag = ma_use_flag,
-                ma_type = ma_type,
-                ma_len1 = ma_len1,
-                ma_len2 = ma_len2,
-                ma_dir = ma_dir,
-                hl_use_flag = hl_use_flag,
-                hl_nbars = hl_nbars,
-                hl_dir = hl_dir,
-                hl_lower = hl_lower,
-                hl_upper = hl_upper,
-            )
+        def china_hrc(*args, **kwargs):
+            return Conds.Sectors.steel_ma_and_hl(*args, steel_src='China HRC', **kwargs)
         
         @staticmethod
-        def china_rebar(
-            df: pd.DataFrame, 
-            ma_use_flag: bool = False, # Coking Coal MA combination
-            ma_type = 'EMA', # Method
-            ma_len1 = 5, # MA1
-            ma_len2 = 15, # MA2
-            ma_dir = 'crossover', # Direction
-            hl_use_flag: bool = False, # Increase/Decrease over N bars
-            hl_nbars = 5, # N Bars
-            hl_dir = 'Increase', # Direction
-            hl_lower = -999, # Lower
-            hl_upper = 999 # Upper
-        ):
-            return Conds.Sectors.steel_ma_and_hl(
-                df = df,
-                steel_src='China Long steel',
-                ma_use_flag = ma_use_flag,
-                ma_type = ma_type,
-                ma_len1 = ma_len1,
-                ma_len2 = ma_len2,
-                ma_dir = ma_dir,
-                hl_use_flag = hl_use_flag,
-                hl_nbars = hl_nbars,
-                hl_dir = hl_dir,
-                hl_lower = hl_lower,
-                hl_upper = hl_upper,
-            )
+        def china_rebar(*args, **kwargs):
+            return Conds.Sectors.steel_ma_and_hl(*args, steel_src='China Long steel', **kwargs)
         
         @staticmethod
-        def steel_scrap(
-            df: pd.DataFrame, 
-            ma_use_flag: bool = False, # Coking Coal MA combination
-            ma_type = 'EMA', # Method
-            ma_len1 = 5, # MA1
-            ma_len2 = 15, # MA2
-            ma_dir = 'crossover', # Direction
-            hl_use_flag: bool = False, # Increase/Decrease over N bars
-            hl_nbars = 5, # N Bars
-            hl_dir = 'Increase', # Direction
-            hl_lower = -999, # Lower
-            hl_upper = 999 # Upper
-        ):
-            return Conds.Sectors.steel_ma_and_hl(
-                df = df,
-                steel_src='Scrap',
-                ma_use_flag = ma_use_flag,
-                ma_type = ma_type,
-                ma_len1 = ma_len1,
-                ma_len2 = ma_len2,
-                ma_dir = ma_dir,
-                hl_use_flag = hl_use_flag,
-                hl_nbars = hl_nbars,
-                hl_dir = hl_dir,
-                hl_lower = hl_lower,
-                hl_upper = hl_upper,
-            )
+        def steel_scrap(*args, **kwargs):
+            return Conds.Sectors.steel_ma_and_hl(*args, steel_src='Scrap', **kwargs)
         
         @staticmethod
-        def hpg_margin(
-            df: pd.DataFrame, 
-            ma_use_flag: bool = False, # Coking Coal MA combination
-            ma_type = 'EMA', # Method
-            ma_len1 = 5, # MA1
-            ma_len2 = 15, # MA2
-            ma_dir = 'crossover', # Direction
-            hl_use_flag: bool = False, # Increase/Decrease over N bars
-            hl_nbars = 5, # N Bars
-            hl_dir = 'Increase', # Direction
-            hl_lower = -999, # Lower
-            hl_upper = 999 # Upper
-        ):
-            return Conds.Sectors.steel_ma_and_hl(
-                df = df,
-                steel_src='Margin',
-                ma_use_flag = ma_use_flag,
-                ma_type = ma_type,
-                ma_len1 = ma_len1,
-                ma_len2 = ma_len2,
-                ma_dir = ma_dir,
-                hl_use_flag = hl_use_flag,
-                hl_nbars = hl_nbars,
-                hl_dir = hl_dir,
-                hl_lower = hl_lower,
-                hl_upper = hl_upper,
-            )
-        
+        def hpg_margin(*args, **kwargs):
+            return Conds.Sectors.steel_ma_and_hl(*args, steel_src='Margin', **kwargs)
+
         @staticmethod
         def brokerage_margin(
             df: pd.DataFrame,
@@ -1689,9 +1548,15 @@ class Conds:
             sector:str,
             field: str,
             ma_use_flag: bool = False,
+            ma_type: str = 'SMA',
             ma_len1: int = 5,
             ma_len2: int = 15,
             ma_dir: str = 'crossover', 
+            range_use_flag: bool = False,
+            range_ma_type: str = 'EMA',
+            range_ma_len: int = 5,
+            range_lower: float = -9999,
+            range_upper: float = 9999,
             change_use_flag: bool = False,
             change_periods: int = 10, 
             change_dir: str = 'increase', #dercrease
@@ -1729,15 +1594,22 @@ class Conds:
             df_sector: pd.DataFrame = glob_obj.sectors[sector]['io_data'].copy()
             df_sector = df_sector[~df_sector[field].isna()]
             
-            
             ma_cond = Conds.Standards.two_ma_lines(
                 df=df_sector,
                 src_name=field,
                 ma_len1=ma_len1,
                 ma_len2=ma_len2,
-                ma_type='SMA',
+                ma_type=ma_type,
                 ma_dir=ma_dir,
                 use_flag=ma_use_flag
+            )
+            
+            range_line = Ta.ma(df_sector[field], range_ma_len, range_ma_type)
+            range_cond = Conds.Standards.range_cond(
+                line = range_line,
+                lower_thres= range_lower,
+                upper_thres= range_upper,
+                use_flag= range_use_flag
             )
             
             change_cond = Conds.price_change(
@@ -1767,7 +1639,7 @@ class Conds:
                 use_flag=std_use_flag
             )
             
-            matched = Utils.combine_conditions([ma_cond, change_cond, hlest_cond, std_cond])
+            matched = Utils.combine_conditions([ma_cond, change_cond, hlest_cond, std_cond, range_cond])
 
             if matched is not None:
                 df_sector['cond'] = matched
@@ -3550,6 +3422,7 @@ if __name__ == "__main__":
     except:
         pass
     
-    show_ram_usage_mb()
-    
+    # show_ram_usage_mb()
+    # glob_obj.load_stocks_data()
+    # df = glob_obj.load_stocks_data()
 # celery -A celery_worker worker --concurrency=10 --loglevel=INFO -n celery_worker@pylabview 
