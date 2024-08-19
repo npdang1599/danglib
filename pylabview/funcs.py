@@ -1450,7 +1450,7 @@ class Conds:
                 if hl_use_flag:
                     func = Ta.is_highest if hl_options == 'highest' else Ta.is_lowest
                     df_mg['matched'] = func(df_mg['marginLending'], hl_nbars)
-                    return matched
+                    return df_mg['matched']
 
                 return None
             
