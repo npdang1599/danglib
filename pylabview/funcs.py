@@ -80,6 +80,7 @@ class Globs:
             "ure_future": Conds.Sectors.ure_future,
         }
         self.sectors = {}
+        self.df_all_index: pd.DataFrame = None
 
     def __getattribute__(self, name):
         if name == "df_stocks":
@@ -237,6 +238,9 @@ class Globs:
         self.load_stocks_data()
         self.load_vnindex()
         self.load_sectors_data() 
+        
+    def load_index_data(self):
+        self.df_all_index = Adapters.get_index_data()
 
 
 class Conds:
@@ -3132,6 +3136,77 @@ class Scanner:
         return res_df, trades_df
     
     @staticmethod
+    def scan_multiple_stocks_v2(
+        df,
+        func, 
+        params, 
+        stocks=None,
+        trade_direction="Long", 
+        use_shift=False,
+        n_shift=15,
+        holding_periods=60):
+        """Backtest on multiple stocks"""
+        from danglib.pylabview.celery_worker import scan_one_stock, clean_redis
+
+
+        if stocks is None:
+            df_all_stocks = df
+        else:
+            df_all_stocks= df[df['stock'].isin(stocks)]
+
+        clean_redis()
+        
+        sum_ls = []
+        trades_ls = []
+        task_dic = {}
+        
+        params = Globs.old_saved_adapters(params)
+        
+        for stock, df_stock in df_all_stocks.groupby("stock"):
+            df_stock = df_stock.reset_index(drop=True)
+
+            task = scan_one_stock.delay(
+                df_stock, 
+                func, 
+                params=params,
+                name=stock,
+                trade_direction=trade_direction,
+                use_shift=use_shift,
+                n_shift=n_shift,
+                holding_periods=holding_periods
+            )
+            
+            task_dic[stock] = task
+            
+        while any(t.status!='SUCCESS' for t in task_dic.values()):
+            pass
+
+        for k, v in task_dic.items():
+            bt = v.result
+            if bt is not None:
+                sum_ls.append(bt.result)
+                trades_ls.append(bt.df)
+                
+            
+        res_df = pd.DataFrame(sum_ls)
+        res_df = res_df[
+            [
+                "name",
+                "numTrade",
+                "winrate",
+                "profitFactor",
+                "avgReturn",
+                "avgUpside",
+                "avgDownside",
+            ]
+        ].round(2)
+        res_df["beta_group"] = 'Super High Beta'
+
+        trades_df = pd.concat(trades_ls)    
+        trades_df['beta_group'] = 'Super High Beta'
+        return res_df, trades_df
+    
+    @staticmethod
     def scan_multiple_stocks3(
         func, params, 
         stocks=None, 
@@ -3370,6 +3445,8 @@ class Scanner:
         trades_df = pd.concat(trades_ls)    
         trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
         return res_df, trades_df
+    
+    
 
 glob_obj = Globs()
 # glob_obj.load_stocks_data()

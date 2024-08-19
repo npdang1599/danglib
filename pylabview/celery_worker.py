@@ -32,7 +32,7 @@ def app_factory(host):
                     f'{CELERY_RESOURCES.CELERY_INPUT_REDIS + 1}'
     remote_app = Celery(
         'dc_slavemaster',
-        broker=broker_url,
+        broker=broker_url, 
         backend=backend_url)
     remote_app.conf.task_serializer = 'pickle'
     remote_app.conf.result_serializer = 'pickle'

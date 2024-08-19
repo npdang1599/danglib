@@ -20,6 +20,24 @@ r = StrictRedis()
 
 class Adapters:
     """Adapter functions to get data from resources"""
+    @staticmethod
+    def get_index_data():
+        # df: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/data/index.pickle")
+        # df = df.rename(columns={"value": "volume"})
+        db = MongoClient('localhost',27022)['stockdata']
+        index_coll = db['index_value']
+        df = pd.DataFrame(index_coll.find({},{'_id':0}))
+
+        INDEX_LIST = ['VNINDEX','VN30','VNDIAMOND','VNMID','VNSML']
+
+        df = df[(df['code'].isin(INDEX_LIST)) & (df['tradingDate'] >= '2017_01_01')].copy()
+
+        df = df[['code', 'tradingDate','open', 'close', 'high', 'low', 'totalMatchValue']].copy().rename(columns ={
+            'code':'stock',
+            'tradingDate':'day',
+            'totalMatchValue':'volume'
+        })
+        return df
     
     @staticmethod
     def get_vnindex_from_db():
