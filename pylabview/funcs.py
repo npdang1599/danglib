@@ -79,6 +79,16 @@ class Globs:
             "dpm_ure": Conds.Sectors.dpm_ure,
             "ure_future": Conds.Sectors.ure_future,
         }
+        self.fa_funcs = [
+            "net_income", 
+            "revenue", 
+            "inventory", 
+            "inventory_day", 
+            "capex_gross", 
+            "cash_debt_mktcap", 
+            "brokerage_margin", 
+            "lookback_cond"
+        ]
         self.sectors = {}
         self.df_all_index: pd.DataFrame = None
 
@@ -92,7 +102,10 @@ class Globs:
     
     def load_stocks_data(self):
         """run to load stocks data"""
-        self._df_stocks = Adapters.load_stocks_data_from_plasma()
+        try:
+            self._df_stocks = Adapters.load_stocks_data_from_plasma()
+        except ValueError as e:
+            logging.error(f"`load_stocks_data` function error: {e}")
 
     def load_stocks_data_pickle(self):
         """Load data from pickle"""
@@ -100,8 +113,12 @@ class Globs:
 
     def get_one_stock_data(self, stock):
         """Get one stock data from df_stocks"""
-        df: pd.DataFrame = self.df_stocks[self.df_stocks["stock"] == stock].copy()
-        df = df.reset_index(drop=True)
+        if self.df_stocks is not None:
+            df: pd.DataFrame = self.df_stocks[self.df_stocks["stock"] == stock].copy()
+            df = df.reset_index(drop=True)
+        else: 
+            df = None
+            logging.error("`get_one_stock_data` error: df_stocks is empty")
         return df
     
     def load_vnindex(self):
@@ -252,10 +269,11 @@ class Conds:
         @staticmethod
         def two_line_pos(
             line1: pd.Series,
-            line2: pd.Series,
+            line2: pd.Series,  
             direction: str = "crossover",
             equal: bool = False,
             use_flag: bool = False,
+            *args, **kwargs
         ):
             """Two line position condition"""
             res = None
@@ -272,7 +290,7 @@ class Conds:
             return res
 
         @staticmethod
-        def range_cond(line, lower_thres, upper_thres, use_flag):
+        def range_cond(line, lower_thres, upper_thres, use_flag, *args, **kwargs):
             """Use flag wrapper or Utils.in_range function"""
             res = None
             if use_flag:
@@ -289,6 +307,7 @@ class Conds:
             use_range: bool = False,
             lower_thres: float = 0,
             upper_thres: float = 0,
+            *args, **kwargs
         ):
             """Two line conditions"""
             pos_cond = Conds.Standards.two_line_pos(
@@ -309,6 +328,7 @@ class Conds:
             ma_type="EMA",
             ma_dir="above",
             use_flag: bool = True,
+            *args, **kwargs
         ):
             """Check if the two moving averages (MA) of the price
             crossover, crossunder, are above, or below each other.
@@ -342,7 +362,7 @@ class Conds:
             return None
         
         @staticmethod
-        def hlest_cond(df: pd.DataFrame, src_name: str, hl_options:str='highest', n_bars: int = 10, use_flag: bool = False):
+        def hlest_cond(df: pd.DataFrame, src_name: str, hl_options:str='highest', n_bars: int = 10, use_flag: bool = False, *args, **kwargs):
             if use_flag:
                 src = df[src_name]
                 func = Ta.is_highest if hl_options == 'highest' else Ta.is_lowest
@@ -352,7 +372,7 @@ class Conds:
             return None
         
         @staticmethod
-        def std_cond(df: pd.DataFrame, src_name: str, n_bars: int = 10, mult: float = 2.0, position:str = 'higher', use_flag:bool = False):
+        def std_cond(df: pd.DataFrame, src_name: str, n_bars: int = 10, mult: float = 2.0, position:str = 'higher', use_flag:bool = False, *args, **kwargs):
             if use_flag:
                 src = df[src_name]
                 std = Ta.stdev(src, n_bars)
@@ -373,6 +393,7 @@ class Conds:
         lower_thres: float = 0,
         upper_thres: float = 100,
         use_flag: bool = True,
+        *args, **kwargs
     ):
         """Check if the percentage change in price over a period of time
         falls within the specified range.
@@ -405,6 +426,7 @@ class Conds:
         ma_type="EMA",
         ma_dir="above",
         use_flag: bool = True,
+        *args, **kwargs
     ):
         """Check if the two moving averages (MA) of the price
         crossover, crossunder, are above, or below each other.
@@ -445,7 +467,8 @@ class Conds:
         direction: str = "Increase",
         nbars: int = 10,
         low_range: float = 5,
-        high_range: float = 100
+        high_range: float = 100,
+        *args, **kwargs
         ):
         """Check if the percentage change between `close` price with lowest(`low`) (if direction is increase) 
         or highest(`high`)(decrease) over a period of time falls within the specified range.
@@ -482,7 +505,7 @@ class Conds:
         return None
 
     @staticmethod
-    def price_gap(df: pd.DataFrame, gap_dir="Use Gap Up", use_flag: bool = True):
+    def price_gap(df: pd.DataFrame, gap_dir="Use Gap Up", use_flag: bool = True, *args, **kwargs):
         """Check if this is Gap Up or Gap Down bar.
 
         Args:
@@ -521,7 +544,8 @@ class Conds:
         ma_len=20,
         comp_ma_dir="higher",
         comp_ma_perc=20,
-        use_flag: bool = True,
+        use_flag: bool = True, 
+        *args, **kwargs
     ):
         """Compare volume(value) with MA
 
@@ -557,7 +581,8 @@ class Conds:
             df: pd.DataFrame,
             method: str = "Highest",
             num_bars: int = 10,
-            use_flag: bool = True,
+            use_flag: bool = True, 
+            *args, **kwargs
         ):
             """Check if close price is highest or lowest over the latest n bars
 
@@ -593,7 +618,8 @@ class Conds:
             direction: str,
             num_bars: int,
             num_matched: int,
-            use_flag: bool = True,
+            use_flag: bool = True, 
+            *args, **kwargs
         ):
             """Check if there are enough increasing (decreasing) bars within the last N bars.
             It is possible to check two sources simultaneously.
@@ -627,7 +653,8 @@ class Conds:
         ranking_window: int = 128,
         low_range: float = 0,
         high_range: float = 100,
-        use_flag: bool = True,
+        use_flag: bool = True, 
+        *args, **kwargs
     ):
         """Check if percentile of volume(value) is within the customed range
 
@@ -661,7 +688,8 @@ class Conds:
         use_true_range: bool = True,
         num_bars: int = 1,
         use_no_sqz:bool =  False,
-        use_flag: bool = False,
+        use_flag: bool = False, 
+        *args, **kwargs
     ):
         """Check if squeeze occurs continuously within the last n bars.
 
@@ -713,7 +741,8 @@ class Conds:
         use_range: bool = False,
         lower_thres: float = 0,
         upper_thres: float = 0,
-        use_flag: bool = False,
+        use_flag: bool = False, 
+        *args, **kwargs
     ):
         """Conditions base on URSI and URSI Signal
 
@@ -779,7 +808,8 @@ class Conds:
         use_range: bool = False,
         lower_thres: float = 0,
         upper_thres: float = 0,
-        use_flag: bool = False,
+        use_flag: bool = False, 
+        *args, **kwargs
     ):
         """Conditions base on MACD and MACD Signal
 
@@ -850,7 +880,8 @@ class Conds:
         low_thres: float = 20,
         use_high_thres: bool = False,
         high_thres: float = 80,
-        use_flag: bool = False,
+        use_flag: bool = False, 
+        *args, **kwargs
     ):
         """bbwp based conditions"""
 
@@ -878,7 +909,8 @@ class Conds:
         use_cross: bool = False,
         direction: str = "crossover",
         cross_line: str = "Upper band",
-        use_flag: bool = False,
+        use_flag: bool = False, 
+        *args, **kwargs
     ):
         """bbpctb based conditions"""
         res = None
@@ -911,7 +943,8 @@ class Conds:
             roll_len: int = 1,
             direction: str = "positive",
             percentage: float = 0,
-            use_flag: bool = False,
+            use_flag: bool = False, 
+            *args, **kwargs
         ):
             if use_flag:
                 df["rollSum"] = Math.sum(df[src_name], roll_len)
@@ -953,6 +986,10 @@ class Conds:
             trend_n_quarters: float = 3,
             trend_growth: str = 'acceleration', # deceleration
             trend_use_flag: bool = False,
+            
+            use_shift = False,
+            n_shift = 15, 
+            *args, **kwargs
         ):
             """Net Income based conditions"""
             
@@ -984,8 +1021,14 @@ class Conds:
             if matched is not None:
                 df_ni['cond'] = matched
                 df['cond'] = df['mapYQ'].map(df_ni['cond'])
-                return df['cond']
-            
+                
+                cond = df['cond']
+                if use_shift:
+                    cond = cond.shift(n_shift)
+                    cond = cond.fillna(value=False)
+                
+                return cond
+
             return None
         
         @staticmethod
@@ -1003,6 +1046,10 @@ class Conds:
             trend_n_quarters: float = 3,
             trend_growth: str = 'acceleration', # deceleration
             trend_use_flag: bool = True,
+
+            use_shift = False,
+            n_shift = 15, 
+            *args, **kwargs
         ):
             """Revenue based conditions"""
 
@@ -1034,7 +1081,13 @@ class Conds:
             if matched is not None:
                 df_rev['cond'] = matched
                 df['cond'] = df['mapYQ'].map(df_rev['cond'])
-                return df['cond']
+                cond = df['cond']
+                
+                if use_shift:
+                    cond = cond.shift(n_shift)
+                    cond = cond.fillna(value=False)
+                
+                return cond
             
             return None
 
@@ -1043,7 +1096,8 @@ class Conds:
             df: pd.DataFrame,
             use_flag = False,
             lowrange = 0,
-            highrange = 10
+            highrange = 10, 
+            *args, **kwargs
         ):
             return Conds.Standards.range_cond(df['PE'], lower_thres=lowrange, upper_thres=highrange, use_flag=use_flag)
         
@@ -1059,7 +1113,8 @@ class Conds:
             bb_upper_use_flag: bool = False,
             bb_upper_method: str = 'above', 
             bb_lower_use_flag: bool = False,
-            bb_lower_method: str = 'below',
+            bb_lower_method: str = 'below', 
+            *args, **kwargs
         ):
             src = df['PB']
             
@@ -1104,7 +1159,8 @@ class Conds:
             direction: str = "increase",
             number_of_quarters: float = 3,
             growth: str = 'acceleration', # deceleration
-            use_flag: bool = False
+            use_flag: bool = False, 
+            *args, **kwargs
         ):  
             if use_flag:
                 src = df[src_name]
@@ -1145,7 +1201,8 @@ class Conds:
             calc_type: str = "QoQ",
             rolling_len: int = 1,
             direction: str = 'increase', 
-            percentage: float = 0
+            percentage: float = 0, 
+            *args, **kwargs
         ):
             if use_flag:
             
@@ -1175,7 +1232,11 @@ class Conds:
             std_use_flag: bool = False,
             std_dir: str = 'higher', 
             std_mult: float = 2,
-            std_periods: int = 10
+            std_periods: int = 10,
+            
+            use_shift = False,
+            n_shift = 15, 
+            *args, **kwargs
         ):
             def test():
                 df = glob_obj.get_one_stock_data("HPG")
@@ -1213,7 +1274,13 @@ class Conds:
             if matched is not None:
                 df_inv['cond'] = matched
                 df['cond'] = df['mapYQ'].map(df_inv['cond'])
-                return df['cond']
+                
+                cond = df['cond']
+                if use_shift:
+                    cond = cond.shift(n_shift)
+                    cond = cond.fillna(value=False)
+                
+                return cond
             
             return None
         
@@ -1227,7 +1294,11 @@ class Conds:
             std_use_flag: bool = False,
             std_dir: str = 'higher', 
             std_mult: float = 2,
-            std_periods: int = 10
+            std_periods: int = 10,
+            
+            use_shift = False,
+            n_shift = 15, 
+            *args, **kwargs
         ):
             def test():
                 df = glob_obj.get_one_stock_data("HPG")
@@ -1265,7 +1336,13 @@ class Conds:
             if matched is not None:
                 df_inv['cond'] = matched
                 df['cond'] = df['mapYQ'].map(df_inv['cond'])
-                return df['cond']
+                
+                cond = df['cond']
+                if use_shift:
+                    cond = cond.shift(n_shift)
+                    cond = cond.fillna(value=False)
+                
+                return cond
             
             return None
         
@@ -1274,30 +1351,53 @@ class Conds:
             df: pd.DataFrame,
             use_flag: bool = False,
             low_range: float = -999,
-            high_range: float = 999
+            high_range: float = 999,
+            
+            use_shift = False,
+            n_shift = 15, 
+            *args, **kwargs
         ):
+            def test():
+                df = df_raw.copy()
             src = -df['CAPEX'] / df['gross']
-            return Conds.Standards.range_cond(
+            cond =  Conds.Standards.range_cond(
                 src,
                 lower_thres=low_range,
                 upper_thres=high_range,
                 use_flag=use_flag
             )
             
+            if use_shift and cond is not None:
+                cond = cond.shift(n_shift)
+                cond = cond.fillna(value=False)
+            
+            return cond
+            
         @staticmethod
         def cash_debt_mktcap(
             df: pd.DataFrame,
             use_flag: bool = False,
             low_range: float = -999,
-            high_range: float = 999
+            high_range: float = 999,
+            
+            use_shift = False,
+            n_shift = 15, 
+            *args, **kwargs
         ):
             src = (df['cash'] - df['debt']) / (df['marketCap'] * 1e9)
-            return Conds.Standards.range_cond(
+            cond = Conds.Standards.range_cond(
                 src,
                 lower_thres=low_range,
                 upper_thres=high_range,
                 use_flag=use_flag
             )
+            
+            if use_shift and cond is not None:
+                cond = cond.shift(n_shift)
+                cond = cond.fillna(value=False)
+            
+            return cond
+            
             
             
     class Sectors:
@@ -1320,11 +1420,12 @@ class Conds:
             hl_nbars = 5, # N Bars
             hl_dir = 'Increase', # Direction
             hl_lower = -999, # Lower
-            hl_upper = 999 # Upper
+            hl_upper = 999, # Upper
+            *args, **kwargs
         ):
             
             def test():
-                steel_src='Ore 62'
+                steel_src='Margin'
                 ma_use_flag: bool = False # Coking Coal MA combination
                 ma_type = 'EMA' # Method
                 ma_len1 = 5 # MA1
@@ -1417,6 +1518,10 @@ class Conds:
             hl_use_flag: bool = False,
             hl_options: str = 'highest',
             hl_nbars: int = 4,
+            
+            use_shift = False,
+            n_shift = 15, 
+            *args, **kwargs
         ):
             def test():
                 df = glob_obj.get_one_stock_data("VND")
@@ -1458,7 +1563,13 @@ class Conds:
             if matched is not None:
                 df_mg['cond'] = matched
                 df['cond'] = df['mapYQ'].map(df_mg['cond'])
-                return df['cond']
+                
+                cond = df['cond']
+                if use_shift:
+                    cond = cond.shift(n_shift)
+                    cond = cond.fillna(value=False)
+            
+                return cond
             
             return None
         
@@ -1481,7 +1592,8 @@ class Conds:
             pct_thres_pct: float = 90,
             pct_thres_dir: str = 'higher', # 'higher', 'lower' only
             pct_madir_use_flag: bool = False,
-            pct_madir: str = 'EMA1 > EMA2' # 'EMA1 > EMA2' or 'EMA1 < EMA2'
+            pct_madir: str = 'EMA1 > EMA2', # 'EMA1 > EMA2' or 'EMA1 < EMA2'
+            *args, **kwargs
         ):
             def test():
                 ma_len1: int = 5
@@ -1572,7 +1684,8 @@ class Conds:
             std_use_flag: bool = False,
             std_dir: str = 'higher', 
             std_mult: float = 2,
-            std_periods: int = 10
+            std_periods: int = 10, 
+            *args, **kwargs
         ):
             def test():
                 df = df_raw.copy()
@@ -1703,18 +1816,28 @@ class Conds:
 
 
     @staticmethod
-    def compute_any_conds(df: pd.DataFrame, functions_params_dic: dict, *args):
+    def compute_any_conds(df: pd.DataFrame, functions_params_dic: dict, *args, **kwargs):
         """Compute and combine any conditions"""
         # df = df.copy()
         conds = []
+        use_shift = kwargs.get("use_shift", False)
+        n_shift = kwargs.get("n_shift", 15)
         try:
             for func_name, params in functions_params_dic.items():
-                if func_name == 'stock_scanner':
-                    continue
-                if(func_name not in glob_obj.function_map): 
-                    continue
-                func = glob_obj.function_map[func_name]
-                cond = func(df, **params)
+                try:
+                    if func_name == 'stock_scanner':
+                        continue
+                    if(func_name not in glob_obj.function_map): 
+                        continue
+                    if func_name in glob_obj.fa_funcs:
+                        params['use_shift'] = use_shift
+                        params['n_shift'] = n_shift
+                    func = glob_obj.function_map[func_name]
+                    cond = func(df, **params)
+                except Exception as fe:
+                    cond = None
+                    logging.error(f"function `{func_name}` error: {fe}")
+                    
                 if cond is not None:
                     conds.append(cond)
         except Exception as e:
@@ -1727,7 +1850,7 @@ class Conds:
         return None
 
     @staticmethod
-    def index_cond(df: pd.DataFrame, **index_params):
+    def index_cond(df: pd.DataFrame, *args, **index_params):
         """Compute index condition"""
         df2 = glob_obj.df_vnindex.copy()
 
@@ -1747,7 +1870,7 @@ class Conds:
         return None
 
     @staticmethod
-    def lookback_cond(df: pd.DataFrame, n_bars: int, **lookback_params: dict):
+    def lookback_cond(df: pd.DataFrame, n_bars: int, *args, **lookback_params: dict):
         """Compute lookback condition"""
         def test():
             df: pd.DataFrame = df_raw.copy()
@@ -1774,15 +1897,28 @@ class Conds:
                     }
                 }
             }
+            
+        use_shift = lookback_params.get('use_shift', False)
+        n_shift = lookback_params.get("n_shift", 15)
+
 
         conds = []
         for func_name, func_params in lookback_params.items():
-            if func_name == 'stock_scanner':
-                continue
-            if(func_name not in glob_obj.function_map): 
-                continue
-            func = glob_obj.function_map[func_name]
-            cond: pd.Series = func(df, **func_params)
+            try:
+                if func_name == 'stock_scanner':
+                    continue
+                if(func_name not in glob_obj.function_map): 
+                    continue
+                if func_name in glob_obj.fa_funcs:
+                    func_params['use_shift'] = use_shift
+                    func_params['n_shift'] = n_shift
+                    
+                func = glob_obj.function_map[func_name]
+                cond: pd.Series = func(df, **func_params)
+            except Exception as fe:
+                cond = None
+                logging.error(f"lookback function `{func_name}` error: {fe}")
+                    
             if cond is not None:
                 cond = cond.rolling(n_bars, closed = 'left').max().fillna(False).astype(bool)
                 conds.append(cond)
@@ -1792,16 +1928,6 @@ class Conds:
 
         return None
     
-# def test():
-#     import json
-#     a = '{"stock_scanner": {"trade_direction": "Long", "use_shift": false, "n_shift": 15, "holding_periods": 15}, "price_change": {"use_flag": false, "periods": 1, "direction": "increase", "lower_thres": 0, "upper_thres": 100}, "price_comp_ma": {"use_flag": false, "ma_len1": 5, "ma_len2": 15, "ma_type": "EMA", "ma_dir": "crossover"}, "price_change_vs_hl": {"use_flag": false, "direction": "Increase", "nbars": 10, "low_range": 5, "high_range": 100}, "price_gap": {"use_flag": false, "gap_dir": "Use Gap Up"}, "price_highest_lowest": {"use_flag": false, "method": "Highest", "num_bars": 10}, "consecutive_conditional_bars": {"use_flag": false, "src1_name": "close", "src2_name": "close", "direction": "Increase", "num_bars": 5, "num_matched": 4}, "vol_comp_ma": {"use_flag": false, "n_bars": 1, "ma_len": 20, "comp_ma_dir": "higher", "comp_ma_perc": 20}, "vol_percentile": {"use_flag": false, "ma_length": 10, "ranking_window": 128, "low_range": 0, "high_range": 100}, "consecutive_squeezes": {"bb_length": 20, "length_kc": 20, "mult_kc": 1.5, "use_true_range": true, "use_flag": false, "num_bars": 1}, "ursi": {"length": 14, "smo_type1": "RMA", "smooth": 14, "smo_type2": "EMA", "use_flag": false, "use_vs_signal": false, "direction": "crossover", "use_range": false, "lower_thres": 0, "upper_thres": 0}, "macd": {"r2_period": 20, "fast": 10, "slow": 20, "signal_length": 9, "use_flag": false, "use_vs_signal": false, "direction": "crossover", "use_range": false, "lower_thres": 0, "upper_thres": 0}, "bbwp": {"src_name": "close", "basic_type": "SMA", "bbwp_len": 13, "bbwp_lkbk": 128, "use_flag": false, "use_low_thres": false, "low_thres": 20, "use_high_thres": false, "high_thres": 80}, "bbpctb": {"src_name": "close", "length": 20, "mult": 2, "use_flag": false, "use_range": false, "low_range": 80, "high_range": 100, "use_cross": false, "direction": "crossover", "cross_line": "Upper band"}, "net_income": {"use_flag": false, "calc_type": "QoQ", "roll_len": 2, "direction": "positive", "percentage": 0}, "index_cond": {"price_comp_ma": {"use_flag": false, "ma_len1": 5, "ma_len2": 15, "ma_type": "EMA", "ma_dir": "crossover"}, "ursi": {"length": 14, "smo_type1": "RMA", "smooth": 14, "smo_type2": "EMA", "use_flag": false, "use_vs_signal": false, "direction": "crossover", "use_range": false, "lower_thres": 0, "upper_thres": 0}, "bbwp": {"src_name": "close", "basic_type": "SMA", "bbwp_len": 13, "bbwp_lkbk": 128, "use_flag": false, "use_low_thres": false, "low_thres": 20, "use_high_thres": false, "high_thres": 80}, "bbpctb": {"src_name": "close", "length": 20, "mult": 2, "use_flag": false, "use_range": false, "low_range": 80, "high_range": 100, "use_cross": false, "direction": "crossover", "cross_line": "Upper band"}}, "lookback_cond": {"n_bars": 5, "price_change": {"use_flag": true, "periods": 2, "direction": "increase", "lower_thres": 6, "upper_thres": 100}, "price_comp_ma": {"use_flag": false, "ma_len1": 5, "ma_len2": 15, "ma_type": "EMA", "ma_dir": "crossover"}, "price_gap": {"use_flag": false, "gap_dir": "Use Gap Up"}, "price_change_vs_hl": {"use_flag": false, "direction": "Increase", "nbars": 10, "low_range": 5, "high_range": 100}, "price_highest_lowest": {"use_flag": false, "method": "Highest", "num_bars": 10}, "consecutive_conditional_bars": {"use_flag": false, "src1_name": "close", "src2_name": "close", "direction": "Increase", "num_bars": 5, "num_matched": 4}, "vol_comp_ma": {"use_flag": false, "n_bars": 1, "ma_len": 20, "comp_ma_dir": "higher", "comp_ma_perc": 20}, "vol_percentile": {"use_flag": false, "ma_length": 10, "ranking_window": 128, "low_range": 0, "high_range": 100}, "consecutive_squeezes": {"bb_length": 20, "length_kc": 20, "mult_kc": 1.5, "use_true_range": true, "use_flag": false, "num_bars": 1}, "ursi": {"length": 14, "smo_type1": "RMA", "smooth": 14, "smo_type2": "EMA", "use_flag": false, "use_vs_signal": false, "direction": "crossover", "use_range": false, "lower_thres": 0, "upper_thres": 0}, "macd": {"r2_period": 20, "fast": 10, "slow": 20, "signal_length": 9, "use_flag": false, "use_vs_signal": false, "direction": "crossover", "use_range": false, "lower_thres": 0, "upper_thres": 0}, "bbwp": {"src_name": "close", "basic_type": "SMA", "bbwp_len": 13, "bbwp_lkbk": 128, "use_flag": false, "use_low_thres": false, "low_thres": 20, "use_high_thres": false, "high_thres": 80}, "bbpctb": {"src_name": "close", "length": 20, "mult": 2.5, "use_flag": true, "use_range": false, "low_range": 80, "high_range": 100, "use_cross": true, "direction": "crossover", "cross_line": "Lower band"}}, "default_selector_stocks": []}'
-#     b: dict = json.loads(a)
-#     b.pop('stock_scanner')
-#     b.pop('default_selector_stocks')
-#     b.keys()
-#     params = {"lookback_cond":b['lookback_cond']}
-    
-#     Conds.compute_any_conds(df_raw, params)
 
 class Simulator:
     """Backtest class"""
@@ -2007,8 +2133,6 @@ class Simulator:
         max_drawdown_arr_i = np.full(len(entry_signals), np.NaN)
         avg_upside_arr_i = np.full(len(entry_signals), np.NaN)
         avg_downside_arr_i = np.full(len(entry_signals), np.NaN)
-        
-        
         
         def src_idx(src, index):
             if index < len(src):
@@ -2229,18 +2353,6 @@ class Simulator:
             avg_downside_arr_i,
         )
         
-        
-        # winrate_arr_i = np.full(len(entry_signals), np.NaN)
-        # avg_returns_arr_i = np.full(len(entry_signals), np.NaN)
-        # profit_factor_arr_i = np.full(len(entry_signals), np.NaN)
-        # return_arr_i = np.full(len(entry_signals), np.NaN)
-        # upside_arr_i = np.full(len(entry_signals), np.NaN)
-        # downside_arr_i = np.full(len(entry_signals), np.NaN)
-        # max_runup_arr_i = np.full(len(entry_signals), np.NaN)
-        # max_drawdown_arr_i = np.full(len(entry_signals), np.NaN)
-        # avg_upside_arr_i = np.full(len(entry_signals), np.NaN)
-        # avg_downside_arr_i = np.full(len(entry_signals), np.NaN)
-        
     def run2(self, 
             trade_direction="Long", 
             use_shift = False,
@@ -2293,14 +2405,11 @@ class Simulator:
 # %%
         
         
-        signals = func(df, params)
+        signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
         
         df['signal'] = Utils.new_1val_series(True, df) if signals is None else signals
         df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
-        if use_shift:
-            df["signal"] = df["signal"].shift(n_shift)
-            df["signal"] = df['signal'].fillna(value=False)
-                    
+  
         exit_signals = Conds.compute_any_conds(df, exit_params)
         df["exitSignal"] = Utils.new_1val_series(False, df) if exit_signals is None else exit_signals
         
@@ -2691,8 +2800,12 @@ class Simulator:
         )
 
     def run(
-        self, trade_direction="Long", compute_start_time="2018_01_01", use_shift=False,
-        n_shift=15, holding_periods=8
+        self, 
+        trade_direction="Long", 
+        compute_start_time="2018_01_01", 
+        use_shift=False,
+        n_shift=15, 
+        holding_periods=8
     ):
         df = self.df
         func = self.func
@@ -2710,23 +2823,14 @@ class Simulator:
                 trade_direction=trade_direction,
                 holding_periods=holding_periods,
             )
-
-        
-        signals = func(df, params)
+        signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
         
         if signals is None:
             df["signal"] = Utils.new_1val_series(True, df) 
         else:
             df["signal"] = signals
         
-
-        
-            
         df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
-        if use_shift:
-            df["signal"] = df["signal"].shift(n_shift)
-            df["signal"] = df['signal'].fillna(value=False)
-        # print(f"num of nan signals: {df['signal'].isna().sum()}")
         df["name"] = name
 
         # Compute trade stats using Numba
@@ -2874,25 +2978,17 @@ class Simulator:
                 trade_direction=trade_direction,
                 holding_periods=holding_periods,
             )
-
         
-        signals = func(df, params)
+        signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
         
         if signals is None:
             df["signal"] = Utils.new_1val_series(True, df) 
         else:
             df["signal"] = signals
-        
-
-        
             
         df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
         df["signal"].iloc[-(holding_periods+1):] = False
 
-        if use_shift:
-            df["signal"] = df["signal"].shift(n_shift)
-            df["signal"] = df['signal'].fillna(value=False)
-        # print(f"num of nan signals: {df['signal'].isna().sum()}")
         df["name"] = name
 
         # Compute trade stats using Numba
@@ -3116,6 +3212,85 @@ class Scanner:
                 sum_ls.append(bt.result)
                 trades_ls.append(bt.df)
                 
+            
+        res_df = pd.DataFrame(sum_ls)
+        res_df = res_df[
+            [
+                "name",
+                "numTrade",
+                "winrate",
+                "profitFactor",
+                "avgReturn",
+                "avgUpside",
+                "avgDownside",
+            ]
+        ].round(2)
+        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups)
+
+        trades_df = pd.concat(trades_ls)    
+        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
+        return res_df, trades_df
+    
+    @staticmethod
+    def scan_multiple_stocks_loop(
+        func, 
+        params, 
+        stocks=None,
+        trade_direction="Long", 
+        use_shift=False,
+        n_shift=15,
+        holding_periods=60):
+        """Backtest on multiple stocks"""
+        
+        def test():
+            func = Conds.compute_any_conds
+            params = {
+                'net_income': {
+                    'use_flag': True,
+                    'percentage': 2,
+                }
+            }
+            trade_direction = "Long"
+            stocks = ['HPG', 'SSI']
+            use_shift = False
+            n_shift =  50
+            holding_periods = 15
+        
+        df_all_stocks = glob_obj.df_stocks
+        if stocks is None:
+            stocks = glob_obj.df_stocks
+        else:
+            df_all_stocks= df_all_stocks[df_all_stocks['stock'].isin(stocks)]
+        
+        sum_ls = []
+        trades_ls = []
+        
+        params = Globs.old_saved_adapters(params)
+        
+        for stock, df_stock in df_all_stocks.groupby("stock"):
+            df_stock = df_stock.reset_index(drop=True)
+
+            
+            bt = Simulator(
+                func,
+                df_ohlcv=df_stock,
+                params=params,
+                name=stock,
+            )
+            try:
+                bt.run(
+                    trade_direction=trade_direction, 
+                    use_shift=use_shift,
+                    n_shift=n_shift,
+                    holding_periods=holding_periods
+                )
+            except Exception as e:
+                print(f"scan error: {e}")
+            
+            
+            sum_ls.append(bt.result)
+            trades_ls.append(bt.df)
+            
             
         res_df = pd.DataFrame(sum_ls)
         res_df = res_df[
@@ -3484,22 +3659,54 @@ def test():
 if __name__ == "__main__":
     glob_obj.load_all_data()
     
+    # glob_obj.gen_stocks_data()
+    
     df_raw = glob_obj.get_one_stock_data("SSI")
-    try:
-        # Tạo một đối tượng ArgumentParser
-        parser = argparse.ArgumentParser(description="A program to demonstrate command line arguments.")
+    # try:
+    #     # Tạo một đối tượng ArgumentParser
+    #     parser = argparse.ArgumentParser(description="A program to demonstrate command line arguments.")
 
-        # Thêm các đối số
-        parser.add_argument('--updatedata', action='store_true', help="Update stocks data for Pylabview")
+    #     # Thêm các đối số
+    #     parser.add_argument('--updatedata', action='store_true', help="Update stocks data for Pylabview")
 
-        args = parser.parse_args()
+    #     args = parser.parse_args()
         
-        if args.updatedata:
-            glob_obj.gen_stocks_data(send_viber=True)
-    except:
-        pass
+    #     if args.updatedata:
+    #         glob_obj.gen_stocks_data(send_viber=True)
+    # except:
+    #     pass
     
     # show_ram_usage_mb()
     # glob_obj.load_stocks_data()
     # df = glob_obj.load_stocks_data()
 # celery -A celery_worker worker --concurrency=10 --loglevel=INFO -n celery_worker@pylabview 
+
+    def test_loop():
+        Conds.price_change
+        Conds.Fa.net_income
+        func = Conds.compute_any_conds
+        params = {
+            "lookback_cond":{
+                'n_bars': 15,
+                'net_income': {
+                    'use_flag': True,
+                    'percentage': 2
+                }
+            }
+        }
+        trade_direction = "Long"
+        stocks = ['HPG', 'SSI']
+        use_shift = True
+        n_shift =  50
+        holding_periods = 15
+        
+        df_res, df_trades = Scanner.scan_multiple_stocks_loop(
+            func=func,
+            params=params,
+            stocks=stocks,
+            trade_direction=trade_direction,
+            use_shift=use_shift,
+            n_shift=n_shift,
+            holding_periods=holding_periods
+        )
+        df_res
