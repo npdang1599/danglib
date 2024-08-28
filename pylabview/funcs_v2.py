@@ -9,6 +9,7 @@ import logging
 import warnings
 import argparse
 from danglib.chatbots.viberbot import F5bot
+from danglib.utils import show_ram_usage_mb
 
 pd.options.mode.chained_assignment = None
 
@@ -49,6 +50,9 @@ class Globs:
             "net_income": Conds.Fa.net_income,
             "revenue": Conds.Fa.revenue,
             "inventory": Conds.Fa.inventory,
+            "inventory_day": Conds.Fa.inventory_day,
+            "capex_gross": Conds.Fa.capex_gross,
+            "cash_debt_mktcap": Conds.Fa.cash_debt_mktcap,
             "PE": Conds.Fa.PE,
             "PB": Conds.Fa.PB,
             "index_cond": Conds.index_cond,
@@ -71,8 +75,22 @@ class Globs:
             "hog_cash_spread": Conds.Sectors.hog_cash_spread,
             "china_p4_price": Conds.Sectors.china_p4_price,
             "china_p4_cash_spread": Conds.Sectors.china_p4_cash_spread,
+            "dcm_ure": Conds.Sectors.dcm_ure,
+            "dpm_ure": Conds.Sectors.dpm_ure,
+            "ure_future": Conds.Sectors.ure_future,
         }
+        self.fa_funcs = [
+            "net_income", 
+            "revenue", 
+            "inventory", 
+            "inventory_day", 
+            "capex_gross", 
+            "cash_debt_mktcap", 
+            "brokerage_margin", 
+            "lookback_cond"
+        ]
         self.sectors = {}
+        self.df_all_index: pd.DataFrame = None
 
     def __getattribute__(self, name):
         if name == "df_stocks":
@@ -84,7 +102,10 @@ class Globs:
     
     def load_stocks_data(self):
         """run to load stocks data"""
-        self._df_stocks = Adapters.load_stocks_data_from_main_db()
+        try:
+            self._df_stocks = Adapters.load_stocks_data_from_plasma()
+        except ValueError as e:
+            logging.error(f"`load_stocks_data` function error: {e}")
 
     def load_stocks_data_pickle(self):
         """Load data from pickle"""
@@ -92,27 +113,38 @@ class Globs:
 
     def get_one_stock_data(self, stock):
         """Get one stock data from df_stocks"""
-        df: pd.DataFrame = self.df_stocks[self.df_stocks["stock"] == stock].copy()
-        df = df.reset_index(drop=True)
+        if self.df_stocks is not None:
+            df: pd.DataFrame = self.df_stocks[self.df_stocks["stock"] == stock].copy()
+            df = df.reset_index(drop=True)
+        else: 
+            df = None
+            logging.error("`get_one_stock_data` error: df_stocks is empty")
         return df
     
     def load_vnindex(self):
-        self.df_vnindex: pd.DataFrame = Adapters.get_stock_from_vnstock(
-            "VNINDEX", from_day=self.data_from_day
-        )
+        # self.df_vnindex: pd.DataFrame = Adapters.get_stock_from_vnstock(
+        #     "VNINDEX", from_day=self.data_from_day
+        # )
+        self.df_vnindex: pd.DataFrame = Adapters.get_vnindex_from_db()
 
     def gen_stocks_data(self, fn=None, collection=None, send_viber=False):
         try:
             if fn is None:
                 fn = Fns.pickle_stocks_data
             stocks = self.stocks
-            Adapters.prepare_stocks_data(stocks, fn=fn, db_collection=collection, to_pickle=False, to_mongo=True)
+            Adapters.prepare_stocks_data(
+                stocks, 
+                fn=fn, 
+                db_collection=collection, 
+                to_pickle=False, 
+                to_mongo=True, 
+                to_plasma=True
+            )
 
             df = Adapters.load_stocks_data_from_main_db()
             latest_day = df['day'].max()
             
             msg = f"Stocks data update for Pylabview has been completed! Latest day: {latest_day}"
-
         except Exception as e:
             msg = f"Failed to update data for Pylabview, error: {e}"
             logging.error(msg)
@@ -179,30 +211,32 @@ class Globs:
     def load_sectors_data(self):
         self.sectors = Adapters.load_sectors_data()
 
-    def get_sectors_stocks(self):
-        sectors = {
-            'Steel': ['HPG', 'NKG', 'HSG'],
-            'Hog': ['DBC','BAF','MML'],
-            'Fish': ['VHC','ANV','IDI'], 
-            'Textile': ['TNG','MSH','STK'], 
-            'Homebuilder':['PTB','VCS','GDT'], 
-            'Chemicals1': ['DGC','DPM','DCM'],
-            'Chemicals2': ['CSV','LAS','BFC']
-        }
-
+    def get_sectors_stocks(self):        
+        self_stocks = self.stocks
+        
+        import ast
+        
+        db = MongoClient("localhost", 27022)["pylabview_db"]
+        col = db['watchlist']
+        df_raw = pd.DataFrame(col.find({},{'_id':0}))
+        df_raw = df_raw[df_raw.index < 20]
+        sectors = dict(zip(df_raw['watchlist_name'], df_raw['watchlist_params'].map(ast.literal_eval)))
+        
         data_list = []
         for sector, stocks in sectors.items():
             for stock in stocks:
-                data_list.append({'stock': stock, 'sector': sector})
+                if stock in self_stocks:
+                    data_list.append({'stock': stock, 'sector': sector})
 
         df = pd.DataFrame(data_list)
 
-        for stock in self.stocks:
-            if stock not in df['stock']:
+        for stock in self_stocks:
+            if stock not in df['stock'].tolist():
                 data_list.append({'stock':stock, 'sector':'other'})
 
-        df = pd.DataFrame(data_list)
-
+        df = pd.DataFrame(data_list)    
+        df = df.drop_duplicates()
+    
         return df
     
     @staticmethod
@@ -216,6 +250,15 @@ class Globs:
                 params['stock_scanner']['use_shift'] = use_shift
                 params['stock_scanner']['n_shift'] = n_shift
         return params  
+    
+    def load_all_data(self):
+        self.load_stocks_data()
+        self.load_vnindex()
+        self.load_sectors_data() 
+        
+    def load_index_data(self):
+        self.df_all_index = Adapters.get_index_data()
+
 
 class Conds:
     """Custom condition funcitions"""
@@ -226,10 +269,11 @@ class Conds:
         @staticmethod
         def two_line_pos(
             line1: pd.Series,
-            line2: pd.Series,
+            line2: pd.Series,  
             direction: str = "crossover",
             equal: bool = False,
             use_flag: bool = False,
+            *args, **kwargs
         ):
             """Two line position condition"""
             res = None
@@ -246,7 +290,7 @@ class Conds:
             return res
 
         @staticmethod
-        def range_cond(line, lower_thres, upper_thres, use_flag):
+        def range_cond(line, lower_thres, upper_thres, use_flag, *args, **kwargs):
             """Use flag wrapper or Utils.in_range function"""
             res = None
             if use_flag:
@@ -263,6 +307,7 @@ class Conds:
             use_range: bool = False,
             lower_thres: float = 0,
             upper_thres: float = 0,
+            *args, **kwargs
         ):
             """Two line conditions"""
             pos_cond = Conds.Standards.two_line_pos(
@@ -283,6 +328,7 @@ class Conds:
             ma_type="EMA",
             ma_dir="above",
             use_flag: bool = True,
+            *args, **kwargs
         ):
             """Check if the two moving averages (MA) of the price
             crossover, crossunder, are above, or below each other.
@@ -316,7 +362,7 @@ class Conds:
             return None
         
         @staticmethod
-        def hlest_cond(df: pd.DataFrame, src_name: str, hl_options:str='highest', n_bars: int = 10, use_flag: bool = False):
+        def hlest_cond(df: pd.DataFrame, src_name: str, hl_options:str='highest', n_bars: int = 10, use_flag: bool = False, *args, **kwargs):
             if use_flag:
                 src = df[src_name]
                 func = Ta.is_highest if hl_options == 'highest' else Ta.is_lowest
@@ -326,7 +372,7 @@ class Conds:
             return None
         
         @staticmethod
-        def std_cond(df: pd.DataFrame, src_name: str, n_bars: int = 10, mult: float = 2.0, position:str = 'higher', use_flag:bool = False):
+        def std_cond(df: pd.DataFrame, src_name: str, n_bars: int = 10, mult: float = 2.0, position:str = 'higher', use_flag:bool = False, *args, **kwargs):
             if use_flag:
                 src = df[src_name]
                 std = Ta.stdev(src, n_bars)
@@ -347,6 +393,7 @@ class Conds:
         lower_thres: float = 0,
         upper_thres: float = 100,
         use_flag: bool = True,
+        *args, **kwargs
     ):
         """Check if the percentage change in price over a period of time
         falls within the specified range.
@@ -379,6 +426,7 @@ class Conds:
         ma_type="EMA",
         ma_dir="above",
         use_flag: bool = True,
+        *args, **kwargs
     ):
         """Check if the two moving averages (MA) of the price
         crossover, crossunder, are above, or below each other.
@@ -419,7 +467,8 @@ class Conds:
         direction: str = "Increase",
         nbars: int = 10,
         low_range: float = 5,
-        high_range: float = 100
+        high_range: float = 100,
+        *args, **kwargs
         ):
         """Check if the percentage change between `close` price with lowest(`low`) (if direction is increase) 
         or highest(`high`)(decrease) over a period of time falls within the specified range.
@@ -442,10 +491,11 @@ class Conds:
             pd.Series[bool]: True or False if use_flag is True else None
         """
         
-        close = df[src_name]
-        comp_src = Ta.lowest(df['low'], nbars) if direction == 'Increase' else Ta.highest(df['high'], nbars)
+
         
         if use_flag:
+            close = df[src_name]
+            comp_src = Ta.lowest(df['low'], nbars) if direction == 'Increase' else Ta.highest(df['high'], nbars)
             pct_change = Utils.calc_percentage_change(comp_src, close)
             if direction == "Decrease":
                 pct_change = pct_change * -1
@@ -455,7 +505,7 @@ class Conds:
         return None
 
     @staticmethod
-    def price_gap(df: pd.DataFrame, gap_dir="Use Gap Up", use_flag: bool = True):
+    def price_gap(df: pd.DataFrame, gap_dir="Use Gap Up", use_flag: bool = True, *args, **kwargs):
         """Check if this is Gap Up or Gap Down bar.
 
         Args:
@@ -494,7 +544,8 @@ class Conds:
         ma_len=20,
         comp_ma_dir="higher",
         comp_ma_perc=20,
-        use_flag: bool = True,
+        use_flag: bool = True, 
+        *args, **kwargs
     ):
         """Compare volume(value) with MA
 
@@ -530,7 +581,8 @@ class Conds:
             df: pd.DataFrame,
             method: str = "Highest",
             num_bars: int = 10,
-            use_flag: bool = True,
+            use_flag: bool = True, 
+            *args, **kwargs
         ):
             """Check if close price is highest or lowest over the latest n bars
 
@@ -566,7 +618,8 @@ class Conds:
             direction: str,
             num_bars: int,
             num_matched: int,
-            use_flag: bool = True,
+            use_flag: bool = True, 
+            *args, **kwargs
         ):
             """Check if there are enough increasing (decreasing) bars within the last N bars.
             It is possible to check two sources simultaneously.
@@ -600,7 +653,8 @@ class Conds:
         ranking_window: int = 128,
         low_range: float = 0,
         high_range: float = 100,
-        use_flag: bool = True,
+        use_flag: bool = True, 
+        *args, **kwargs
     ):
         """Check if percentile of volume(value) is within the customed range
 
@@ -633,7 +687,9 @@ class Conds:
         mult_kc: float = 1.5,
         use_true_range: bool = True,
         num_bars: int = 1,
-        use_flag: bool = False,
+        use_no_sqz:bool =  False,
+        use_flag: bool = False, 
+        *args, **kwargs
     ):
         """Check if squeeze occurs continuously within the last n bars.
 
@@ -652,14 +708,24 @@ class Conds:
             pd.Series: True or False
         """
         if use_flag:
+            bb_length = int(bb_length)
+            length_kc = int(length_kc)
+            num_bars = int(num_bars)
             # Calculating squeeze
-            sqz_on, _, _ = Ta.squeeze(
+            sqz_on, sqz_off, no_sqz = Ta.squeeze(
                 df, src_name, bb_length, length_kc, mult_kc, use_true_range
             )
 
-            # Count consecutive squeeze on
-            cons_sqz_num = Utils.count_consecutive(sqz_on)
-            return cons_sqz_num >= num_bars
+            # # Count consecutive squeeze on
+            # cons_sqz_num = Utils.count_consecutive(sqz_on)
+            # return cons_sqz_num >= num_bars
+        
+            if use_no_sqz:
+                return sqz_off
+            else:
+                # Count consecutive squeeze on
+                cons_sqz_num = Utils.count_consecutive(sqz_on)
+                return cons_sqz_num >= num_bars
 
         return None
 
@@ -675,7 +741,8 @@ class Conds:
         use_range: bool = False,
         lower_thres: float = 0,
         upper_thres: float = 0,
-        use_flag: bool = False,
+        use_flag: bool = False, 
+        *args, **kwargs
     ):
         """Conditions base on URSI and URSI Signal
 
@@ -741,7 +808,8 @@ class Conds:
         use_range: bool = False,
         lower_thres: float = 0,
         upper_thres: float = 0,
-        use_flag: bool = False,
+        use_flag: bool = False, 
+        *args, **kwargs
     ):
         """Conditions base on MACD and MACD Signal
 
@@ -812,7 +880,8 @@ class Conds:
         low_thres: float = 20,
         use_high_thres: bool = False,
         high_thres: float = 80,
-        use_flag: bool = False,
+        use_flag: bool = False, 
+        *args, **kwargs
     ):
         """bbwp based conditions"""
 
@@ -840,7 +909,8 @@ class Conds:
         use_cross: bool = False,
         direction: str = "crossover",
         cross_line: str = "Upper band",
-        use_flag: bool = False,
+        use_flag: bool = False, 
+        *args, **kwargs
     ):
         """bbpctb based conditions"""
         res = None
@@ -873,7 +943,8 @@ class Conds:
             roll_len: int = 1,
             direction: str = "positive",
             percentage: float = 0,
-            use_flag: bool = False,
+            use_flag: bool = False, 
+            *args, **kwargs
         ):
             if use_flag:
                 df["rollSum"] = Math.sum(df[src_name], roll_len)
@@ -914,7 +985,11 @@ class Conds:
             trend_direction: str = "increase",
             trend_n_quarters: float = 3,
             trend_growth: str = 'acceleration', # deceleration
-            trend_use_flag: bool = True,
+            trend_use_flag: bool = False,
+            
+            use_shift = False,
+            n_shift = 15, 
+            *args, **kwargs
         ):
             """Net Income based conditions"""
             
@@ -946,8 +1021,14 @@ class Conds:
             if matched is not None:
                 df_ni['cond'] = matched
                 df['cond'] = df['mapYQ'].map(df_ni['cond'])
-                return df['cond']
-            
+                
+                cond = df['cond']
+                if use_shift:
+                    cond = cond.shift(n_shift)
+                    cond = cond.fillna(value=False)
+                
+                return cond
+
             return None
         
         @staticmethod
@@ -965,6 +1046,10 @@ class Conds:
             trend_n_quarters: float = 3,
             trend_growth: str = 'acceleration', # deceleration
             trend_use_flag: bool = True,
+
+            use_shift = False,
+            n_shift = 15, 
+            *args, **kwargs
         ):
             """Revenue based conditions"""
 
@@ -996,7 +1081,13 @@ class Conds:
             if matched is not None:
                 df_rev['cond'] = matched
                 df['cond'] = df['mapYQ'].map(df_rev['cond'])
-                return df['cond']
+                cond = df['cond']
+                
+                if use_shift:
+                    cond = cond.shift(n_shift)
+                    cond = cond.fillna(value=False)
+                
+                return cond
             
             return None
 
@@ -1005,7 +1096,8 @@ class Conds:
             df: pd.DataFrame,
             use_flag = False,
             lowrange = 0,
-            highrange = 10
+            highrange = 10, 
+            *args, **kwargs
         ):
             return Conds.Standards.range_cond(df['PE'], lower_thres=lowrange, upper_thres=highrange, use_flag=use_flag)
         
@@ -1021,7 +1113,8 @@ class Conds:
             bb_upper_use_flag: bool = False,
             bb_upper_method: str = 'above', 
             bb_lower_use_flag: bool = False,
-            bb_lower_method: str = 'below',
+            bb_lower_method: str = 'below', 
+            *args, **kwargs
         ):
             src = df['PB']
             
@@ -1066,7 +1159,8 @@ class Conds:
             direction: str = "increase",
             number_of_quarters: float = 3,
             growth: str = 'acceleration', # deceleration
-            use_flag: bool = False
+            use_flag: bool = False, 
+            *args, **kwargs
         ):  
             if use_flag:
                 src = df[src_name]
@@ -1107,7 +1201,8 @@ class Conds:
             calc_type: str = "QoQ",
             rolling_len: int = 1,
             direction: str = 'increase', 
-            percentage: float = 0
+            percentage: float = 0, 
+            *args, **kwargs
         ):
             if use_flag:
             
@@ -1130,63 +1225,32 @@ class Conds:
         @staticmethod
         def inventory(
             df: pd.DataFrame,
-            # trend_calc_type: str= "QoQ",
-            # trend_rolling_len: int = 1, 
-            # trend_direction: str = "increase",
-            # trend_n_quarters: float = 3,
-            # trend_growth: str = 'acceleration', # deceleration
-            # trend_use_flag: bool = False,
-
-            # growth_use_flag: bool = False,
-            # growth_calc_type: str = "QoQ",
-            # growth_rolling_len: int = 1,
-            # growth_direction: str = 'increase', 
-            # growth_percentage: float = 0,
-            
             hlest_use_flag: bool = False,
             hlest_direction: str = 'highest', 
-            hlest_n_quarters: int = 3
+            hlest_n_quarters: int = 3,
+            
+            std_use_flag: bool = False,
+            std_dir: str = 'higher', 
+            std_mult: float = 2,
+            std_periods: int = 10,
+            
+            use_shift = False,
+            n_shift = 15, 
+            *args, **kwargs
         ):
             def test():
                 df = glob_obj.get_one_stock_data("HPG")
-                trend_calc_type: str= "QoQ"
-                trend_rolling_len: int = 1 
-                trend_direction: str = "increase"
-                trend_n_quarters: float = 3
-                trend_growth: str = 'acceleration' # deceleration
-                trend_use_flag: bool = True
-
-                growth_use_flag: bool = False
-                growth_calc_type: str = "QoQ"
-                growth_rolling_len: int = 1
-                growth_direction: str = 'increase' 
-                growth_percentage: float = 0
                 
                 hlest_use_flag: bool = False
                 hlest_direction: str = 'highest' 
                 hlest_n_quarters: int = 3
                 
+                std_use_flag: bool = True
+                std_dir: str = 'higher' 
+                std_mult: float = 2
+                std_periods: int = 10
+                
             df_inv = df.groupby('mapYQ').agg({'inventory':'last'})
-            # trend_cond = Conds.Fa.trend(
-            #     df_inv,
-            #     src_name='inventory', 
-            #     calc_type=trend_calc_type,
-            #     rolling_len=trend_rolling_len,
-            #     direction=trend_direction,
-            #     number_of_quarters=trend_n_quarters,
-            #     growth=trend_growth,
-            #     use_flag=trend_use_flag
-            # )
-            
-            # growth_cond = Conds.Fa.growth(
-            #     df_inv,
-            #     src_name='inventory',
-            #     use_flag=growth_use_flag,
-            #     calc_type=growth_calc_type,
-            #     rolling_len=growth_rolling_len,
-            #     direction=growth_direction,
-            #     percentage=growth_percentage
-            # )
             
             hlest_cond = Conds.Standards.hlest_cond(
                 df_inv,
@@ -1196,14 +1260,145 @@ class Conds:
                 use_flag=hlest_use_flag
             )
             
-            # matched = Utils.combine_conditions([trend_cond, growth_cond, hlest_cond])
+            std_cond = Conds.Standards.std_cond(
+                df = df_inv,
+                src_name='inventory',
+                n_bars= std_periods,
+                mult=std_mult,
+                position=std_dir,
+                use_flag=std_use_flag
+            )
             
-            if hlest_cond is not None:
-                df_inv['cond'] = hlest_cond
+            matched = Utils.combine_conditions([hlest_cond, std_cond])
+            
+            if matched is not None:
+                df_inv['cond'] = matched
                 df['cond'] = df['mapYQ'].map(df_inv['cond'])
-                return df['cond']
+                
+                cond = df['cond']
+                if use_shift:
+                    cond = cond.shift(n_shift)
+                    cond = cond.fillna(value=False)
+                
+                return cond
             
             return None
+        
+        @staticmethod
+        def inventory_day(
+            df: pd.DataFrame,
+            hlest_use_flag: bool = False,
+            hlest_direction: str = 'highest', 
+            hlest_n_quarters: int = 3,
+            
+            std_use_flag: bool = False,
+            std_dir: str = 'higher', 
+            std_mult: float = 2,
+            std_periods: int = 10,
+            
+            use_shift = False,
+            n_shift = 15, 
+            *args, **kwargs
+        ):
+            def test():
+                df = glob_obj.get_one_stock_data("HPG")
+                
+                hlest_use_flag: bool = False
+                hlest_direction: str = 'highest' 
+                hlest_n_quarters: int = 3
+                
+                std_use_flag: bool = True
+                std_dir: str = 'higher' 
+                std_mult: float = 2
+                std_periods: int = 10
+                
+            df_inv = df.groupby('mapYQ').agg({'inventoryDay':'last'})
+            
+            hlest_cond = Conds.Standards.hlest_cond(
+                df_inv,
+                src_name='inventoryDay', 
+                hl_options=hlest_direction,
+                n_bars=hlest_n_quarters,
+                use_flag=hlest_use_flag
+            )
+            
+            std_cond = Conds.Standards.std_cond(
+                df = df_inv,
+                src_name='inventoryDay',
+                n_bars= std_periods,
+                mult=std_mult,
+                position=std_dir,
+                use_flag=std_use_flag
+            )
+            
+            matched = Utils.combine_conditions([hlest_cond, std_cond])
+            
+            if matched is not None:
+                df_inv['cond'] = matched
+                df['cond'] = df['mapYQ'].map(df_inv['cond'])
+                
+                cond = df['cond']
+                if use_shift:
+                    cond = cond.shift(n_shift)
+                    cond = cond.fillna(value=False)
+                
+                return cond
+            
+            return None
+        
+        @staticmethod
+        def capex_gross(
+            df: pd.DataFrame,
+            use_flag: bool = False,
+            low_range: float = -999,
+            high_range: float = 999,
+            
+            use_shift = False,
+            n_shift = 15, 
+            *args, **kwargs
+        ):
+            def test():
+                df = df_raw.copy()
+            src = -df['CAPEX'] / df['gross']
+            cond =  Conds.Standards.range_cond(
+                src,
+                lower_thres=low_range,
+                upper_thres=high_range,
+                use_flag=use_flag
+            )
+            
+            if use_shift and cond is not None:
+                cond = cond.shift(n_shift)
+                cond = cond.fillna(value=False)
+            
+            return cond
+            
+        @staticmethod
+        def cash_debt_mktcap(
+            df: pd.DataFrame,
+            use_flag: bool = False,
+            low_range: float = -999,
+            high_range: float = 999,
+            
+            use_shift = False,
+            n_shift = 15, 
+            *args, **kwargs
+        ):
+            src = (df['cash'] - df['debt']) / (df['marketCap'] * 1e9)
+            cond = Conds.Standards.range_cond(
+                src,
+                lower_thres=low_range,
+                upper_thres=high_range,
+                use_flag=use_flag
+            )
+            
+            if use_shift and cond is not None:
+                cond = cond.shift(n_shift)
+                cond = cond.fillna(value=False)
+            
+            return cond
+            
+            
             
     class Sectors:
         @staticmethod
@@ -1215,16 +1410,22 @@ class Conds:
             ma_type = 'EMA', # Method
             ma_len1 = 5, # MA1
             ma_len2 = 15, # MA2
+            range_use_flag: bool = False,
+            range_ma_type = 'EMA',
+            range_ma_len = 5,
+            range_lower = -999,
+            range_upper = 999,
             ma_dir = 'crossover', # Direction
             hl_use_flag: bool = False, # Increase/Decrease over N bars
             hl_nbars = 5, # N Bars
             hl_dir = 'Increase', # Direction
             hl_lower = -999, # Lower
-            hl_upper = 999 # Upper
+            hl_upper = 999, # Upper
+            *args, **kwargs
         ):
             
             def test():
-                steel_src='Ore 62'
+                steel_src='Margin'
                 ma_use_flag: bool = False # Coking Coal MA combination
                 ma_type = 'EMA' # Method
                 ma_len1 = 5 # MA1
@@ -1253,6 +1454,14 @@ class Conds:
                 ma_dir = ma_dir,
                 use_flag=ma_use_flag
             )
+            
+            range_line = Ta.ma(df_steel[steel_src], range_ma_len, range_ma_type)
+            range_cond = Conds.Standards.range_cond(
+                line = range_line,
+                lower_thres= range_lower,
+                upper_thres= range_upper,
+                use_flag= range_use_flag
+            )
 
             hl_cond = Conds.price_change_vs_hl(
                 df_steel,
@@ -1264,7 +1473,7 @@ class Conds:
                 high_range=hl_upper
             )
 
-            steel_cond = Utils.combine_conditions([ma_cond, hl_cond])
+            steel_cond = Utils.combine_conditions([ma_cond, hl_cond, range_cond])
             if steel_cond is not None:
                 df_steel['cond'] = steel_cond
                 return Utils.merge_condition(df, dict(zip(df_steel['day'], df_steel['cond'])))
@@ -1272,206 +1481,29 @@ class Conds:
             return None
         
         @staticmethod
-        def coking_coal(
-            df: pd.DataFrame, 
-            show_src: bool = False,
-            ma_use_flag: bool = False, # Coking Coal MA combination
-            ma_type = 'EMA', # Method
-            ma_len1 = 5, # MA1
-            ma_len2 = 15, # MA2
-            ma_dir = 'crossover', # Direction
-            hl_use_flag: bool = False, # Increase/Decrease over N bars
-            hl_nbars = 5, # N Bars
-            hl_dir = 'Increase', # Direction
-            hl_lower = -999, # Lower
-            hl_upper = 999 # Upper
-        ):
-            return Conds.Sectors.steel_ma_and_hl(
-                df = df,
-                steel_src='Aus Coal',
-                show_src=show_src,
-                ma_use_flag = ma_use_flag,
-                ma_type = ma_type,
-                ma_len1 = ma_len1,
-                ma_len2 = ma_len2,
-                ma_dir = ma_dir,
-                hl_use_flag = hl_use_flag,
-                hl_nbars = hl_nbars,
-                hl_dir = hl_dir,
-                hl_lower = hl_lower,
-                hl_upper = hl_upper,
-            )
+        def coking_coal(*args, **kwargs):
+            return Conds.Sectors.steel_ma_and_hl(*args, steel_src='Aus Coal', **kwargs)
         
         @staticmethod
-        def iron_ore(
-            df: pd.DataFrame, 
-            show_src: bool = False,
-            ma_use_flag: bool = False, # Coking Coal MA combination
-            ma_type = 'EMA', # Method
-            ma_len1 = 5, # MA1
-            ma_len2 = 15, # MA2
-            ma_dir = 'crossover', # Direction
-            hl_use_flag: bool = False, # Increase/Decrease over N bars
-            hl_nbars = 5, # N Bars
-            hl_dir = 'Increase', # Direction
-            hl_lower = -999, # Lower
-            hl_upper = 999 # Upper
-        ):
-            return Conds.Sectors.steel_ma_and_hl(
-                df = df,
-                steel_src='Ore 62',
-                show_src=show_src,
-                ma_use_flag = ma_use_flag,
-                ma_type = ma_type,
-                ma_len1 = ma_len1,
-                ma_len2 = ma_len2,
-                ma_dir = ma_dir,
-                hl_use_flag = hl_use_flag,
-                hl_nbars = hl_nbars,
-                hl_dir = hl_dir,
-                hl_lower = hl_lower,
-                hl_upper = hl_upper,
-            )
+        def iron_ore(*args, **kwargs):
+            return Conds.Sectors.steel_ma_and_hl(*args, steel_src='Ore 62', **kwargs)
         
         @staticmethod
-        def china_hrc(
-            df: pd.DataFrame, 
-            ma_use_flag: bool = False, # Coking Coal MA combination
-            ma_type = 'EMA', # Method
-            ma_len1 = 5, # MA1
-            ma_len2 = 15, # MA2
-            ma_dir = 'crossover', # Direction
-            hl_use_flag: bool = False, # Increase/Decrease over N bars
-            hl_nbars = 5, # N Bars
-            hl_dir = 'Increase', # Direction
-            hl_lower = -999, # Lower
-            hl_upper = 999 # Upper
-        ):
-            return Conds.Sectors.steel_ma_and_hl(
-                df = df,
-                steel_src='China HRC',
-                ma_use_flag = ma_use_flag,
-                ma_type = ma_type,
-                ma_len1 = ma_len1,
-                ma_len2 = ma_len2,
-                ma_dir = ma_dir,
-                hl_use_flag = hl_use_flag,
-                hl_nbars = hl_nbars,
-                hl_dir = hl_dir,
-                hl_lower = hl_lower,
-                hl_upper = hl_upper,
-            )
+        def china_hrc(*args, **kwargs):
+            return Conds.Sectors.steel_ma_and_hl(*args, steel_src='China HRC', **kwargs)
         
         @staticmethod
-        def china_rebar(
-            df: pd.DataFrame, 
-            ma_use_flag: bool = False, # Coking Coal MA combination
-            ma_type = 'EMA', # Method
-            ma_len1 = 5, # MA1
-            ma_len2 = 15, # MA2
-            ma_dir = 'crossover', # Direction
-            hl_use_flag: bool = False, # Increase/Decrease over N bars
-            hl_nbars = 5, # N Bars
-            hl_dir = 'Increase', # Direction
-            hl_lower = -999, # Lower
-            hl_upper = 999 # Upper
-        ):
-            return Conds.Sectors.steel_ma_and_hl(
-                df = df,
-                steel_src='China Long steel',
-                ma_use_flag = ma_use_flag,
-                ma_type = ma_type,
-                ma_len1 = ma_len1,
-                ma_len2 = ma_len2,
-                ma_dir = ma_dir,
-                hl_use_flag = hl_use_flag,
-                hl_nbars = hl_nbars,
-                hl_dir = hl_dir,
-                hl_lower = hl_lower,
-                hl_upper = hl_upper,
-            )
+        def china_rebar(*args, **kwargs):
+            return Conds.Sectors.steel_ma_and_hl(*args, steel_src='China Long steel', **kwargs)
         
         @staticmethod
-        def steel_scrap(
-            df: pd.DataFrame, 
-            ma_use_flag: bool = False, # Coking Coal MA combination
-            ma_type = 'EMA', # Method
-            ma_len1 = 5, # MA1
-            ma_len2 = 15, # MA2
-            ma_dir = 'crossover', # Direction
-            hl_use_flag: bool = False, # Increase/Decrease over N bars
-            hl_nbars = 5, # N Bars
-            hl_dir = 'Increase', # Direction
-            hl_lower = -999, # Lower
-            hl_upper = 999 # Upper
-        ):
-            return Conds.Sectors.steel_ma_and_hl(
-                df = df,
-                steel_src='Scrap',
-                ma_use_flag = ma_use_flag,
-                ma_type = ma_type,
-                ma_len1 = ma_len1,
-                ma_len2 = ma_len2,
-                ma_dir = ma_dir,
-                hl_use_flag = hl_use_flag,
-                hl_nbars = hl_nbars,
-                hl_dir = hl_dir,
-                hl_lower = hl_lower,
-                hl_upper = hl_upper,
-            )
+        def steel_scrap(*args, **kwargs):
+            return Conds.Sectors.steel_ma_and_hl(*args, steel_src='Scrap', **kwargs)
         
         @staticmethod
-        def hpg_margin(
-            df: pd.DataFrame, 
-            ma_use_flag: bool = False, # Coking Coal MA combination
-            ma_type = 'EMA', # Method
-            ma_len1 = 5, # MA1
-            ma_len2 = 15, # MA2
-            ma_dir = 'crossover', # Direction
-            hl_use_flag: bool = False, # Increase/Decrease over N bars
-            hl_nbars = 5, # N Bars
-            hl_dir = 'Increase', # Direction
-            hl_lower = -999, # Lower
-            hl_upper = 999 # Upper
-        ):
-            return Conds.Sectors.steel_ma_and_hl(
-                df = df,
-                steel_src='Margin',
-                ma_use_flag = ma_use_flag,
-                ma_type = ma_type,
-                ma_len1 = ma_len1,
-                ma_len2 = ma_len2,
-                ma_dir = ma_dir,
-                hl_use_flag = hl_use_flag,
-                hl_nbars = hl_nbars,
-                hl_dir = hl_dir,
-                hl_lower = hl_lower,
-                hl_upper = hl_upper,
-            )
+        def hpg_margin(*args, **kwargs):
+            return Conds.Sectors.steel_ma_and_hl(*args, steel_src='Margin', **kwargs)
 
-        # MARGIN_MA_useMA = input.bool(defval = false, title = 'MA combination', group = 'MARGIN MA conditions')
-        # MARGIN_MA_MAType = input.string(defval = 'SMA', title = 'MA Method', inline = 'MA1', options = ['SMA'], group = 'MARGIN MA conditions')
-        # MARGIN_MA_MALen1 = input.int(defval = 5, title = 'Line 1 MA Length', inline = 'MA2', group = 'MARGIN MA conditions')
-        # MARGIN_MA_MALen2 = input.int(defval = 15, title = 'Line 2 MA Length', inline = 'MA3', group = 'MARGIN MA conditions')
-        # MARGIN_MA_EntryCond = input.string(defval = 'crossover', title = 'Entry Conditions',options = ['crossover', 'crossunder', 'above', 'below'],inline = 'MA7', group = 'MARGIN MA conditions')
-        # MARGIN_MA_useRange = input.bool(defval = false, title = 'Limit Range;', inline = 'MA4', group = 'MARGIN MA conditions')
-        # MARGIN_MA_lower = input.float(defval = -99999999999, title = 'lower', inline = 'MA4', group = 'MARGIN MA conditions')
-        # MARGIN_MA_upper = input.float(defval = 99999999999, title = 'upper', inline = 'MA4', group = 'MARGIN MA conditions')
-        # MARGIN_hl_use_highest = input.bool(defval = false, title = 'Enter when margin is highest', group = 'MARGIN high/low conditions')
-        # MARGIN_hl_use_lowest = input.bool(defval = false, title = 'Enter when margin is lowest', group = 'MARGIN high/low conditions')
-        # MARGIN_hl_len = input.int(defval = 4, title = 'N Bar', group= 'MARGIN high/low conditions')
-        # MARGIN_plot = input.bool(false, title = 'Plot Margin')
-        
-        # f_MARGIN_cond(margin) =>
-        #     MARGIN_ma1 = dlib.f_ma(margin, MARGIN_MA_MALen1, MARGIN_MA_MAType)    
-        #     MARGIN_ma2 = dlib.f_ma(margin, MARGIN_MA_MALen2, MARGIN_MA_MAType)    
-        #     MARGIN_ma_cond = not MARGIN_MA_useMA or (dlib.f_define_2line_cond(MARGIN_ma1, MARGIN_ma2, MARGIN_MA_EntryCond) and 
-        #                       (not MARGIN_MA_useRange or dlib.f_inrange(MARGIN_ma1, MARGIN_MA_lower, MARGIN_MA_upper) ))
-        #     [isMax, isMin] = f_checkHLMargin(margin, MARGIN_hl_len)
-        #     MARGIN_hl_cond = (not MARGIN_hl_use_highest or isMax) and (not MARGIN_hl_use_lowest or isMin)
-        #     MRGINCond = MARGIN_ma_cond and MARGIN_hl_cond
-        #     MRGINCond
-        
         @staticmethod
         def brokerage_margin(
             df: pd.DataFrame,
@@ -1486,10 +1518,29 @@ class Conds:
             hl_use_flag: bool = False,
             hl_options: str = 'highest',
             hl_nbars: int = 4,
+            
+            use_shift = False,
+            n_shift = 15, 
+            *args, **kwargs
         ):
-            src = df['marginLending']
-            ma1 = Ta.ma(src=src, length=ma_len1, ma_type=ma_type)
-            ma2 = Ta.ma(src=src, length=ma_len2, ma_type=ma_type)
+            def test():
+                df = glob_obj.get_one_stock_data("VND")
+                ma_use_flag: bool = True 
+                ma_type: str = 'SMA' 
+                ma_len1: int = 5
+                ma_len2: int = 15
+                ma_dir: str = 'crossover'
+                range_use_flag: bool = False
+                range_lower: float = -999
+                range_upper: float = 999
+                hl_use_flag: bool = False
+                hl_options: str = 'highest'
+                hl_nbars: int = 4
+            
+            df_mg = df.groupby("mapYQ")[["marginLending"]].max()
+            
+            ma1 = Ta.ma(src=df_mg, length=ma_len1, ma_type=ma_type)
+            ma2 = Ta.ma(src=df_mg, length=ma_len2, ma_type=ma_type)
             ma_cond = Conds.Standards.two_line_conditions(
                 line1=ma1, 
                 line2=ma2, 
@@ -1502,35 +1553,26 @@ class Conds:
             
             def hl_cond():
                 if hl_use_flag:
-                    df_mg = df.groupby("mapYQ")[["marginLending"]].max()
                     func = Ta.is_highest if hl_options == 'highest' else Ta.is_lowest
                     df_mg['matched'] = func(df_mg['marginLending'], hl_nbars)
-                    matched = df["mapYQ"].map(df_mg["matched"])
-                    return matched
+                    return df_mg['matched']
 
                 return None
             
-            cond = Utils.combine_conditions([ma_cond, hl_cond()])
-            return cond
+            matched = Utils.combine_conditions([ma_cond, hl_cond()])
+            if matched is not None:
+                df_mg['cond'] = matched
+                df['cond'] = df['mapYQ'].map(df_mg['cond'])
+                
+                cond = df['cond']
+                if use_shift:
+                    cond = cond.shift(n_shift)
+                    cond = cond.fillna(value=False)
+            
+                return cond
+            
+            return None
         
-# DR_MA_useMA = input.bool(defval = false, title = 'MA combination', group = 'Deposit Rate MA conditions')
-# DR_MA_MAType = input.string(defval = 'EMA', title = 'MA Method', inline = 'MA1', options = ['EMA', 'SMA'], group = 'Deposit Rate MA conditions')
-# DR_MA_MALen1 = input.int(defval = 5, title = 'Line 1 MA Length', inline = 'MA2', group = 'Deposit Rate MA conditions')
-# DR_MA_MALen2 = input.int(defval = 15, title = 'Line 2 MA Length', inline = 'MA3', group = 'Deposit Rate MA conditions')
-# DR_MA_EntryCond = input.string(defval = 'crossover', title = 'Entry Conditions',options = ['crossover', 'crossunder', 'above', 'below'],inline = 'MA7', group = 'Deposit Rate MA conditions')
-# DR_MA_useRange = input.bool(defval = false, title = 'Limit Range;', inline = 'MA4', group = 'Deposit Rate MA conditions')
-# DR_MA_lower = input.float(defval = -99999999999, title = 'lower', inline = 'MA4', group = 'Deposit Rate MA conditions')
-# DR_MA_upper = input.float(defval = 99999999999, title = 'upper', inline = 'MA4', group = 'Deposit Rate MA conditions')
-
-# DR_sett_emaLen1 = input.int(5, title = 'EMA Len 1', group = 'Deposit Rate Percentile')
-# DR_sett_emaLen2 = input.int(15, title = 'EMA Len 2', group ='Deposit Rate Percentile')
-# DR_sett_percentilePeriod = input.int(128, title = 'Percentile Period', group = 'Deposit Rate Percentile')
-# DR_input_usePerc = input.bool(defval = false, title = '', inline = 'vnivperc', group = 'Deposit Rate Percentile')
-# DR_input_percentile = input.float(defval = 90, title = 'percentile', inline = 'vnivperc', group = 'Deposit Rate Percentile') / 100
-# DR_input_direct = input.string('higher', options = ['higher', 'lower'], title = '' ,inline = 'vnivperc', group = 'Deposit Rate Percentile')
-# DR_input_usePercDirect = input.bool(false, title = '', inline = 'vnivperc1', group = 'Deposit Rate Percentile')
-# DR_input_percDirect = input.string('EMA1 > EMA2', options = ['EMA1 > EMA2', 'EMA2 > EMA1'], title = 'Compare Dir', inline = 'vnivperc1', group = 'Deposit Rate Percentile')
-
         @staticmethod
         def brokerage_deposit_rate(
             df: pd.DataFrame,
@@ -1550,7 +1592,8 @@ class Conds:
             pct_thres_pct: float = 90,
             pct_thres_dir: str = 'higher', # 'higher', 'lower' only
             pct_madir_use_flag: bool = False,
-            pct_madir: str = 'EMA1 > EMA2' # 'EMA1 > EMA2' or 'EMA1 < EMA2'
+            pct_madir: str = 'EMA1 > EMA2', # 'EMA1 > EMA2' or 'EMA1 < EMA2'
+            *args, **kwargs
         ):
             def test():
                 ma_len1: int = 5
@@ -1594,14 +1637,7 @@ class Conds:
                 lower_thres=range_lower,
                 upper_thres=range_upper,
             )
-            # DR_EMAV1 = ffill(ta.ema(DR, DR_sett_emaLen1))
-            # DR_EMAV2 = ffill(ta.ema(DR, DR_sett_emaLen2))
-            # DRVGap = DR_EMAV1 - DR_EMAV2
-            # DRVGPer = rolling_rank(math.abs(DRVGap), DR_sett_percentilePeriod)
-
-            # DR_percDirect = DR_input_percDirect == 'EMA1 > EMA2' ? DRVGap > 0 : DRVGap < 0 
-            # DRVCond1 = not DR_input_usePerc or (f_compare_threshold(DRVGPer, DR_input_percentile, DR_input_direct) and (not DR_input_usePercDirect or DR_percDirect))
-
+            
             df['gap'] =  df['drema1'] - df['drema2']
             df['per'] = Ta.rolling_rank(abs(df['gap']), pct_period)
             def thres_cond():
@@ -1622,23 +1658,21 @@ class Conds:
             
             return cond
         
-# f_check_macrodata(financial, usema, malen1, malen2, malines_pos, usechange, change_nperiod, change_dir, change_lrange, change_hrange, 
-# usehlest, hlest, hlestperiods, usestd, stdpos, stdlen, stdmult) =>
-# ma_cond = f_check_ma_cond(financial, usema, malen1, malen2, malines_pos)
-# change_cond = f_check_change_cond(financial, usechange, change_nperiod, change_dir, change_lrange , change_hrange)
-# hlest_cond = f_check_highest_lowest_cond(financial, hlestperiods, usehlest, hlest)
-# std_cond = f_check_std_cond(financial, stdlen, stdmult, usestd, stdpos)
-
-# ma_cond and change_cond and hlest_cond and std_cond
         @staticmethod
         def check_5sectors_macrodata(
             df: pd.DataFrame,
             sector:str,
             field: str,
             ma_use_flag: bool = False,
+            ma_type: str = 'SMA',
             ma_len1: int = 5,
             ma_len2: int = 15,
             ma_dir: str = 'crossover', 
+            range_use_flag: bool = False,
+            range_ma_type: str = 'EMA',
+            range_ma_len: int = 5,
+            range_lower: float = -9999,
+            range_upper: float = 9999,
             change_use_flag: bool = False,
             change_periods: int = 10, 
             change_dir: str = 'increase', #dercrease
@@ -1650,7 +1684,8 @@ class Conds:
             std_use_flag: bool = False,
             std_dir: str = 'higher', 
             std_mult: float = 2,
-            std_periods: int = 10
+            std_periods: int = 10, 
+            *args, **kwargs
         ):
             def test():
                 df = df_raw.copy()
@@ -1673,16 +1708,25 @@ class Conds:
                 std_mult: float = 2
                 std_periods: int = 10
                 
-            df_sector = glob_obj.sectors[sector]['io_data'].copy()
+            df_sector: pd.DataFrame = glob_obj.sectors[sector]['io_data'].copy()
+            df_sector = df_sector[~df_sector[field].isna()]
             
             ma_cond = Conds.Standards.two_ma_lines(
                 df=df_sector,
                 src_name=field,
                 ma_len1=ma_len1,
                 ma_len2=ma_len2,
-                ma_type='SMA',
+                ma_type=ma_type,
                 ma_dir=ma_dir,
                 use_flag=ma_use_flag
+            )
+            
+            range_line = Ta.ma(df_sector[field], range_ma_len, range_ma_type)
+            range_cond = Conds.Standards.range_cond(
+                line = range_line,
+                lower_thres= range_lower,
+                upper_thres= range_upper,
+                use_flag= range_use_flag
             )
             
             change_cond = Conds.price_change(
@@ -1712,34 +1756,15 @@ class Conds:
                 use_flag=std_use_flag
             )
             
-            matched = Utils.combine_conditions([ma_cond, change_cond, hlest_cond, std_cond])
+            matched = Utils.combine_conditions([ma_cond, change_cond, hlest_cond, std_cond, range_cond])
 
             if matched is not None:
                 df_sector['cond'] = matched
-                return Utils.merge_condition(df, dict(zip(df_sector['day'], df_sector['cond'])))
+                cond = Utils.merge_condition(df, dict(zip(df_sector['day'], df_sector['cond'])), fillna=False)
+                cond = cond.ffill().fillna(False)
+                return cond
             
             return  None
-        
-        # useFishPriceMA = input.bool(defval = false, title = 'Check Fish Price MA', group = '-----------Fish Macro Data')
-        # FishPrice_MAlength1 = input.int(defval = 5, title = 'MA length 1',group = '-----------Fish Macro Data')
-        # FishPrice_MAlength2 = input.int(defval = 15, title = 'MA length 2',group = '-----------Fish Macro Data')
-        # FishPrice_MAlinepos = input.string(defval = 'above', title = 'Chọn vị trí giữa 2 đường MA', options = ['crossover','crossunder','above','below'],group = '-----------Fish Macro Data')
-        # FishPrice_MAplot = input.bool(defval = false, title = 'Plot Fish Price', group = '-----------Fish Macro Data')
-        
-        # useFishPriceChange = input.bool(defval = false, title = 'Check Fish Price Change over N periods', group = '-----------Fish Macro Data')
-        # FishPriceChange_NPeriods = input.int(defval = 5, title = 'N periods', group = '-----------Fish Macro Data')
-        # FishPriceChange_dir      = input.string(defval = 'increase', options = ['increase', 'decrease'], title = 'Direction', group = '-----------Fish Macro Data')
-        # FishPriceChange_lowrange = input.float(defval = 0, title = 'Low Range', inline = 'hog1', group = '-----------Fish Macro Data')
-        # FishPriceChange_highrange = input.float(defval = 10, title = 'High Range', inline = 'hog1',group = '-----------Fish Macro Data' )
-
-        # useFishPriceHLest = input.bool(defval = false, title = 'Check Fish Price Highest / Lowest', group = '-----------Fish Macro Data')
-        # FishPriceHLest            = input.string(defval = 'highest', title = 'Use Highest/Lowest over x periods', options = ['highest','lowest'], inline = 'hog2', group = '-----------Fish Macro Data')
-        # FishPriceXPeriods            = input.int(defval = 4, title = 'periods', inline = 'hog2', group = '-----------Fish Macro Data')
-
-        # useFishPriceStd           = input.bool(defval = false, title = 'Check Fish Price Standard Deviation',  group = '-----------Fish Macro Data')
-        # FishPriceStdPos           = input.string(defval = 'higher', title = '', options = ['higher','lower'], inline = 'hog3', group = '-----------Fish Macro Data')
-        # FishPriceStdLength        = input.int(defval = 10, title ='Length', inline = 'hog3', group = '-----------Fish Macro Data')
-        # FishPriceStdMult          = input.float(defval = 1.0, title = 'Multiplier',inline = 'hog3', group = '-----------Fish Macro Data' )
 
         @staticmethod
         def vhc_us_asp(*args, **kwargs):
@@ -1776,21 +1801,43 @@ class Conds:
         @staticmethod
         def china_p4_cash_spread(*args, **kwargs):
             return Conds.Sectors.check_5sectors_macrodata( *args, sector='fertilizer', field='ChinaP4CashSpread', **kwargs)
+        
+        @staticmethod
+        def dcm_ure(*args, **kwargs):
+            return Conds.Sectors.check_5sectors_macrodata( *args, sector='fertilizer', field='DCM', **kwargs)
+        
+        @staticmethod
+        def dpm_ure(*args, **kwargs):
+            return Conds.Sectors.check_5sectors_macrodata( *args, sector='fertilizer', field='DPM', **kwargs)
+        
+        @staticmethod
+        def ure_future(*args, **kwargs):
+            return Conds.Sectors.check_5sectors_macrodata( *args, sector='fertilizer', field='future', **kwargs)
 
 
     @staticmethod
-    def compute_any_conds(df: pd.DataFrame, functions_params_dic: dict, *args):
+    def compute_any_conds(df: pd.DataFrame, functions_params_dic: dict, *args, **kwargs):
         """Compute and combine any conditions"""
         # df = df.copy()
         conds = []
+        use_shift = kwargs.get("use_shift", False)
+        n_shift = kwargs.get("n_shift", 15)
         try:
             for func_name, params in functions_params_dic.items():
-                if func_name == 'stock_scanner':
-                    continue
-                if(func_name not in glob_obj.function_map): 
-                    continue
-                func = glob_obj.function_map[func_name]
-                cond = func(df, **params)
+                try:
+                    if func_name == 'stock_scanner':
+                        continue
+                    if(func_name not in glob_obj.function_map): 
+                        continue
+                    if func_name in glob_obj.fa_funcs:
+                        params['use_shift'] = use_shift
+                        params['n_shift'] = n_shift
+                    func = glob_obj.function_map[func_name]
+                    cond = func(df, **params)
+                except Exception as fe:
+                    cond = None
+                    logging.error(f"function `{func_name}` error: {fe}")
+                    
                 if cond is not None:
                     conds.append(cond)
         except Exception as e:
@@ -1802,49 +1849,85 @@ class Conds:
 
         return None
 
-
     @staticmethod
-    def index_cond(df: pd.DataFrame, **index_params):
+    def index_cond(df: pd.DataFrame, *args, **index_params):
         """Compute index condition"""
         df2 = glob_obj.df_vnindex.copy()
 
         index_cond = Conds.compute_any_conds(df2, index_params)
         if index_cond is not None:
             df2["index_cond"] = index_cond
+            close = df['close']
             df = pd.merge(df, df2, how="left", on="day")
             df["index_cond"] = np.where(
                 df["index_cond"].isna(), False, df["index_cond"]
             )
+            
+            df["index_cond"] = np.where(close.isna(),False, df['index_cond'])
             df = df.infer_objects()
             return df["index_cond"]
+
+        return None
+
+    @staticmethod
+    def lookback_cond(df: pd.DataFrame, n_bars: int, *args, **lookback_params: dict):
+        """Compute lookback condition"""
+        def test():
+            df: pd.DataFrame = df_raw.copy()
+            n_bars = 5
+            lookback_params =  {
+                'lookback_cond':{
+                    'price_change':{
+                        'periods':  2,
+                        'direction':  "increase",
+                        'lower_thres':  6,
+                        'upper_thres':  100,
+                        'use_flag':  True
+                    },
+                    'bbpctb':{
+                        'length': 20,
+                        'mult':  2.5,
+                        'use_range':  False,
+                        'low_range':  80,
+                        'high_range':  100,
+                        'use_cross':  True,
+                        'direction':  "crossover",
+                        'cross_line':  "Lower band",
+                        'use_flag':  True
+                    }
+                }
+            }
+            
+        use_shift = lookback_params.get('use_shift', False)
+        n_shift = lookback_params.get("n_shift", 15)
+
+
+        conds = []
+        for func_name, func_params in lookback_params.items():
+            try:
+                if func_name == 'stock_scanner':
+                    continue
+                if(func_name not in glob_obj.function_map): 
+                    continue
+                if func_name in glob_obj.fa_funcs:
+                    func_params['use_shift'] = use_shift
+                    func_params['n_shift'] = n_shift
+                    
+                func = glob_obj.function_map[func_name]
+                cond: pd.Series = func(df, **func_params)
+            except Exception as fe:
+                cond = None
+                logging.error(f"lookback function `{func_name}` error: {fe}")
+                    
+            if cond is not None:
+                cond = cond.rolling(n_bars, closed = 'left').max().fillna(False).astype(bool)
+                conds.append(cond)
+
+        if len(conds) > 0:
+            return Utils.combine_conditions(conds)
 
         return None
     
-    @staticmethod
-    def index_cond2(df: pd.DataFrame, index_params):
-        """Compute index condition"""
-        df2 = glob_obj.df_vnindex.copy()
-
-        index_cond = Conds.compute_any_conds(df2, index_params)
-        if index_cond is not None:
-            df2["index_cond"] = index_cond
-            df = pd.merge(df, df2, how="left", on="day")
-            df["index_cond"] = np.where(
-                df["index_cond"].isna(), False, df["index_cond"]
-            )
-            df = df.infer_objects()
-            return df["index_cond"]
-
-        return None
-
-    @staticmethod
-    def lookback_cond(df: pd.DataFrame, n_bars: int, **lookback_params: dict):
-        """Compute lookback condition"""
-        lookback_cond = Conds.compute_any_conds(df, lookback_params)
-        if lookback_cond is not None:
-            return lookback_cond.rolling(n_bars, closed = 'left').max().astype(bool)
-
-        return None
 
 class Simulator:
     """Backtest class"""
@@ -1929,37 +2012,44 @@ class Simulator:
         loss_thres=5
     ):
 # %%
-        # entry_condition = {
-        #     'price_comp_ma':{
-        #         "ma_len1":5,
-        #         "ma_len2":15,
-        #         "ma_type":"EMA",
-        #         "ma_dir":"crossover",
-        #         "use_flag": True,
-        #     }
-        # }
+        def test():
+            entry_condition = {
+                'price_comp_ma':{
+                    "ma_len1":5,
+                    "ma_len2":15,
+                    "ma_type":"EMA",
+                    "ma_dir":"crossover",
+                    "use_flag": True,
+                }
+            }
 
-        # exit_condition = {
-        #     'price_comp_ma':{
-        #         "ma_len1":5,
-        #         "ma_len2":15,
-        #         "ma_type":"EMA",
-        #         "ma_dir":"below",
-        #         "use_flag": True,
-        #     }
-        # }
+            exit_condition = {
+                'price_comp_ma':{
+                    "ma_len1":5,
+                    "ma_len2":15,
+                    "ma_type":"EMA",
+                    "ma_dir":"below",
+                    "use_flag": False,
+                }
+            }
 
-        # df = df_raw.copy()
-        
-        # day = df['day'].astype(int).values
-        # open_p = df['open'].values
-        # high_p = df['high'].values
-        # low_p = df['low'].values
-        # entry_signals = Conds.compute_any_conds(df, entry_condition)
-        # exit_signals = Conds.compute_any_conds(df, exit_condition)
-        
-        # direction = 1
-        # holding_periods = 15
+            df = df_raw.copy()
+            
+            day = df['day'].astype(int).values
+            open_p = df['open'].values
+            high_p = df['high'].values
+            low_p = df['low'].values
+            entry_signals = Conds.compute_any_conds(df, entry_condition)
+            exit_signals = Conds.compute_any_conds(df, exit_condition)
+            
+            direction = 1
+            
+            use_holding_periods=False
+            holding_periods = 15
+            
+            use_takeprofit_cutloss=False
+            profit_thres=5
+            loss_thres=5
         
         num_trades = 0
         num_win = 0
@@ -2043,8 +2133,6 @@ class Simulator:
         max_drawdown_arr_i = np.full(len(entry_signals), np.NaN)
         avg_upside_arr_i = np.full(len(entry_signals), np.NaN)
         avg_downside_arr_i = np.full(len(entry_signals), np.NaN)
-        
-        
         
         def src_idx(src, index):
             if index < len(src):
@@ -2265,18 +2353,6 @@ class Simulator:
             avg_downside_arr_i,
         )
         
-        
-        # winrate_arr_i = np.full(len(entry_signals), np.NaN)
-        # avg_returns_arr_i = np.full(len(entry_signals), np.NaN)
-        # profit_factor_arr_i = np.full(len(entry_signals), np.NaN)
-        # return_arr_i = np.full(len(entry_signals), np.NaN)
-        # upside_arr_i = np.full(len(entry_signals), np.NaN)
-        # downside_arr_i = np.full(len(entry_signals), np.NaN)
-        # max_runup_arr_i = np.full(len(entry_signals), np.NaN)
-        # max_drawdown_arr_i = np.full(len(entry_signals), np.NaN)
-        # avg_upside_arr_i = np.full(len(entry_signals), np.NaN)
-        # avg_downside_arr_i = np.full(len(entry_signals), np.NaN)
-        
     def run2(self, 
             trade_direction="Long", 
             use_shift = False,
@@ -2299,11 +2375,11 @@ class Simulator:
             trade_direction="Long"
             use_shift = False,
             n_shift = 15,
-            use_holding_periods = True
+            use_holding_periods = False
             holding_periods=15
             profit_thres=5,
             loss_thres=5
-            use_takeprofit_cutloss = False
+            use_takeprofit_cutloss = True
             compute_start_time="2018_01_01"
             df = df_raw.copy()
             func = Conds.compute_any_conds
@@ -2317,7 +2393,7 @@ class Simulator:
                 'use_range': False,
                 'low_range': 80,
                 'high_range': 100,
-                'use_cross': False,
+                'use_cross': True,
                 'direction': 'crossover',
                 'cross_line': 'Upper band'
                 }
@@ -2329,15 +2405,11 @@ class Simulator:
 # %%
         
         
-        signals = func(df, params)
+        signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
         
         df['signal'] = Utils.new_1val_series(True, df) if signals is None else signals
         df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
-        if use_shift:
-            df["signal"] = df["signal"].shift(n_shift)
-            df["signal"] = df['signal'].fillna(value=False)
-                    
-
+  
         exit_signals = Conds.compute_any_conds(df, exit_params)
         df["exitSignal"] = Utils.new_1val_series(False, df) if exit_signals is None else exit_signals
         
@@ -2728,8 +2800,12 @@ class Simulator:
         )
 
     def run(
-        self, trade_direction="Long", compute_start_time="2018_01_01", use_shift=False,
-        n_shift=15, holding_periods=8
+        self, 
+        trade_direction="Long", 
+        compute_start_time="2018_01_01", 
+        use_shift=False,
+        n_shift=15, 
+        holding_periods=8
     ):
         df = self.df
         func = self.func
@@ -2747,23 +2823,14 @@ class Simulator:
                 trade_direction=trade_direction,
                 holding_periods=holding_periods,
             )
-
-        
-        signals = func(df, params)
+        signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
         
         if signals is None:
             df["signal"] = Utils.new_1val_series(True, df) 
         else:
             df["signal"] = signals
         
-
-        
-            
         df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
-        if use_shift:
-            df["signal"] = df["signal"].shift(n_shift)
-            df["signal"] = df['signal'].fillna(value=False)
-        # print(f"num of nan signals: {df['signal'].isna().sum()}")
         df["name"] = name
 
         # Compute trade stats using Numba
@@ -2911,23 +2978,17 @@ class Simulator:
                 trade_direction=trade_direction,
                 holding_periods=holding_periods,
             )
-
         
-        signals = func(df, params)
+        signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
         
         if signals is None:
             df["signal"] = Utils.new_1val_series(True, df) 
         else:
             df["signal"] = signals
-        
-
-        
             
         df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
-        if use_shift:
-            df["signal"] = df["signal"].shift(n_shift)
-            df["signal"] = df['signal'].fillna(value=False)
-        # print(f"num of nan signals: {df['signal'].isna().sum()}")
+        df["signal"].iloc[-(holding_periods+1):] = False
+
         df["name"] = name
 
         # Compute trade stats using Numba
@@ -3171,10 +3232,160 @@ class Scanner:
         return res_df, trades_df
     
     @staticmethod
+    def scan_multiple_stocks_loop(
+        func, 
+        params, 
+        stocks=None,
+        trade_direction="Long", 
+        use_shift=False,
+        n_shift=15,
+        holding_periods=60):
+        """Backtest on multiple stocks"""
+        
+        def test():
+            func = Conds.compute_any_conds
+            params = {
+                'net_income': {
+                    'use_flag': True,
+                    'percentage': 2,
+                }
+            }
+            trade_direction = "Long"
+            stocks = ['HPG', 'SSI']
+            use_shift = False
+            n_shift =  50
+            holding_periods = 15
+        
+        df_all_stocks = glob_obj.df_stocks
+        if stocks is None:
+            stocks = glob_obj.df_stocks
+        else:
+            df_all_stocks= df_all_stocks[df_all_stocks['stock'].isin(stocks)]
+        
+        sum_ls = []
+        trades_ls = []
+        
+        params = Globs.old_saved_adapters(params)
+        
+        for stock, df_stock in df_all_stocks.groupby("stock"):
+            df_stock = df_stock.reset_index(drop=True)
+
+            
+            bt = Simulator(
+                func,
+                df_ohlcv=df_stock,
+                params=params,
+                name=stock,
+            )
+            try:
+                bt.run(
+                    trade_direction=trade_direction, 
+                    use_shift=use_shift,
+                    n_shift=n_shift,
+                    holding_periods=holding_periods
+                )
+            except Exception as e:
+                print(f"scan error: {e}")
+            
+            
+            sum_ls.append(bt.result)
+            trades_ls.append(bt.df)
+            
+            
+        res_df = pd.DataFrame(sum_ls)
+        res_df = res_df[
+            [
+                "name",
+                "numTrade",
+                "winrate",
+                "profitFactor",
+                "avgReturn",
+                "avgUpside",
+                "avgDownside",
+            ]
+        ].round(2)
+        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups)
+
+        trades_df = pd.concat(trades_ls)    
+        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
+        return res_df, trades_df
+    
+    @staticmethod
+    def scan_multiple_stocks_v2(
+        df,
+        func, 
+        params, 
+        stocks=None,
+        trade_direction="Long", 
+        use_shift=False,
+        n_shift=15,
+        holding_periods=60):
+        """Backtest on multiple stocks"""
+        from danglib.pylabview.celery_worker import scan_one_stock, clean_redis
+
+
+        if stocks is None:
+            df_all_stocks = df
+        else:
+            df_all_stocks= df[df['stock'].isin(stocks)]
+
+        clean_redis()
+        
+        sum_ls = []
+        trades_ls = []
+        task_dic = {}
+        
+        params = Globs.old_saved_adapters(params)
+        
+        for stock, df_stock in df_all_stocks.groupby("stock"):
+            df_stock = df_stock.reset_index(drop=True)
+
+            task = scan_one_stock.delay(
+                df_stock, 
+                func, 
+                params=params,
+                name=stock,
+                trade_direction=trade_direction,
+                use_shift=use_shift,
+                n_shift=n_shift,
+                holding_periods=holding_periods
+            )
+            
+            task_dic[stock] = task
+            
+        while any(t.status!='SUCCESS' for t in task_dic.values()):
+            pass
+
+        for k, v in task_dic.items():
+            bt = v.result
+            if bt is not None:
+                sum_ls.append(bt.result)
+                trades_ls.append(bt.df)
+                
+            
+        res_df = pd.DataFrame(sum_ls)
+        res_df = res_df[
+            [
+                "name",
+                "numTrade",
+                "winrate",
+                "profitFactor",
+                "avgReturn",
+                "avgUpside",
+                "avgDownside",
+            ]
+        ].round(2)
+        res_df["beta_group"] = 'Super High Beta'
+
+        trades_df = pd.concat(trades_ls)    
+        trades_df['beta_group'] = 'Super High Beta'
+        return res_df, trades_df
+    
+    @staticmethod
     def scan_multiple_stocks3(
         func, params, 
         stocks=None, 
-        trade_direction="Long", 
+        trade_direction="Long",
         use_shift=False,
         n_shift=15,
         use_holding_periods=True,
@@ -3183,59 +3394,7 @@ class Scanner:
         profit_thres=5,
         loss_thres=5
         ):
-        # %%
-        # func = Conds.compute_any_conds
-        # stocks=None
-        # trade_direction="Long"
-        # holding_periods=15
-        # params = {
-        #     'china_hrc': {
-        #         'ma_use_flag': True,
-        #         'ma_len1': 5,
-        #         'ma_len2': 15,
-        #         'ma_type': 'EMA',
-        #         'ma_dir': 'crossover',
-        #         'hl_use_flag': False,
-        #         'hl_dir': 'Increase',
-        #         'hl_nbars': 10,
-        #         'hl_lower': 5,
-        #         'hl_upper': 100
-        #     },
-        #     'coking_coal': {
-        #         'ma_use_flag': False,
-        #         'ma_len1': 5,
-        #         'ma_len2': 15,
-        #         'ma_type': 'EMA',
-        #         'ma_dir': 'crossover',
-        #         'hl_use_flag': False,
-        #         'hl_dir': 'Increase',
-        #         'hl_nbars': 10,
-        #         'hl_lower': 5,
-        #         'hl_upper': 100
-        #     },
-        #     'iron_ore': {
-        #         'ma_use_flag': False,
-        #         'ma_len1': 5,
-        #         'ma_len2': 15,
-        #         'ma_type': 'EMA',
-        #         'ma_dir': 'crossover',
-        #         'hl_use_flag': False,
-        #         'hl_dir': 'Increase',
-        #         'hl_nbars': 10,
-        #         'hl_lower': 5,
-        #         'hl_upper': 100
-        #     },
-        #     # 'exit_cond':{
-        #     #     'price_comp_ma':{
-        #     #         "ma_len1":5,
-        #     #         "ma_len2":15,
-        #     #         "ma_type":"EMA",
-        #     #         "ma_dir":"crossunder",
-        #     #         "use_flag": True,
-        #     #     }
-        #     # }
-        # }
-        
+
         # exit_params = params.pop('exit_cond') if 'exit_cond' in params else {}
         """Backtest on multiple stocks"""  
         from danglib.pylabview.celery_worker import scan_one_stock_v2, clean_redis
@@ -3387,10 +3546,87 @@ class Scanner:
         trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
         return res_df, trades_df
 
+
+    @staticmethod
+    def scan_multiple_stocks_v4(
+        func, 
+        params, 
+        stocks=None,
+        trade_direction="Long", 
+        use_shift=False,
+        n_shift=15,
+        holding_periods=60):
+        """Backtest on multiple stocks"""
+        from danglib.pylabview.celery_worker import scan_one_stock_v3, clean_redis
+
+        df_all_stocks = glob_obj.df_stocks.copy()
+        if stocks is None:
+            stocks = glob_obj.df_stocks
+        else:
+            df_all_stocks= df_all_stocks[df_all_stocks['stock'].isin(stocks)]
+        df_all_stocks = df_all_stocks.pivot(index = 'day', columns = 'stock')
+        clean_redis()
+        
+        sum_ls = []
+        trades_ls = []
+        err_stocks = {}
+        task_dic = {}
+        
+        params = Globs.old_saved_adapters(params)
+        
+        for stock, df_stock in df_all_stocks.groupby("stock", axis =1):
+        # for stock in df_all_stocks.columns.get_level_values(level='stock'):
+            # df_stock = df_all_stocks.xs(stock,level = 'stock', axis=1)
+            df_stock.columns = df_stock.columns.droplevel('stock')
+            df_stock = df_stock.reset_index(drop=False)
+            df_stock['stock'] = stock
+            task = scan_one_stock_v3.delay(
+                df_stock, 
+                func, 
+                params=params,
+                name=stock,
+                trade_direction=trade_direction,
+                use_shift=use_shift,
+                n_shift=n_shift,
+                holding_periods=holding_periods
+            )
+            
+            task_dic[stock] = task
+            
+        while any(t.status!='SUCCESS' for t in task_dic.values()):
+            pass
+
+        for k, v in task_dic.items():
+            bt = v.result
+            if bt is not None:
+                sum_ls.append(bt.result)
+                trades_ls.append(bt.df)
+                
+            
+        res_df = pd.DataFrame(sum_ls)
+        res_df = res_df[
+            [
+                "name",
+                "numTrade",
+                "winrate",
+                "profitFactor",
+                "avgReturn",
+                "avgUpside",
+                "avgDownside",
+            ]
+        ].round(2)
+        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups)
+
+        trades_df = pd.concat(trades_ls)    
+        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
+        return res_df, trades_df
+    
+    
+
 glob_obj = Globs()
 # glob_obj.load_stocks_data()
-glob_obj.load_vnindex()
-glob_obj.load_sectors_data()
+# glob_obj.load_vnindex()
+# glob_obj.load_sectors_data()
 
 def test():
     df = glob_obj.get_one_stock_data("HPG")
@@ -3403,34 +3639,74 @@ def test():
             }
         }
     )
-    res, df = Scanner.scan_multiple_stocks3(
+
+    Conds.compute_any_conds(df, params)
+
+    res, df = Scanner.scan_multiple_stocks_v4(
             func=Conds.compute_any_conds,
             params=params,
             stocks=['HPG', 'SSI', 'CTR'],
             trade_direction='Long', 
-            use_holding_periods=True,
+            # use_holding_periods=True,
             holding_periods=15,
-            use_takeprofit_cutloss=False,
-            profit_thres=5,
-            loss_thres=5
+            # use_takeprofit_cutloss=False,
+            # profit_thres=5,
+            # loss_thres=5
         )
     
-    
+
+
 if __name__ == "__main__":
-
-    df_raw = glob_obj.get_one_stock_data("SSI")
-    try:
-        # Tạo một đối tượng ArgumentParser
-        parser = argparse.ArgumentParser(description="A program to demonstrate command line arguments.")
-
-        # Thêm các đối số
-        parser.add_argument('--updatedata', action='store_true', help="Update stocks data for Pylabview")
-
-        args = parser.parse_args()
-        
-        if args.updatedata:
-            glob_obj.gen_stocks_data(send_viber=True)
-    except:
-        pass
+    glob_obj.load_all_data()
     
+    # glob_obj.gen_stocks_data()
+    
+    df_raw = glob_obj.get_one_stock_data("SSI")
+    # try:
+    #     # Tạo một đối tượng ArgumentParser
+    #     parser = argparse.ArgumentParser(description="A program to demonstrate command line arguments.")
+
+    #     # Thêm các đối số
+    #     parser.add_argument('--updatedata', action='store_true', help="Update stocks data for Pylabview")
+
+    #     args = parser.parse_args()
+        
+    #     if args.updatedata:
+    #         glob_obj.gen_stocks_data(send_viber=True)
+    # except:
+    #     pass
+    
+    # show_ram_usage_mb()
+    # glob_obj.load_stocks_data()
+    # df = glob_obj.load_stocks_data()
 # celery -A celery_worker worker --concurrency=10 --loglevel=INFO -n celery_worker@pylabview 
+
+    def test_loop():
+        Conds.price_change
+        Conds.Fa.net_income
+        func = Conds.compute_any_conds
+        params = {
+            "lookback_cond":{
+                'n_bars': 15,
+                'net_income': {
+                    'use_flag': True,
+                    'percentage': 2
+                }
+            }
+        }
+        trade_direction = "Long"
+        stocks = ['HPG', 'SSI']
+        use_shift = True
+        n_shift =  50
+        holding_periods = 15
+        
+        df_res, df_trades = Scanner.scan_multiple_stocks_loop(
+            func=func,
+            params=params,
+            stocks=stocks,
+            trade_direction=trade_direction,
+            use_shift=use_shift,
+            n_shift=n_shift,
+            holding_periods=holding_periods
+        )
+        df_res

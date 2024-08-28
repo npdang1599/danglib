@@ -68,12 +68,11 @@ class Adapters:
     @staticmethod
     def load_stocks_data_from_plasma():
         from danglib.lazy_core import gen_plasma_functions
-        _, disconnect, psave, pload = gen_plasma_functions()
+        _, disconnect, psave, pload = gen_plasma_functions(db=5)
         
         nummeric_data = pload("stocks_data_nummeric")
         stocks_i2s = pickle.loads(r.get("pylabview_stocks_i2s"))
         columns = pickle.loads(r.get("pylabview_stocks_data_columns"))
-        
         
         df = pd.DataFrame(nummeric_data, columns=columns)
         df['stock'] = df['stock'].map(stocks_i2s)
@@ -603,10 +602,40 @@ class Adapters:
             to_plasma=False,
         ):
         def example_params():
-            stocks = ['HPG', 'SSI', 'VPB', 'TCB']
-            start_day = '2017_01_01'
+            stocks = ['VGI', 'HPG']
+            start_day = '2019_07_11'
         
-        df_stocks: pd.DataFrame = Adapters.get_stocks_data_from_db_fiinpro(stocks=stocks, from_day=start_day)
+        # df_stocks: pd.DataFrame = Adapters.get_stocks_data_from_db_fiinpro(stocks=stocks, from_day=start_day)
+        
+        db = MongoClient(HOST, 27022)["stockdata"]
+        col = db['combined_price_fa']
+        df_stocks = pd.DataFrame(list(col.find(
+            {
+                'day': {'$gte': start_day},
+                'stock': {'$in': stocks}
+            },
+            {
+                "_id": 0,
+                'stock': 1,
+                'day': 1,
+                'open': 1,
+                'close': 1,
+                'high':1,
+                'low':1,
+                'value':1
+            }
+        )))
+        
+        
+        if len(df_stocks['stock'].unique().tolist()) != len(stocks):
+            missing_stocks = []
+            for s in stocks:
+                if s not in df_stocks['stock'].unique():
+                    missing_stocks.append(s)
+                    
+            logging.warning(f"`prepare_stocks_data` error: Missing {missing_stocks} data in `combined_price_fa` db")
+
+        df_stocks: pd.DataFrame = df_stocks.rename(columns={'value':'volume'})
         df_stocks = Utils.compute_quarter_day_map(df_stocks)
         
         # NetIncome, Revenue
@@ -660,7 +689,7 @@ class Adapters:
         if to_plasma:
             from danglib.lazy_core import gen_plasma_functions
 
-            _, disconnect, psave, pload = gen_plasma_functions()
+            _, disconnect, psave, pload = gen_plasma_functions(db=5)
             
             dfp = df_stocks_to_num(dfres)
             psave("stocks_data_nummeric", dfp)

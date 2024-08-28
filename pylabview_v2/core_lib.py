@@ -83,11 +83,12 @@ class Adapters:
     @staticmethod
     def load_stocks_data_from_plasma():
         from danglib.lazy_core import gen_plasma_functions
-        _, disconnect, psave, pload = gen_plasma_functions(db=5)
+        _, disconnect, psave, pload = gen_plasma_functions()
         
         nummeric_data = pload("stocks_data_nummeric")
         stocks_i2s = pickle.loads(r.get("pylabview_stocks_i2s"))
         columns = pickle.loads(r.get("pylabview_stocks_data_columns"))
+        
         
         df = pd.DataFrame(nummeric_data, columns=columns)
         df['stock'] = df['stock'].map(stocks_i2s)
@@ -96,6 +97,7 @@ class Adapters:
         
         return df
         
+
     @staticmethod
     def map_net_income(df: pd.DataFrame, symbol: str):
         """Map DataFrame with Quarterly Net Income data
