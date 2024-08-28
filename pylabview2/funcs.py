@@ -970,6 +970,19 @@ class Conds:
 
         return None
     
+
+    @staticmethod
+    def detech_peak_by_price(df, pct_change, n_bars_before, n_bars_after):
+        def test():
+            df = df_raw.copy()
+            pct_change = 10
+            n_bars_before = 10
+            n_bars_after = 5
+        src = df['close']
+
+        price_change = Conds.price_change(df, 'close', periods=n_bars_before, lower_thres=pct_change, use_flag=True)
+
+    
 class FilteringStocks:
 
     @staticmethod

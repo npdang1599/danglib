@@ -2,7 +2,7 @@ from pymongo import MongoClient
 from redis import StrictRedis
 import pandas as pd
 from datetime import datetime as dt
-from dc_server.adapters.pickle_adapter_ssi_ws import PICKLED_WS_ADAPTERS
+# from dc_server.adapters.pickle_adapter_ssi_ws import PICKLED_WS_ADAPTERS
 import json
 
 class MongoCLIs:
@@ -110,10 +110,10 @@ class MongoDBs:
         db = cli['cache']
         return db
     
-    @staticmethod
-    def hose_500(day):
-        db = PICKLED_WS_ADAPTERS.load_hose500_from_db(day)
-        return db
+    # @staticmethod
+    # def hose_500(day):
+    #     db = PICKLED_WS_ADAPTERS.load_hose500_from_db(day)
+    #     return db
     
 
 class MongoAdapters:
