@@ -978,9 +978,47 @@ class Conds:
             pct_change = 10
             n_bars_before = 10
             n_bars_after = 5
-        src = df['close']
+            
+        src: pd.DataFrame = df['close']
 
-        price_change = Conds.price_change(df, 'close', periods=n_bars_before, lower_thres=pct_change, use_flag=True)
+        df_price_change = Conds.price_change(df, 'close', periods=n_bars_before, lower_thres=pct_change, use_flag=True)
+
+        df_rollmax = src.rolling(n_bars_after).max().shift(-(n_bars_after))
+        df_matched_after = src >= df_rollmax
+        
+        df_matched = df_price_change & df_matched_after
+        
+        def test_res():
+            view_stock = 'HPG'
+            dfv = src[view_stock].to_frame('close')
+            dfv['priceChange'] = dfv['close'].pct_change(periods=n_bars_before).round(6) * 100
+            dfv['matchedPC'] = df_price_change[view_stock]
+            dfv['rollmax'] = dfv['close'].rolling(n_bars_after).max()
+            dfv['rollmaxShift'] = df_rollmax[view_stock]
+            dfv['matchedAfter'] = df_matched_after[view_stock]
+            dfv['matched'] = df_matched[view_stock]
+            
+            import plotly.graph_objects as go
+            import pandas as pd
+
+            df_ohlc = df.xs(view_stock, level = 'stock', axis=1)
+            # Create a candlestick chart
+            fig = go.Figure(data=[go.Candlestick(x=df_ohlc.index,
+                            open=df_ohlc['open'],
+                            high=df_ohlc['high'],
+                            low=df_ohlc['low'],
+                            close=df_ohlc['close'])])
+
+            # Add titles and labels
+            fig.update_layout(
+                title='Candlestick Chart Example',
+                xaxis_title='Date',
+                yaxis_title='Price',
+                xaxis_rangeslider_visible=False
+            )
+
+            # Show the figure
+            fig.show()
 
     
 class FilteringStocks:
@@ -1897,6 +1935,95 @@ def get_from_day(df: pd.DataFrame, from_day, col = None):
         df = df[df.index >= from_day]
     return df
 
+
+class View:
+    @staticmethod
+    def plot_detecting_peak_result(view_stock):
+        # view_stock = 'HPG'
+        df = df_raw.copy()
+        pct_change = 5
+        n_bars_before = 15
+        n_bars_after = 5
+        margin = 1.002
+            
+        src: pd.DataFrame = df['close']
+        high: pd.DataFrame = df['high']
+        
+        price_change_cond = Conds.price_change_vs_hl(df, 'close', nbars=n_bars_before, low_range=pct_change, use_flag=True)
+        
+        
+        df_matched_before = src == src.rolling(n_bars_before).max()
+
+        df_rollmax = src.rolling(n_bars_after).max().shift(-(n_bars_after))
+        # df_matched_after = src >= df_rollmax
+        df_matched_after = high * margin >= high.rolling(n_bars_after).max().shift(-(n_bars_after))
+        
+        df_matched = price_change_cond & df_matched_before & df_matched_after
+        
+        dfv = src[view_stock].to_frame('close')
+        dfv['priceChange'] = dfv['close'].pct_change(periods=n_bars_before).round(6) * 100
+        dfv['matchedPC'] = df_matched_before[view_stock]
+        dfv['rollmax'] = dfv['close'].rolling(n_bars_after).max()
+        dfv['rollmaxShift'] = df_rollmax[view_stock]
+        dfv['matchedAfter'] = df_matched_after[view_stock]
+        dfv['matched'] = df_matched[view_stock]
+        
+        import plotly.graph_objects as go
+        import pandas as pd
+
+        df_ohlc = df.xs(view_stock, level = 'stock', axis=1)
+        # Create a candlestick chart
+        fig = go.Figure(data=[go.Candlestick(x=df_ohlc.index,
+                        open=df_ohlc['open'],
+                        high=df_ohlc['high'],
+                        low=df_ohlc['low'],
+                        close=df_ohlc['close'])])
+        
+        df_matched = dfv[dfv['matched']]
+        
+        fig.add_trace(go.Scatter(
+            x=df_matched.index,
+            y=df_matched['close'],
+            mode='markers',
+            marker=dict(color='blue', size=10, symbol='triangle-up'),
+            name='Peak'
+        ))
+
+        # Add titles and labels
+        fig.update_layout(
+            title='Candlestick Chart',
+            xaxis_title='Date',
+            yaxis_title='Price',
+            xaxis_rangeslider_visible=False
+        )
+
+        # Show the figure
+        return fig
+
+def create_dash_app():
+    from dash import Dash, html, dcc, callback, Output, Input
+    import plotly.express as px
+    import pandas as pd
+    print("Reloading")
+    app = Dash()
+
+    app.layout = [
+        html.H1(children='Plot', style={'textAlign':'center'}),
+        dcc.Dropdown(glob_obj.stocks, 'HPG', id='dropdown-selection'),
+        dcc.Graph(id='graph-content')
+    ]
+
+    @callback(
+        Output('graph-content', 'figure'),
+        Input('dropdown-selection', 'value')
+    )
+    def update_graph(value):
+        
+        return View.plot_detecting_peak_result(value)
+    
+    return app
+
+
 if __name__ == "__main__":
     glob_obj.load_all_data()
     df_raw = glob_obj.df_stocks.copy()
@@ -1904,3 +2031,6 @@ if __name__ == "__main__":
 
     from danglib.utils import show_ram_usage_mb
     show_ram_usage_mb()
+    
+    app = create_dash_app()
+    app.run(debug=True, host='192.168.9.19', port=1999)
