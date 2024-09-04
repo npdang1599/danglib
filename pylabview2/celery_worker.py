@@ -53,12 +53,13 @@ app = app_factory(CELERY_RESOURCES.HOST)
 class TaskName:
     COMPUTE_STOCK = 'compute_one_stock'
     COMPUTE_MULTI_STRATEGIES = 'compute_multi_strategies'
+    COMPUTE_MULTI_STRATEGIES_URSI = 'compute_multi_strategies_ursi'
     COMPUTE_SIGNAL = 'compute_signal'
 
 @app.task(name=TaskName.COMPUTE_SIGNAL)
 def compute_signal(idx, params: dict):
 
-    _, disconnect, psave, pload = gen_plasma_functions()
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
 
     df: pd.DataFrame = pload("df_stocks")
     print(df.shape)
@@ -85,7 +86,7 @@ def compute_signal(idx, params: dict):
 @app.task(name=TaskName.COMPUTE_STOCK)
 def scan_one_stock(conds1, conds2):
     with plasma_lock:
-        _, _, psave, pload, disconect = gen_plasma_functions()
+        _, _, psave, pload, disconect = gen_plasma_functions(db=5)
 
         re_2d = pload("return_array")
         disconect()
@@ -95,7 +96,7 @@ def scan_one_stock(conds1, conds2):
 @app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES)
 def compute_multi_strategies(i):
 
-    _, disconnect, psave, pload = gen_plasma_functions()
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
 
     array_3d = pload("sig_3d_array")
     re_2d = pload("return_array")
@@ -134,6 +135,75 @@ def compute_multi_strategies(i):
     # return nt_ls, re_ls, wt_ls
 
 
+@app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_URSI)
+def compute_multi_strategies_ursi(i):
+
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+    array_3d = pload("sig_3d_array")
+    ursi_2d = pload("ursi_vectorized")
+    
+
+    df1 = array_3d[i]
+
+    stock_count_ls=[]
+    ursi_res = []
+
+    for j in range(i+1, len(array_3d)):
+        df2 = array_3d[j]
+
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
+
+        cond = df1 * df2
+        stocks_count = np.sum(cond, axis=1)
+        stock_count_ls.append(stocks_count)
+
+        s_ursi = np.sum(np.nan_to_num(ursi_2d * cond, 0))
+        s2_ursi = np.sum(np.nan_to_num((ursi_2d ** 2) * cond, 0))
+
+        ursi_res.append({'j': j, 'sum': s_ursi, 'sumSquare': s2_ursi})
+
+
+
+    disconnect()
+
+    stock_count_arr = np.vstack(stock_count_ls)
+
+    with open(f"/data/dang/tmp2/stocks_count_day/combo_{i}.pkl", 'wb') as f:
+        pickle.dump(stock_count_arr, f)
+
+    with open(f"/data/dang/tmp2/ursi_sum/combo_{i}.pkl", 'wb') as f:
+        pickle.dump(pd.DataFrame(ursi_res), f)
+
+
+def test():
+    
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+    array_3d = pload("sig_3d_array")
+    ursi_2d = pload("ursi_vectorized")
+
+    i =283
+
+    res = []
+    for j in range(i+1, len(array_3d)):
+        df2 = array_3d[j]
+
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
+
+        cond = df1 * df2
+        s_ursi = np.sum(np.nan_to_num(ursi_2d * cond, 0))
+        s2_ursi = np.sum(np.nan_to_num((ursi_2d ** 2) * cond, 0))
+
+        res.append({'j': j, 'sum': s_ursi, 'sumSquare': s2_ursi})
+
+    disconnect()
+
+    res = pd.DataFrame(res)
+    with open(f"/data/dang/tmp2/ursi_sum/combo_{i}.pkl", 'wb') as f:
+        pickle.dump(res, f)
 
 
 

@@ -31,6 +31,7 @@ class Adapters:
         INDEX_LIST = ['VNINDEX','VN30','VNDIAMOND','VNMID','VNSML']
 
         df = df[(df['code'].isin(INDEX_LIST)) & (df['tradingDate'] >= '2017_01_01')].copy()
+        df = df.drop_duplicates(subset = ['code','tradingDate'],keep='last')
 
         df = df[['code', 'tradingDate','open', 'close', 'high', 'low', 'totalMatchValue']].copy().rename(columns ={
             'code':'stock',

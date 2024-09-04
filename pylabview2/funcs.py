@@ -1778,119 +1778,236 @@ class Vectorized:
 
         return params_df, sig_dic
     
+
     @staticmethod
-    def compute_all(df: pd.DataFrame, recompute_signals = True):
-        from danglib.pylabview2.celery_worker import compute_signal, clean_redis, compute_multi_strategies
-        _, client_disconnect, psave, pload = gen_plasma_functions()
+    def calc_and_push_data_to_plasma(
+        push_stocks_numpy: bool = False, 
+        push_return_numpy: bool = False,
+        push_ursi_numpy: bool = False
 
-        psave("df_stocks", df)
+    ):
+        _, client_disconnect, psave, pload = gen_plasma_functions(db=5)
 
-        # df_return: pd.DataFrame  = df['open'].pct_change(15).shift(-16) * 100
+        df = glob_obj.df_stocks
+        close: pd.DataFrame = df['close']
+        stocks_map = {k: v for k, v in enumerate(close.columns)}
+        day_ls = close.index.to_list()
+        day_ls = [i for i in day_ls if i >= '2018_01_01']
 
-        df_return: pd.DataFrame  = (df['open'].shift(-16) / df['open'].shift(-1) - 1) * 100
+        if push_stocks_numpy:
+            psave("df_stocks", df)
 
-        df_return = get_from_day(df_return, '2018_01_01')
-        return_num = df_return.to_numpy()
+        if push_return_numpy:
+            df_return: pd.DataFrame  = (df['open'].shift(-16) / df['open'].shift(-1) - 1) * 100
 
-        stocks_map = {k: v for k, v in enumerate(df_return.columns)}
+            df_return = get_from_day(df_return, '2018_01_01')
+            return_num = df_return.to_numpy()
 
-        psave("return_array", return_num)
+            psave("return_array", return_num)
 
-        def compute_signals():
-            params_df: pd.DataFrame = Vectorized.create_params_sets()
-            n_strats = len(params_df)
+        if push_ursi_numpy:
+            src = df['close']
+            df_ursi, _ = Ta.ursi(src)
 
-            if recompute_signals:
-                df_tmp = df['close']
-                df_tmp = df_tmp[df_tmp.index >= '2018_01_01']
-                n_rows, n_cols = df_tmp.shape
+            df_ursi = get_from_day(df_ursi, '2018_01_01')
+            ursi_num = df_ursi.to_numpy()
 
-                # Khởi tạo một mảng NumPy 3 chiều với kích thước (2000, 2000, 200)
-                array_3d = np.empty((n_strats, n_rows, n_cols))
-
-                task_dic = {}
-                print("Computing signals:")
-                for idx, params in tqdm(params_df.iterrows(), total=params_df.shape[0]):    
-                    params = params.dropna().to_dict()
-                    task_dic[idx] = compute_signal.delay(idx, params)
-
-                while any(t.status!='SUCCESS' for t in task_dic.values()):
-                    pass
-                
-                for idx, v in task_dic.items():
-                    res: pd.DataFrame = v.result
-                    if res is not None:
-                        array_3d[idx, :, :] = res
-
-                    else:
-                        print(f"{idx} error")
-                array_3d = array_3d.astype(bool)
-                psave("sig_3d_array",array_3d)
-                clean_redis()
-
-            return n_strats
-
-        def compute_stats(n):
-            clean_redis()
-
-            task_dic = {}
-            print("Computing stats")
-            for i in tqdm(range(0, n-1)):
-                task_dic[i] = compute_multi_strategies.delay(i)
-
-            while any(t.status!='SUCCESS' for t in task_dic.values()):
-                pass
-
-            clean_redis()
-
-        def join_data(n):
-            fns = walk_through_files("/data/dang/tmp/")
-
-            def join_one_stats(name):
-
-                # df_res: pd.DataFrame = None
-                res = []
-                print(f"Join {name} stats: ")
-                for f in tqdm(fns):
-                    f: str
-                    i = int(f.split('/')[-1].split(".")[0].split("_")[1])
-                    if i < 2013:
-                        nt_raw, re_raw, wt_raw = pd.read_pickle(f)
-                        src = None
-                        if name == 'nt':
-                            src = nt_raw
-                        if name == 're':
-                            src = re_raw
-                        if name == 'wt':
-                            src = wt_raw
-
-                        tmp = pd.DataFrame(src, index=list(range(i+1, n)))
-                        tmp[-1] = i 
-                        res.append(tmp)
-                res: pd.DataFrame = pd.concat(res)
-                res = res.reset_index(names=-2)
-                cols_map = stocks_map.copy()
-                cols_map[-1] = 'i'
-                cols_map[-2] = 'j'
-
-                res = res.rename(columns = cols_map)
-                res = res.set_index(['i', 'j'])
-                write_pickle(f"/home/ubuntu/Dang/pickles/df_{name}.pkl", res)
-
-            join_one_stats('nt')
-            join_one_stats('wt')
-            join_one_stats('re')
-
-
-
-        n = compute_signals()
-        compute_stats(n)
-        join_data(n)
+            psave("ursi_vectorized", ursi_num)
 
         client_disconnect()
 
+        return stocks_map, day_ls
+
+    
+    @staticmethod
+    def compute_signals(recompute = True):
+        from danglib.pylabview2.celery_worker import compute_signal, clean_redis
+
+        params_df: pd.DataFrame = Vectorized.create_params_sets()
+        n_strats = len(params_df)
+
+        if recompute:
+            _, client_disconnect, psave, pload = gen_plasma_functions(db=5)
+            df_tmp = df['close']
+            df_tmp = df_tmp[df_tmp.index >= '2018_01_01']
+            n_rows, n_cols = df_tmp.shape
+
+            # Khởi tạo một mảng NumPy 3 chiều với kích thước (2000, 2000, 200)
+            array_3d = np.empty((n_strats, n_rows, n_cols))
+
+            task_dic = {}
+            print("Computing signals:")
+            for idx, params in tqdm(params_df.iterrows(), total=params_df.shape[0]):    
+                params = params.dropna().to_dict()
+                task_dic[idx] = compute_signal.delay(idx, params)
+
+            while any(t.status!='SUCCESS' for t in task_dic.values()):
+                pass
+            
+            for idx, v in task_dic.items():
+                res: pd.DataFrame = v.result
+                if res is not None:
+                    array_3d[idx, :, :] = res
+
+                else:
+                    print(f"{idx} error")
+            array_3d = array_3d.astype(bool)
+            psave("sig_3d_array",array_3d)
+
+            clean_redis()
+            client_disconnect()
+
+        return n_strats
+    
+    @staticmethod
+    def compute_wr_re_nt_for_all_strats(n_solo_strats):
+        from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies
+        clean_redis()
+
+        task_dic = {}
+        print("Computing stats")
+        for i in tqdm(range(0, n_solo_strats-1)):
+            task_dic[i] = compute_multi_strategies.delay(i)
+
+        while any(t.status!='SUCCESS' for t in task_dic.values()):
+            pass
+
+        clean_redis()
+
+    @staticmethod
+    def join_wr_re_nt_data(n, stocks_map):
+        fns = walk_through_files("/data/dang/tmp/")
+
+        def join_one_stats(name):
+
+            # df_res: pd.DataFrame = None
+            res = []
+            print(f"Join {name} stats: ")
+            for f in tqdm(fns):
+                f: str
+                i = int(f.split('/')[-1].split(".")[0].split("_")[1])
+                if i < 2013:
+                    nt_raw, re_raw, wt_raw = pd.read_pickle(f)
+                    src = None
+                    if name == 'nt':
+                        src = nt_raw
+                    if name == 're':
+                        src = re_raw
+                    if name == 'wt':
+                        src = wt_raw
+
+                    tmp = pd.DataFrame(src, index=list(range(i+1, n)))
+                    tmp[-1] = i 
+                    res.append(tmp)
+            res: pd.DataFrame = pd.concat(res)
+            res = res.reset_index(names=-2)
+            cols_map = stocks_map.copy()
+            cols_map[-1] = 'i'
+            cols_map[-2] = 'j'
+
+            res = res.rename(columns = cols_map)
+            res = res.set_index(['i', 'j'])
+            write_pickle(f"/home/ubuntu/Dang/pickles/df_{name}.pkl", res)
+
+        join_one_stats('nt')
+        join_one_stats('wt')
+        join_one_stats('re')
+
+    
+    @staticmethod
+    def compute_all(recompute_signals: bool = True):
+
+        stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+                                            push_return_numpy=True, 
+                                            push_stocks_numpy=True
+                                        )
+        
+        n_strats = Vectorized.compute_signals(recompute_signals)
+
+        Vectorized.compute_wr_re_nt_for_all_strats(n_strats)
+        Vectorized.join_wr_re_nt_data(n_strats, stocks_map)
+
+
+    @staticmethod
+    def compute_ursi_for_all_strats(n_solo_strats):
+        from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_ursi
+        clean_redis()
+
+        task_dic = {}
+        print("Computing stats")
+        for i in tqdm(range(0, n_solo_strats-1)):
+            task_dic[i] = compute_multi_strategies_ursi.delay(i)
+
+        while any(t.status!='SUCCESS' for t in task_dic.values()):
+            pass
+
+        clean_redis()
+
+    @staticmethod
+    def join_ursi_result(n, day_ls):
+        def test():
+            n =  1418
+            
+
+        fns = walk_through_files("/data/dang/tmp2/stocks_count_day/")
+        print(f"Join stocks count: ")
+        # df_res: pd.DataFrame = None
+        res = []
+
+        for f in tqdm(fns):
+            f: str
+            i = int(f.split('/')[-1].split(".")[0].split("_")[1])
+
+            src = pd.read_pickle(f)
+            tmp = pd.DataFrame(src, index=list(range(i+1, n)))
+            tmp[-1] = i 
+            res.append(tmp)
+        res: pd.DataFrame = pd.concat(res)
+        res = res.reset_index(names=-2)
+        cols = [int(i) for i in day_ls]
+        res = res.rename(columns={-1:'i', -2:'j'})
+
+        # res = res.rename(columns = day_ls)
+        res = res.set_index(['i', 'j'])
+        res.columns = cols
+        res.sort_index(axis=1)
+        
+        write_pickle(f"/home/ubuntu/Dang/pickles/stocks_matched_day.pkl", res)
+
+
+        fns2 = walk_through_files("/data/dang/tmp2/ursi_sum/")
+        print(f"Join ursi: ")
+        # df_res: pd.DataFrame = None
+        res2 = []
+
+        for f in tqdm(fns2):
+            f: str
+            i = int(f.split('/')[-1].split(".")[0].split("_")[1])
+
+            src = pd.read_pickle(f)
+            src['i'] = i 
+            res2.append(src)
+        res2: pd.DataFrame = pd.concat(res2)
+        res2 = res2.set_index(['i', 'j'])
+
+        write_pickle(f"/home/ubuntu/Dang/pickles/strats_stocks_ursi.pkl", res2)
+
+    @staticmethod
+    def compute_ursi(recompute_signals: bool = False):
+        stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+                                            push_return_numpy=True, 
+                                            push_stocks_numpy=True
+                                        )
+        
+        n_strats = Vectorized.compute_signals(recompute_signals)
+
+        Vectorized.compute_ursi_for_all_strats(n_strats)
+        Vectorized.join_ursi_result(n_strats, day_ls)
+
+
 def run():     
-    Vectorized.compute_all(df, recompute_signals=True)
+    Vectorized.compute_all(recompute_signals=True)
+    Vectorized.compute_ursi(recompute_signals=True)
         
 
 glob_obj = Globs()
@@ -1928,6 +2045,8 @@ def test_2():
         except:
             print('Error')
 
+    df_stock_count = pd.read_pickle("/home/ubuntu/Dang/pickles/stocks_matched_day.pkl")
+
 def get_from_day(df: pd.DataFrame, from_day, col = None):
     if col is not None:
         df = df[df[col] >= from_day]    
@@ -1938,14 +2057,21 @@ def get_from_day(df: pd.DataFrame, from_day, col = None):
 
 class View:
     @staticmethod
-    def plot_detecting_peak_result(view_stock):
+    def plot_detecting_peak_result(
+                                view_stock, 
+                                pct_change = 5,
+                                n_bars_before = 15,
+                                n_bars_after = 5,
+                                pct_change_after = 5):
         # view_stock = 'HPG'
-        df = df_raw.copy()
-        pct_change = 5
-        n_bars_before = 15
-        n_bars_after = 5
-        margin = 1.002
+        # df = df_raw.copy()
+        # pct_change = 5
+        # n_bars_before = 15
+        # n_bars_after = 5
+        # # margin = 1
+        # pct_change_after = 5
             
+        df = glob_obj.df_stocks.copy()
         src: pd.DataFrame = df['close']
         high: pd.DataFrame = df['high']
         
@@ -1956,7 +2082,8 @@ class View:
 
         df_rollmax = src.rolling(n_bars_after).max().shift(-(n_bars_after))
         # df_matched_after = src >= df_rollmax
-        df_matched_after = high * margin >= high.rolling(n_bars_after).max().shift(-(n_bars_after))
+        # df_matched_after = high * margin >= high.rolling(n_bars_after).max().shift(-(n_bars_after))
+        df_matched_after = src.shift(-n_bars_after) / src < (1 - pct_change_after/100)
         
         df_matched = price_change_cond & df_matched_before & df_matched_after
         
@@ -1968,6 +2095,14 @@ class View:
         dfv['matchedAfter'] = df_matched_after[view_stock]
         dfv['matched'] = df_matched[view_stock]
         
+        price_change_cond2 = Conds.price_change_vs_hl(df, 'close', direction = 'Decrease', nbars=n_bars_before, low_range=pct_change, use_flag=True)
+        df_matched_before2 = src == src.rolling(n_bars_before).min()
+        df_matched_after2 = src.shift(-n_bars_after) / src > (1 + pct_change_after/100)
+        df_matched2 = price_change_cond2 & df_matched_before2 & df_matched_after2
+
+        dfv['matched2'] = df_matched2[view_stock]
+
+
         import plotly.graph_objects as go
         import pandas as pd
 
@@ -1985,8 +2120,17 @@ class View:
             x=df_matched.index,
             y=df_matched['close'],
             mode='markers',
-            marker=dict(color='blue', size=10, symbol='triangle-up'),
+            marker=dict(color='blue', size=10, symbol='triangle-down'),
             name='Peak'
+        ))
+        
+        df_matched2 = dfv[dfv['matched2']]
+        fig.add_trace(go.Scatter(
+            x=df_matched2.index,
+            y=df_matched2['close'],
+            mode='markers',
+            marker=dict(color='yellow', size=10, symbol='triangle-up'),
+            name='Trough'
         ))
 
         # Add titles and labels
@@ -2033,4 +2177,4 @@ if __name__ == "__main__":
     show_ram_usage_mb()
     
     app = create_dash_app()
-    app.run(debug=True, host='192.168.9.19', port=1999)
+    app.run(debug=True, host='localhost', port=1999)
