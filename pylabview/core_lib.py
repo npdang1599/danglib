@@ -1475,6 +1475,32 @@ class Ta:
 
         return bbpctb
     
+    @staticmethod
+    def wavetrend(
+        df: pd.DataFrame, n1 = 10, n2 = 21
+    ):
+        def test():
+            # df = df_raw.copy()
+            n1 = 10
+            n2 = 21
+        p_high = df['high']
+        p_low = df['low']
+        p_close = df['close']
+        hlc3 = (p_high + p_low + p_close)/3
+
+        wt_ap = hlc3
+        wt_esa = Ta.ma(wt_ap, n1, 'EMA')
+        wt_d = Ta.ma(abs(wt_ap - wt_esa), n1, 'EMA')
+        wt_ci = (wt_ap - wt_esa) / (0.015 * wt_d)
+        wt_tci = Ta.ma(wt_ci, n2, 'EMA')
+
+        wt1 = wt_tci
+        wt2 = Ta.ma(wt1, 4, 'SMA')
+
+        return wt1, wt2
+
+        
+    
 class VTa:
     """TA functions used for vector calculations"""
 

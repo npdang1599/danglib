@@ -932,6 +932,46 @@ class Conds:
 
         return res
 
+    @staticmethod
+    def wavetrend(
+        df: pd.DataFrame, 
+        use_flag: bool = False,
+        direction: str = 'crossover',
+
+        
+        ):
+        # WT_n1 = 10
+        # WT_n2 = 21
+
+        # WT_ap = hlc3 
+        # WT_esa = f_ma(WT_ap, WT_n1, 'EMA') // esa = ema(ap, n1)
+        # WT_d = f_ma(math.abs(WT_ap - WT_esa), WT_n1, 'EMA')
+        # WT_ci = (WT_ap - WT_esa) / (0.015 * WT_d)
+        # WT_tci = f_ma(WT_ci, WT_n2, 'EMA')
+        
+        # WT_wt1 = WT_tci
+        # WT_wt2 = f_ma(WT_wt1, 4, 'SMA')
+
+        # WT_Over = ta.crossover(WT_wt1, WT_wt2)
+        # WT_Under = ta.crossunder(WT_wt1, WT_wt2)
+
+        # WT1AboveWT2 = WT_wt1 > WT_wt2
+        # WT1BelowWT2 = WT_wt1 < WT_wt2
+
+        # C21 = switch
+        #     WT1AboveWT2 and not WT_Over => 'Above'
+        #     WT1BelowWT2 and not WT_Under => 'Below'
+        #     WT_Over => 'Crossover'
+        #     WT_Under => 'Crossunder'
+        res = None
+
+        if use_flag:
+            wt1, wt2 = Ta.wavetrend(df)
+            res = Conds.Standards.two_line_pos(wt1, wt2, direction, use_flag)
+        
+        return res
+
+
     class Fa:
         """FA conditions"""
         
@@ -2991,48 +3031,6 @@ class Simulator:
 
         df["name"] = name
 
-        # Compute trade stats using Numba
-        # price_changes = df["priceChange"].values
-        # returns = df["return"].values
-        # returns1 = df["return1"].values
-        # returns5 = df["return5"].values
-        # returns10 = df["return10"].values
-        # returns15 = df["return15"].values
-        # signals = df["signal"].values
-        # upsides = df["upside"].values
-        # downsides = df["downside"].values
-        # (
-        #     trading_status,
-        #     num_trades_arr,
-        #     winrate_arr,
-        #     winrate1_arr,
-        #     winrate5_arr,
-        #     winrate10_arr,
-        #     winrate15_arr,
-        #     avg_returns_arr,
-        #     avg_returns1_arr,
-        #     avg_returns5_arr,
-        #     avg_returns10_arr,
-        #     avg_returns15_arr,
-        #     avg_upside_arr,
-        #     avg_downside_arr,
-        #     max_runup_arr,
-        #     max_drawdown_arr,
-        #     profit_factor_arr,
-        #     is_entry_arr,
-        # ) = self.compute_trade_stats3(
-        #     price_changes, 
-        #     returns, 
-        #     returns1, 
-        #     returns5, 
-        #     returns10, 
-        #     returns15, 
-        #     signals, 
-        #     upsides, 
-        #     downsides, 
-        #     holding_periods
-        # )
-
         # Update DataFrame
         df['isEntry'] = df['signal'].copy()
         df['isTrading'] = df['isEntry'].rolling(holding_periods).sum().fillna(0).astype(bool)
@@ -3056,7 +3054,6 @@ class Simulator:
         df['avgReturnT10'] = (df['isEntry'] * df['return10']).cumsum() / df['numTrade']
         df['avgReturnT15'] = (df['isEntry'] * df['return15']).cumsum() / df['numTrade']
 
-
         df['avgUpside'] = (df['isEntry'] * df['upside']).cumsum() / df['numTrade']
         df['avgDownside'] = (df['isEntry'] * df['downside']).cumsum() / df['numTrade']
 
@@ -3071,11 +3068,6 @@ class Simulator:
         df = df.drop(['is_win', 'is_win1', 'is_win5', 'is_win10', 'is_win15', 'profit', 'loss' ], axis = 1)
         df['isEntry'] = np.where(df['signal'], 1, np.nan)
 
-        
-        
-        
-        
-        
         # df["numTrade"] = num_trades_arr
         # df["winrate"] = winrate_arr
         # df["winrateT1"] = winrate1_arr
