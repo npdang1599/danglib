@@ -3136,7 +3136,7 @@ class Scanner:
 
 
         """Backtest on multiple stocks"""
-        from danglib.pylabview_v2.celery_worker import scan_one_stock, clean_redis
+        from danglib.pylabview.celery_worker import scan_one_stock, clean_redis
         from tqdm import tqdm
 
         clean_redis()

@@ -2,9 +2,9 @@
 
 from celery import Celery
 from redis import Redis
-from danglib.pylabview.funcs import Simulator, pd, glob_obj
+from danglib.pylabview.funcs import Simulator, pd, Adapters, Conds
 import logging
-glob_obj.load_all_data()
+
 class CELERY_RESOURCES:
     HOST = 'localhost'
     CELERY_INPUT_REDIS = 8
@@ -47,21 +47,40 @@ class TaskName:
     SCAN_STOCK = 'scan_one_stock'
     SCAN_STOCK_V2 = 'scan_one_stock_v2'
     SCAN_STOCK_V3 = 'scan_one_stock_v3'
+    SCAN_STOCK_V4 = 'scan_one_stock_v4'
     
 @app.task(name=TaskName.SCAN_STOCK)
 def scan_one_stock(
-        df: pd.DataFrame, 
-        func, 
         params, 
+        stock,
         name="", 
         trade_direction='Long', 
         use_shift=False,
         n_shift=15, 
         holding_periods=15
     ):
-    
+    def test():
+        params = (
+            {
+                'price_change':{
+                    'lower_thres':5,
+                    'use_flag': True
+                }
+            }
+        )
+        stock = 'HPG'
+        name = stock
+        trade_direction='Long' 
+        use_shift=False
+        n_shift=15 
+        holding_periods=15
+        
+
+    df_stock: pd.DataFrame = Adapters.load_stocks_data_from_plasma()
+    df = df_stock[df_stock['stock'] == stock].reset_index(drop=True)
+
     bt = Simulator(
-        func,
+        func=Conds.compute_any_conds,
         df_ohlcv=df,
         params=params,
         name=name,
@@ -80,8 +99,8 @@ def scan_one_stock(
 
 @app.task(name=TaskName.SCAN_STOCK_V2)
 def scan_one_stock_v2(
-        df: pd.DataFrame, 
-        func, params: dict, 
+        params: dict, 
+        stock,
         name="", 
         trade_direction='Long',
         use_shift=False,
@@ -95,8 +114,11 @@ def scan_one_stock_v2(
     
     exit_params = params.pop('exit_cond') if 'exit_cond' in params else {}
     
+    df_stock: pd.DataFrame = Adapters.load_stocks_data_from_plasma()
+    df = df_stock[df_stock['stock'] == stock].reset_index(drop=True)
+
     bt = Simulator(
-        func,
+        func=Conds.compute_any_conds,
         df_ohlcv=df,
         params=params,
         exit_params=exit_params,
@@ -120,22 +142,74 @@ def scan_one_stock_v2(
     return bt
     
 @app.task(name=TaskName.SCAN_STOCK_V3)
-def scan_one_stock_v3(df: pd.DataFrame, func, params, name="", trade_direction='Long', use_shift=False,
-        n_shift=15, holding_periods=15):
+def scan_one_stock_v3(
+    params, 
+    stock,
+    name="", 
+    trade_direction='Long', 
+    use_shift=False,
+    n_shift=15, 
+    holding_periods=15
+    ):
+    
+    df_stock: pd.DataFrame = Adapters.load_stocks_data_from_plasma()
+    df = df_stock[df_stock['stock'] == stock].reset_index(drop=True)
+    
     bt = Simulator(
-        func,
+        func=Conds.compute_any_conds,
         df_ohlcv=df,
         params=params,
         name=name,
     )
     try:
-        bt.run3(trade_direction=trade_direction, use_shift=use_shift,
-        n_shift=n_shift,holding_periods=holding_periods)
+        bt.run3(
+            trade_direction=trade_direction, 
+            use_shift=use_shift,
+            n_shift=n_shift,
+            holding_periods=holding_periods
+        )
     except Exception as e:
         print(f"scan error: {e}")
 
     return bt
     
+@app.task(name=TaskName.SCAN_STOCK_V4)
+def scan_one_stock_v4(
+    params, 
+    stock,
+    name="", 
+    trade_direction='Long', 
+    use_shift=False,
+    n_shift=15, 
+    holding_periods=15
+    ):
+    
+    df_stock: pd.DataFrame = Adapters.load_stocks_data_from_plasma()
+    df = df_stock.pivot(index = 'day', columns = 'stock')\
+        .xs(stock, axis=1, level='stock')\
+        .reset_index(drop=False)
+    df['stock'] = stock
+
+    
+    bt = Simulator(
+        func=Conds.compute_any_conds,
+        df_ohlcv=df,
+        params=params,
+        name=name,
+    )
+    try:
+        bt.run3(
+            trade_direction=trade_direction, 
+            use_shift=use_shift,
+            n_shift=n_shift,
+            holding_periods=holding_periods
+        )
+    except Exception as e:
+        print(f"scan error: {e}")
+
+    return bt
+    
+
 
 
 # celery -A celery_worker worker --concurrency=30 --loglevel=INFO -n celery_worker@pylabview

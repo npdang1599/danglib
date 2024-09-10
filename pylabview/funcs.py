@@ -91,14 +91,14 @@ class Globs:
         ]
         self.sectors = {}
         self.df_all_index: pd.DataFrame = None
-
-    def __getattribute__(self, name):
-        if name == "df_stocks":
-            if(self._df_stocks is None):
-                self.load_stocks_data()
-            return self._df_stocks
-        else:
-            return super().__getattribute__(name)
+        
+    # def __getattribute__(self, name):
+    #     if name == "df_stocks":
+    #         if(self._df_stocks is None):
+    #             self.load_stocks_data()
+    #         return self._df_stocks
+    #     else:
+    #         return super().__getattribute__(name)
     
     def load_stocks_data(self):
         """run to load stocks data"""
@@ -107,25 +107,19 @@ class Globs:
         except ValueError as e:
             logging.error(f"`load_stocks_data` function error: {e}")
 
-    def load_stocks_data_pickle(self):
-        """Load data from pickle"""
-        self._df_stocks = Adapters.load_stocks_data_from_pickle()
 
     def get_one_stock_data(self, stock):
         """Get one stock data from df_stocks"""
-        if self.df_stocks is not None:
-            df: pd.DataFrame = self.df_stocks[self.df_stocks["stock"] == stock].copy()
-            df = df.reset_index(drop=True)
-        else: 
-            df = None
-            logging.error("`get_one_stock_data` error: df_stocks is empty")
+        df_stocks = Adapters.load_stocks_data_from_plasma()
+        df: pd.DataFrame = df_stocks[df_stocks["stock"] == stock]
+        df = df.dropna(axis=1, how='all').reset_index(drop=True)
         return df
     
     def load_vnindex(self):
         # self.df_vnindex: pd.DataFrame = Adapters.get_stock_from_vnstock(
         #     "VNINDEX", from_day=self.data_from_day
         # )
-        self.df_vnindex: pd.DataFrame = Adapters.get_vnindex_from_db()
+        self.df_vnindex: pd.DataFrame = self.get_one_stock_data("VNINDEX")
 
     def gen_stocks_data(self, fn=None, collection=None, send_viber=False):
         try:
@@ -255,6 +249,11 @@ class Globs:
         self.load_stocks_data()
         self.load_vnindex()
         self.load_sectors_data() 
+        
+    def load_all_data2(self):
+        # self.load_vnindex()
+        self.load_sectors_data() 
+        
         
     def load_index_data(self):
         self.df_all_index = Adapters.get_index_data()
@@ -1892,9 +1891,20 @@ class Conds:
     @staticmethod
     def index_cond(df: pd.DataFrame, *args, **index_params):
         """Compute index condition"""
-        df2 = glob_obj.df_vnindex.copy()
+        
+        def test():
+            index_params = {
+                'price_change': {
+                    'lower_thres': 3,
+                    'use_flag': True
+                }
+            }
+            df = glob_obj.get_one_stock_data('HPG')
+        
+        df2 = glob_obj.get_one_stock_data('VNINDEX')
 
         index_cond = Conds.compute_any_conds(df2, index_params)
+        
         if index_cond is not None:
             df2["index_cond"] = index_cond
             close = df['close']
@@ -2411,6 +2421,8 @@ class Simulator:
         exit_params = self.exit_params
         name = self.name
         
+        print(len(df))
+        
         def test_params():
             trade_direction="Long"
             use_shift = False,
@@ -2455,7 +2467,8 @@ class Simulator:
         
         df["name"] = name
         
-        dfi = glob_obj.df_vnindex[['day', 'open', 'high', 'low', 'close']]
+        dfi = glob_obj.get_one_stock_data('VNINDEX')
+        dfi = dfi[['day', 'open', 'high', 'low', 'close']]
         dfi.columns = ['day', 'iopen', 'ihigh', 'ilow', 'iclose']
         df = pd.merge(df, dfi, how='left', on='day')
         
@@ -3154,21 +3167,32 @@ class Scanner:
 
     @staticmethod
     def scan_multiple_stocks(
-        func, 
         params, 
         stocks=None,
         trade_direction="Long", 
         use_shift=False,
         n_shift=15,
         holding_periods=60):
+
+        def test():
+            params = (
+                {
+                    'price_change':{
+                        'lower_thres':5,
+                        'use_flag': True
+                    }
+                }
+            )
+            stocks=None
+            trade_direction="Long" 
+            use_shift=False
+            n_shift=15
+            holding_periods=60
+
+
         """Backtest on multiple stocks"""
         from danglib.pylabview.celery_worker import scan_one_stock, clean_redis
-
-        df_all_stocks = glob_obj.df_stocks
-        if stocks is None:
-            stocks = glob_obj.df_stocks
-        else:
-            df_all_stocks= df_all_stocks[df_all_stocks['stock'].isin(stocks)]
+        from tqdm import tqdm
 
         clean_redis()
         
@@ -3176,16 +3200,17 @@ class Scanner:
         trades_ls = []
         err_stocks = {}
         task_dic = {}
+
+        if stocks is None:
+            stocks = glob_obj.stocks
         
         params = Globs.old_saved_adapters(params)
         
-        for stock, df_stock in df_all_stocks.groupby("stock"):
-            df_stock = df_stock.reset_index(drop=True)
+        for stock in tqdm(stocks):
 
             task = scan_one_stock.delay(
-                df_stock, 
-                func, 
                 params=params,
+                stock = stock,
                 name=stock,
                 trade_direction=trade_direction,
                 use_shift=use_shift,
@@ -3216,11 +3241,11 @@ class Scanner:
                 "avgUpside",
                 "avgDownside",
             ]
-        ].round(2)
-        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups)
+        ].round(2).fillna(-999)
+        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups).fillna('unknown')
 
         trades_df = pd.concat(trades_ls)    
-        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
+        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups).fillna('unknown')
         return res_df, trades_df
     
     @staticmethod
@@ -3248,9 +3273,9 @@ class Scanner:
             n_shift =  50
             holding_periods = 15
         
-        df_all_stocks = glob_obj.df_stocks
+        df_all_stocks = Adapters.load_stocks_data_from_plasma()
         if stocks is None:
-            stocks = glob_obj.df_stocks
+            stocks = glob_obj.stocks
         else:
             df_all_stocks= df_all_stocks[df_all_stocks['stock'].isin(stocks)]
         
@@ -3295,8 +3320,8 @@ class Scanner:
                 "avgUpside",
                 "avgDownside",
             ]
-        ].round(2)
-        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups)
+        ].round(2).fillna(-999)
+        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups).fillna('unknown')
 
         trades_df = pd.concat(trades_ls)    
         trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
@@ -3304,8 +3329,6 @@ class Scanner:
     
     @staticmethod
     def scan_multiple_stocks_v2(
-        df,
-        func, 
         params, 
         stocks=None,
         trade_direction="Long", 
@@ -3314,13 +3337,11 @@ class Scanner:
         holding_periods=60):
         """Backtest on multiple stocks"""
         from danglib.pylabview.celery_worker import scan_one_stock, clean_redis
+        from tqdm import tqdm
 
 
-        if stocks is None:
-            df_all_stocks = df
-        else:
-            df_all_stocks= df[df['stock'].isin(stocks)]
-
+        stocks = ['VN30', 'VNDIAMOND', 'VNINDEX', 'VNMID', 'VNSML']
+        
         clean_redis()
         
         sum_ls = []
@@ -3329,13 +3350,11 @@ class Scanner:
         
         params = Globs.old_saved_adapters(params)
         
-        for stock, df_stock in df_all_stocks.groupby("stock"):
-            df_stock = df_stock.reset_index(drop=True)
+        for stock in tqdm(stocks):
 
             task = scan_one_stock.delay(
-                df_stock, 
-                func, 
                 params=params,
+                stock=stock,
                 name=stock,
                 trade_direction=trade_direction,
                 use_shift=use_shift,
@@ -3366,7 +3385,7 @@ class Scanner:
                 "avgUpside",
                 "avgDownside",
             ]
-        ].round(2)
+        ].round(2).fillna(-999)
         res_df["beta_group"] = 'Super High Beta'
 
         trades_df = pd.concat(trades_ls)    
@@ -3375,7 +3394,7 @@ class Scanner:
     
     @staticmethod
     def scan_multiple_stocks3(
-        func, params, 
+        params, 
         stocks=None, 
         trade_direction="Long",
         use_shift=False,
@@ -3390,14 +3409,12 @@ class Scanner:
         # exit_params = params.pop('exit_cond') if 'exit_cond' in params else {}
         """Backtest on multiple stocks"""  
         from danglib.pylabview.celery_worker import scan_one_stock_v2, clean_redis
+        from tqdm import tqdm
 
-        df_all_stocks = glob_obj.df_stocks
     
         if stocks is None:
-            stocks = glob_obj.df_stocks
-        else:
-            df_all_stocks= df_all_stocks[df_all_stocks['stock'].isin(stocks)]
-
+            stocks = glob_obj.stocks
+        
         clean_redis()
         
         sum_ls = []
@@ -3407,13 +3424,11 @@ class Scanner:
         
         params = Globs.old_saved_adapters(params)
         
-        for stock, df_stock in df_all_stocks.groupby("stock"):
-            df_stock = df_stock.reset_index(drop=True)
+        for stock in tqdm(stocks):
 
             task = scan_one_stock_v2.delay(
-                df_stock, 
-                func, 
                 params=params,
+                stock = stock,
                 name=stock,
                 trade_direction=trade_direction,
                 use_shift=use_shift,
@@ -3457,19 +3472,16 @@ class Scanner:
                 "avgUpsideIdx",
                 "avgDownsideIdx"
             ]
-        ].round(2)
-        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups)
+        ].round(2).fillna(-999)
+        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups).fillna('unknown')
 
         trades_df = pd.concat(trades_ls)    
-        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
-
+        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups).fillna('unknown')
 # %%
-
         return res_df, trades_df
 
     @staticmethod
     def scan_multiple_stocks_v3(
-        func, 
         params, 
         stocks=None,
         trade_direction="Long", 
@@ -3478,13 +3490,11 @@ class Scanner:
         holding_periods=60):
         """Backtest on multiple stocks"""
         from danglib.pylabview.celery_worker import scan_one_stock_v3, clean_redis
-
-        df_all_stocks = glob_obj.df_stocks
+        from tqdm import tqdm
+        
         if stocks is None:
-            stocks = glob_obj.df_stocks
-        else:
-            df_all_stocks= df_all_stocks[df_all_stocks['stock'].isin(stocks)]
-
+            stocks = glob_obj.stocks
+        
         clean_redis()
         
         sum_ls = []
@@ -3494,13 +3504,11 @@ class Scanner:
         
         params = Globs.old_saved_adapters(params)
         
-        for stock, df_stock in df_all_stocks.groupby("stock"):
-            df_stock = df_stock.reset_index(drop=True)
+        for stock in tqdm(stocks):
 
             task = scan_one_stock_v3.delay(
-                df_stock, 
-                func, 
                 params=params,
+                stock = stock,
                 name=stock,
                 trade_direction=trade_direction,
                 use_shift=use_shift,
@@ -3531,11 +3539,12 @@ class Scanner:
                 "avgUpside",
                 "avgDownside",
             ]
-        ].round(2)
-        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups)
+        ].round(2).fillna(-999)
+        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups).fillna('unknown')
 
         trades_df = pd.concat(trades_ls)    
-        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
+        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups).fillna('unknown')
+
         return res_df, trades_df
 
 
@@ -3549,14 +3558,11 @@ class Scanner:
         n_shift=15,
         holding_periods=60):
         """Backtest on multiple stocks"""
-        from danglib.pylabview.celery_worker import scan_one_stock_v3, clean_redis
-
-        df_all_stocks = glob_obj.df_stocks.copy()
+        from danglib.pylabview.celery_worker import scan_one_stock_v4, clean_redis
+        from tqdm import tqdm
         if stocks is None:
-            stocks = glob_obj.df_stocks
-        else:
-            df_all_stocks= df_all_stocks[df_all_stocks['stock'].isin(stocks)]
-        df_all_stocks = df_all_stocks.pivot(index = 'day', columns = 'stock')
+            stocks = glob_obj.stocks
+            
         clean_redis()
         
         sum_ls = []
@@ -3566,16 +3572,11 @@ class Scanner:
         
         params = Globs.old_saved_adapters(params)
         
-        for stock, df_stock in df_all_stocks.groupby("stock", axis =1):
-        # for stock in df_all_stocks.columns.get_level_values(level='stock'):
-            # df_stock = df_all_stocks.xs(stock,level = 'stock', axis=1)
-            df_stock.columns = df_stock.columns.droplevel('stock')
-            df_stock = df_stock.reset_index(drop=False)
-            df_stock['stock'] = stock
-            task = scan_one_stock_v3.delay(
-                df_stock, 
-                func, 
+        for stock in tqdm(stocks):  
+            
+            task = scan_one_stock_v4.delay(
                 params=params,
+                stock = stock,
                 name=stock,
                 trade_direction=trade_direction,
                 use_shift=use_shift,
@@ -3606,38 +3607,32 @@ class Scanner:
                 "avgUpside",
                 "avgDownside",
             ]
-        ].round(2)
-        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups)
+        ].round(2).fillna(-999)
+        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups).fillna('unknown')
 
         trades_df = pd.concat(trades_ls)    
-        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups)
+        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups).fillna('unknown')
         return res_df, trades_df
     
     
 
 glob_obj = Globs()
-# glob_obj.load_stocks_data()
-# glob_obj.load_vnindex()
-# glob_obj.load_sectors_data()
+glob_obj.load_all_data2()
 
 def test():
-    df = glob_obj.get_one_stock_data("HPG")
 
     params = (
-        {
+        {   
             'price_change':{
-                'lower_thres':5,
+                'lower_thres':3,
                 'use_flag': True
             }
+
         }
     )
 
-    Conds.compute_any_conds(df, params)
-
-    res, df = Scanner.scan_multiple_stocks_v4(
-            func=Conds.compute_any_conds,
+    res, df = Scanner.scan_multiple_stocks_v3(
             params=params,
-            stocks=['HPG', 'SSI', 'CTR'],
             trade_direction='Long', 
             # use_holding_periods=True,
             holding_periods=15,
@@ -3646,14 +3641,18 @@ def test():
             # loss_thres=5
         )
     
+    from danglib.pylabview.celery_worker import clean_redis
+    clean_redis()
+
+
 
 
 if __name__ == "__main__":
-    glob_obj.load_all_data()
+    
     
     # glob_obj.gen_stocks_data()
     
-    df_raw = glob_obj.get_one_stock_data("SSI")
+    df_raw = glob_obj.get_one_stock_data("VN30")
     # try:
     #     # Tạo một đối tượng ArgumentParser
     #     parser = argparse.ArgumentParser(description="A program to demonstrate command line arguments.")
@@ -3702,3 +3701,5 @@ if __name__ == "__main__":
             holding_periods=holding_periods
         )
         df_res
+        
+        # glob_obj.gen_stocks_data()

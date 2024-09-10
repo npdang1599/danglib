@@ -21,7 +21,7 @@ r = StrictRedis()
 class Adapters:
     """Adapter functions to get data from resources"""
     @staticmethod
-    def get_index_data():
+    def get_index_data(start_day):
         # df: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/data/index.pickle")
         # df = df.rename(columns={"value": "volume"})
         db = MongoClient('localhost',27022)['stockdata']
@@ -30,7 +30,7 @@ class Adapters:
 
         INDEX_LIST = ['VNINDEX','VN30','VNDIAMOND','VNMID','VNSML']
 
-        df = df[(df['code'].isin(INDEX_LIST)) & (df['tradingDate'] >= '2017_01_01')].copy()
+        df = df[(df['code'].isin(INDEX_LIST)) & (df['tradingDate'] >= start_day)].copy()
         df = df.drop_duplicates(subset = ['code','tradingDate'],keep='last')
 
         df = df[['code', 'tradingDate','open', 'close', 'high', 'low', 'totalMatchValue']].copy().rename(columns ={
@@ -662,6 +662,9 @@ class Adapters:
         dfres[['marketCap','inventory','CAPEX','inventoryDay']] = dfres.groupby('stock')[['marketCap','inventory','CAPEX','inventoryDay']].ffill()
         
         dfres = pd.merge(dfres, dfbs2, how='left', on=['stock', 'mapYQ'])
+        
+        df_indexs = Adapters.get_index_data(start_day=start_day)
+        dfres = pd.concat([dfres, df_indexs]).reset_index(drop=True)
         
         stocks_i2s = {i: s for i , s in enumerate(dfres['stock'].unique())}
         stocks_s2i = {s: i for i, s in stocks_i2s.items()}
