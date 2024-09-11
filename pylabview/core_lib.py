@@ -38,6 +38,7 @@ class Adapters:
             'tradingDate':'day',
             'totalMatchValue':'volume'
         })
+        df = df.sort_values(['stock', 'day'])
         return df
     
     @staticmethod

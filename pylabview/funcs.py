@@ -3550,7 +3550,6 @@ class Scanner:
 
     @staticmethod
     def scan_multiple_stocks_v4(
-        func, 
         params, 
         stocks=None,
         trade_direction="Long", 

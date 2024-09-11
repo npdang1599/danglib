@@ -101,4 +101,4 @@ def scan_one_stock(
 
 
 
-# celery -A celery_worker worker --concurrency=30 --loglevel=INFO -n celery_worker@pylabview
+# celery -A celery_worker worker --concurrency=50 --loglevel=INFO -n celery_worker@pylabview
