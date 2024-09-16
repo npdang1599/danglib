@@ -256,7 +256,7 @@ class Globs:
         
         
     def load_index_data(self):
-        self.df_all_index = Adapters.get_index_data()
+        self.df_all_index = Adapters.get_index_data(self.data_from_day)
 
 
 class Conds:

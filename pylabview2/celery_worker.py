@@ -6,7 +6,7 @@ from danglib.pylabview2.funcs import Vectorized, Conds
 import logging
 import numpy as np
 import pandas as pd
-from danglib.lazy_core import gen_plasma_functions
+from danglib.lazy_core import gen_plasma_functions, maybe_create_dir
 import threading
 import pickle
 
@@ -53,7 +53,9 @@ app = app_factory(CELERY_RESOURCES.HOST)
 class TaskName:
     COMPUTE_STOCK = 'compute_one_stock'
     COMPUTE_MULTI_STRATEGIES = 'compute_multi_strategies'
+    COMPUTE_MULTI_STRATEGIES_2 = 'compute_multi_strategies_2'
     COMPUTE_MULTI_STRATEGIES_URSI = 'compute_multi_strategies_ursi'
+    COMPUTE_MULTI_STRATEGIES_RUDD = 'compute_multi_strategies_ru_dd'
     COMPUTE_SIGNAL = 'compute_signal'
 
 @app.task(name=TaskName.COMPUTE_SIGNAL)
@@ -100,7 +102,6 @@ def compute_multi_strategies(i):
 
     array_3d = pload("sig_3d_array")
     re_2d = pload("return_array")
-    
 
     df1 = array_3d[i]
 
@@ -129,10 +130,118 @@ def compute_multi_strategies(i):
     re_arr = np.vstack(re_ls)
     wt_arr = np.vstack(wt_ls)
 
-
     with open(f"/data/dang/tmp/combo_{i}.pkl", 'wb') as f:
         pickle.dump((nt_arr, re_arr, wt_arr), f)
-    # return nt_ls, re_ls, wt_ls
+
+
+@app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_2)
+def compute_multi_strategies_2(i, start_idx=0, end_idx=-1, folder_name ='nt_wr_re'):
+
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+    array_3d = pload("sig_3d_array")
+    re_2d = pload("return_array")[start_idx:end_idx]
+
+    df1 = array_3d[i][start_idx:end_idx]
+
+    nt_ls=[]
+    re_ls=[]
+    wt_ls=[]
+    for j in range(i+1, len(array_3d)):
+        df2 = array_3d[j][start_idx:end_idx]
+
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
+
+        cond = df1 * df2
+        num_trade = np.sum(cond, axis=0)
+        re = np.nan_to_num(re_2d * cond, 0.0)
+        total_re = np.sum(re, axis=0)
+        num_win = np.sum(re > 0, axis=0)
+
+        nt_ls.append(num_trade)
+        re_ls.append(total_re)
+        wt_ls.append(num_win)
+
+    disconnect()
+
+    nt_arr = np.vstack(nt_ls)
+    re_arr = np.vstack(re_ls)
+    wt_arr = np.vstack(wt_ls)
+
+    f_name = f"/data/dang/tmp2/{folder_name}_{start_idx}_{end_idx}"
+    maybe_create_dir(f_name)
+    with open(f"{f_name}/combo_{i}.pkl", 'wb') as f:
+        pickle.dump((nt_arr, re_arr, wt_arr), f)
+
+
+@app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_RUDD)
+def compute_multi_strategies_ru_dd(i, start_idx=0, end_idx=-1, folder_name ='ru_dd'):
+
+    def test():
+        i = 15
+        j = 22
+        start_idx = 0 
+        end_idx = -1
+        
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+    array_3d = pload("sig_3d_array")
+    ru_2d = pload("runup_vectorized")[start_idx:end_idx]
+    dd_2d = pload("drawdown_vectorized")[start_idx:end_idx]
+
+    df1 = array_3d[i][start_idx:end_idx]
+
+    ru_ls=[]
+    dd_ls=[]
+    for j in range(i+1, len(array_3d)):
+        df2 = array_3d[j][start_idx:end_idx]
+
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
+
+        cond = df1 * df2
+        avg_ru = np.mean(np.nan_to_num(ru_2d * cond, 0.0))
+        avg_dd = np.mean(np.nan_to_num(dd_2d * cond, 0.0))
+
+        ru_ls.append(avg_ru)
+        dd_ls.append(avg_dd)
+
+    disconnect()
+
+    ru_arr = np.vstack(ru_ls)
+    dd_arr = np.vstack(dd_ls)
+
+
+    f_name = f"/data/dang/tmp2/{folder_name}_{start_idx}_{end_idx}"
+    maybe_create_dir(f_name)
+    with open(f"{f_name}/combo_{i}.pkl", 'wb') as f:
+        pickle.dump((ru_arr, dd_arr), f)
+
+
+# def test():
+
+#     i = 15
+#     j = 99
+
+
+#     _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+#     array_3d = pload("sig_3d_array")
+#     re_2d = pload("return_array")[123:200]
+
+#     df1 = array_3d[i][123:200]
+#     df2 = array_3d[j][123:200]
+
+#     cond = df1 * df2
+#     num_trade = np.sum(cond, axis=0)
+#     re = np.nan_to_num(re_2d * cond, 0.0)
+#     total_re = np.sum(re, axis=0)
+#     num_win = np.sum(re > 0, axis=0)
+
+#     disconnect()
+
+
 
 
 @app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_URSI)
