@@ -56,7 +56,9 @@ class TaskName:
     COMPUTE_MULTI_STRATEGIES_2 = 'compute_multi_strategies_2'
     COMPUTE_MULTI_STRATEGIES_URSI = 'compute_multi_strategies_ursi'
     COMPUTE_MULTI_STRATEGIES_RUDD = 'compute_multi_strategies_ru_dd'
+    COMPUTE_MULTI_STRATEGIES_SHARPE = 'compute_multi_strategies_sharpe'
     COMPUTE_SIGNAL = 'compute_signal'
+    COMPUTE_STATS_YEARLY = 'compute_stats_yearly'
 
 @app.task(name=TaskName.COMPUTE_SIGNAL)
 def compute_signal(idx, params: dict):
@@ -201,8 +203,8 @@ def compute_multi_strategies_ru_dd(i, start_idx=0, end_idx=-1, folder_name ='ru_
             break
 
         cond = df1 * df2
-        avg_ru = np.mean(np.nan_to_num(ru_2d * cond, 0.0))
-        avg_dd = np.mean(np.nan_to_num(dd_2d * cond, 0.0))
+        avg_ru = np.sum(np.nan_to_num(ru_2d * cond, 0.0))
+        avg_dd = np.sum(np.nan_to_num(dd_2d * cond, 0.0))
 
         ru_ls.append(avg_ru)
         dd_ls.append(avg_dd)
@@ -219,29 +221,49 @@ def compute_multi_strategies_ru_dd(i, start_idx=0, end_idx=-1, folder_name ='ru_
         pickle.dump((ru_arr, dd_arr), f)
 
 
-# def test():
+@app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_SHARPE)
+def compute_multi_strategies_sharpe(i, start_idx=0, end_idx=-1, folder_name ='sharpe'):
 
-#     i = 15
-#     j = 99
+    def test():
+        i = 15
+        j = 22
+        start_idx = 0 
+        end_idx = -1
+        
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
 
+    array_3d = pload("sig_3d_array")
+    re_2d  = pload("return_array")[start_idx:end_idx]
+    sharpe_2d = re_2d ** 2
 
-#     _, disconnect, psave, pload = gen_plasma_functions(db=5)
+    df1 = array_3d[i][start_idx:end_idx]
 
-#     array_3d = pload("sig_3d_array")
-#     re_2d = pload("return_array")[123:200]
+    sharpe_ls=[]
 
-#     df1 = array_3d[i][123:200]
-#     df2 = array_3d[j][123:200]
+    for j in range(i+1, len(array_3d)):
+        df2 = array_3d[j][start_idx:end_idx]
 
-#     cond = df1 * df2
-#     num_trade = np.sum(cond, axis=0)
-#     re = np.nan_to_num(re_2d * cond, 0.0)
-#     total_re = np.sum(re, axis=0)
-#     num_win = np.sum(re > 0, axis=0)
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
 
-#     disconnect()
+        cond = df1 * df2
+        avg_sharpe = np.sum(np.nan_to_num(sharpe_2d * cond, 0.0), axis=0)
+        sharpe_ls.append(avg_sharpe)
 
+    disconnect()
 
+    sharpe_arr = np.vstack(sharpe_ls)
+
+    suffix = ''
+    if end_idx != -1:
+        suffix = f"_{start_idx}_{end_idx}"
+    else:
+        suffix = f"_{start_idx}_end"
+
+    f_name = f"/data/dang/tmp2/{folder_name}{suffix}"
+    maybe_create_dir(f_name)
+    with open(f"{f_name}/combo_{i}.pkl", 'wb') as f:
+        pickle.dump(sharpe_arr, f)
 
 
 @app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_URSI)
@@ -272,8 +294,6 @@ def compute_multi_strategies_ursi(i):
         s2_ursi = np.sum(np.nan_to_num((ursi_2d ** 2) * cond, 0))
 
         ursi_res.append({'j': j, 'sum': s_ursi, 'sumSquare': s2_ursi})
-
-
 
     disconnect()
 
@@ -316,6 +336,41 @@ def test():
 
 
 
+@app.task(name=TaskName.COMPUTE_STATS_YEARLY)
+def calculate_yearly_winrate(year, wr_threshold = 65, ar_threshold = 0):
+    def test():
+        year = '2021'
+        wr_threshold = 65
+        ar_threshold = 0
 
+    df_wt_tmp: pd.DataFrame = pd.read_pickle(f'/home/ubuntu/Dang/pickles/df_{year}_wt.pkl')
+    df_nt_tmp: pd.DataFrame = pd.read_pickle(f'/home/ubuntu/Dang/pickles/df_{year}_nt.pkl')
+    df_re_tmp: pd.DataFrame = pd.read_pickle(f'/home/ubuntu/Dang/pickles/df_{year}_re.pkl')
+    
+    wt = df_wt_tmp.to_numpy()
+    nt = df_nt_tmp.to_numpy()
+    re = df_re_tmp.to_numpy()
+
+    wr: pd.DataFrame = wt / nt * 100
+    ar: pd.DataFrame = re / nt
+
+    df_tmp = pd.DataFrame(nt.sum(axis=1), index=df_wt_tmp.index, columns=['total_trade'])
+    df_tmp['total_wintrade'] = wt.sum(axis=1) 
+    df_tmp['winrate'] =  (df_tmp['total_wintrade'] / df_tmp['total_trade']*100).fillna(0)
+
+    filt = (wr >= wr_threshold) & (ar >= ar_threshold)
+
+    re_qualified = re * filt
+    wt_qualified = wt * filt
+    nt_qualified = nt * filt
+
+    df_tmp['no_qualified_stocks'] = filt.sum(axis = 1)
+    df_tmp['qualified_nt'] = nt_qualified.sum(axis =1) 
+    df_tmp['qualified_ar'] = re_qualified.sum(axis =1) / df_tmp['qualified_nt']
+    df_tmp['qualified_wr'] = wt_qualified.sum(axis =1) / df_tmp['qualified_nt'] * 100
+    
+    df_tmp['qualified_avgNumTrade'] = df_tmp['qualified_nt'] / df_tmp['no_qualified_stocks']
+
+    return df_tmp
 
 # celery -A celery_worker worker --concurrency=10 --loglevel=INFO -n celery_worker@pylabview

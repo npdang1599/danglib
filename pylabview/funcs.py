@@ -3070,8 +3070,8 @@ class Simulator:
         df['avgUpside'] = (df['isEntry'] * df['upside']).cumsum() / df['numTrade']
         df['avgDownside'] = (df['isEntry'] * df['downside']).cumsum() / df['numTrade']
 
-        df['maxRunup'] = df['upside'].cummax()
-        df['maxDrawdown'] = df['downside'].cummin()
+        df['maxRunup'] = (df['isEntry'] * df['upside']).cummax()
+        df['maxDrawdown'] = (df['isEntry'] * df['downside']).cummin()
 
         df['profit'] = df['isEntry'] * df['return'].clip(lower = 0)
         df['loss'] = df['isEntry'] * df['return'].clip(upper = 0) * (-1)
@@ -3491,6 +3491,16 @@ class Scanner:
         """Backtest on multiple stocks"""
         from danglib.pylabview.celery_worker import scan_one_stock_v3, clean_redis
         from tqdm import tqdm
+
+        def test():
+            params = {'stock_scanner': {'trade_direction': 'Long', 'use_shift': False, 'n_shift': 15, 'holding_periods': 15}, 'price_change': {'use_flag': False, 'periods': 1, 'direction': 'increase', 'lower_thres': 5, 'upper_thres': 100}, 'price_comp_ma': {'use_flag': True, 'ma_len1': 5, 'ma_len2': 15, 'ma_type': 'EMA', 'ma_dir': 'crossover'}, 'price_gap': {'use_flag': False, 'gap_dir': 'Use Gap Up'}, 'price_change_vs_hl': {'use_flag': False, 'direction': 'Increase', 'nbars': 10, 'low_range': 5, 'high_range': 100}, 'price_highest_lowest': {'use_flag': False, 'method': 'Highest', 'num_bars': 10}, 'consecutive_conditional_bars': {'use_flag': False, 'src1_name': 'close', 'src2_name': 'close', 'direction': 'Increase', 'num_bars': 5, 'num_matched': 4}, 'vol_comp_ma': {'use_flag': False, 'n_bars': 1, 'ma_len': 20, 'comp_ma_dir': 'higher', 'comp_ma_perc': 20}, 'vol_percentile': {'use_flag': False, 'ma_length': 10, 'ranking_window': 128, 'low_range': 0, 'high_range': 100}, 'consecutive_squeezes': {'bb_length': 20, 'length_kc': 20, 'mult_kc': 1.5, 'use_true_range': True, 'use_flag': False, 'num_bars': 1}, 'ursi': {'length': 14, 'smo_type1': 'RMA', 'smooth': 14, 'smo_type2': 'EMA', 'use_flag': True, 'use_vs_signal': True, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'macd': {'r2_period': 20, 'fast': 10, 'slow': 20, 'signal_length': 9, 'use_flag': False, 'use_vs_signal': False, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'bbwp': {'src_name': 'close', 'basic_type': 'SMA', 'bbwp_len': 13, 'bbwp_lkbk': 128, 'use_flag': False, 'use_low_thres': False, 'low_thres': 20, 'use_high_thres': False, 'high_thres': 80}, 'bbpctb': {'src_name': 'close', 'length': 20, 'mult': 2, 'use_flag': False, 'use_range': False, 'low_range': 80, 'high_range': 100, 'use_cross': False, 'direction': 'crossover', 'cross_line': 'Upper band'}, 'net_income': {'use_flag': False, 'calc_type': 'QoQ', 'roll_len': 2, 'direction': 'positive', 'percentage': 0}, 'index_cond': {'price_comp_ma': {'use_flag': False, 'ma_len1': 5, 'ma_len2': 15, 'ma_type': 'EMA', 'ma_dir': 'crossover'}, 'ursi': {'length': 14, 'smo_type1': 'RMA', 'smooth': 14, 'smo_type2': 'EMA', 'use_flag': False, 'use_vs_signal': False, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'bbwp': {'src_name': 'close', 'basic_type': 'SMA', 'bbwp_len': 13, 'bbwp_lkbk': 128, 'use_flag': False, 'use_low_thres': False, 'low_thres': 20, 'use_high_thres': False, 'high_thres': 80}, 'bbpctb': {'src_name': 'close', 'length': 20, 'mult': 2, 'use_flag': False, 'use_range': False, 'low_range': 80, 'high_range': 100, 'use_cross': False, 'direction': 'crossover', 'cross_line': 'Upper band'}}, 'lookback_cond': {'n_bars': 5, 'price_change': {'use_flag': False, 'periods': 1, 'direction': 'increase', 'lower_thres': 0, 'upper_thres': 100}, 'price_comp_ma': {'use_flag': False, 'ma_len1': 5, 'ma_len2': 15, 'ma_type': 'EMA', 'ma_dir': 'crossover'}, 'price_gap': {'use_flag': False, 'gap_dir': 'Use Gap Up'}, 'price_change_vs_hl': {'use_flag': False, 'direction': 'Increase', 'nbars': 10, 'low_range': 5, 'high_range': 100}, 'price_highest_lowest': {'use_flag': False, 'method': 'Highest', 'num_bars': 10}, 'consecutive_conditional_bars': {'use_flag': False, 'src1_name': 'close', 'src2_name': 'close', 'direction': 'Increase', 'num_bars': 5, 'num_matched': 4}, 'vol_comp_ma': {'use_flag': False, 'n_bars': 1, 'ma_len': 20, 'comp_ma_dir': 'higher', 'comp_ma_perc': 20}, 'vol_percentile': {'use_flag': False, 'ma_length': 10, 'ranking_window': 128, 'low_range': 0, 'high_range': 100}, 'consecutive_squeezes': {'bb_length': 20, 'length_kc': 20, 'mult_kc': 1.5, 'use_true_range': True, 'use_flag': False, 'num_bars': 1}, 'ursi': {'length': 14, 'smo_type1': 'RMA', 'smooth': 14, 'smo_type2': 'EMA', 'use_flag': False, 'use_vs_signal': False, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'macd': {'r2_period': 20, 'fast': 10, 'slow': 20, 'signal_length': 9, 'use_flag': False, 'use_vs_signal': False, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'bbwp': {'src_name': 'close', 'basic_type': 'SMA', 'bbwp_len': 13, 'bbwp_lkbk': 128, 'use_flag': False, 'use_low_thres': False, 'low_thres': 20, 'use_high_thres': False, 'high_thres': 80}, 'bbpctb': {'src_name': 'close', 'length': 20, 'mult': 2, 'use_flag': False, 'use_range': False, 'low_range': 80, 'high_range': 100, 'use_cross': False, 'direction': 'crossover', 'cross_line': 'Upper band'}}, 'default_selector_stocks': []}
+            # stock_scanner_params = params['stock_scanner']
+            trade_direction =  'Long',
+            use_shift =  False,
+            n_shift =  15,
+            holding_periods =  15
+            stocks = glob_obj.stocks
+        
         
         if stocks is None:
             stocks = glob_obj.stocks
@@ -3651,7 +3661,7 @@ if __name__ == "__main__":
     
     # glob_obj.gen_stocks_data()
     
-    df_raw = glob_obj.get_one_stock_data("VN30")
+    df_raw = glob_obj.get_one_stock_data("AGG")
     # try:
     #     # Tạo một đối tượng ArgumentParser
     #     parser = argparse.ArgumentParser(description="A program to demonstrate command line arguments.")
@@ -3702,3 +3712,4 @@ if __name__ == "__main__":
         df_res
         
         # glob_obj.gen_stocks_data()
+

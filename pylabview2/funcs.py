@@ -1893,48 +1893,18 @@ class Vectorized:
             clean_redis()
 
         @staticmethod
-        def compute_wr_re_nt_yearly(n_solo_strats,stocks_map ,day_ls):
-            def test():
-                stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
-                                    push_return_numpy=True
-                                )
-                
-                n_strats = Vectorized.MultiProcess.compute_signals(recompute=False)
-                n_solo_strats = n_strats
-                
+        def compute_wr_re_nt_2(n_strats, start_date_idx, end_date_idx):
             from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_2
+            clean_redis()
+            task_dic = {}
+            for i in tqdm(range(0, n_strats-1)):
                 
-            year_map = {}
-            year = None
-            for idx, d in enumerate(day_ls):
-                curr_year = int(d[0:4])
-                if curr_year != year:
-                    year_map[curr_year] = [idx]
-                    if idx != 0:
-                        year_map[year].append(idx)
-                    year = curr_year
-            year_map[year].append(idx+1)
+                task_dic[i] = compute_multi_strategies_2.delay(i, start_date_idx, end_date_idx )
 
-            for year, idxs in year_map.items():
-                start_idx, end_idx = idxs
+            while any(t.status!='SUCCESS' for t in task_dic.values()):
+                pass
 
-                clean_redis()
-                task_dic = {}
-                print("Computing stats")
-                for i in tqdm(range(0, n_solo_strats-1)):
-                    
-                    task_dic[i] = compute_multi_strategies_2.delay(i, start_idx, end_idx, )
-
-                while any(t.status!='SUCCESS' for t in task_dic.values()):
-                    pass
-
-                clean_redis()
-
-            for year, idxs in year_map.items():
-                start_idx, end_idx = idxs
-                if year == 2024:
-                    end_idx = end_idx - 1
-                Vectorized.JoinResults.join_wr_re_nt_data_2(n_solo_strats, stocks_map, f'/data/dang/tmp2/nt_wr_re_{start_idx}_{end_idx}', year)
+            clean_redis()
 
 
         @staticmethod
@@ -1966,6 +1936,22 @@ class Vectorized:
                 pass
 
             clean_redis()
+
+        @staticmethod
+        def compute_sharpe_for_all_strats(n_solo_strats):
+            from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_sharpe
+            clean_redis()
+
+            task_dic = {}
+            print("Computing stats")
+            for i in tqdm(range(0, n_solo_strats-1)):
+                task_dic[i] = compute_multi_strategies_sharpe.delay(i)
+
+            while any(t.status!='SUCCESS' for t in task_dic.values()):
+                pass
+
+            clean_redis()
+
 
 
     class JoinResults:
@@ -2144,6 +2130,37 @@ class Vectorized:
             join_one_stats(f'{file_name}_dd')
             # join_one_stats(f'{file_name}_re')
 
+            
+        @staticmethod
+        def join_sharpe_files(n, stocks_map, dir, file_name):
+            def test():
+                n =  1418
+                
+            fns = walk_through_files(dir)
+            print(f"Join sharpe temp files: ")
+            # df_res: pd.DataFrame = None
+            res = []
+
+            for f in tqdm(fns):
+                f: str
+                i = int(f.split('/')[-1].split(".")[0].split("_")[1])
+                if i < 2013:
+                    src = pd.read_pickle(f)
+                        
+                    tmp = pd.DataFrame(src, index=list(range(i+1, n)))
+                    tmp[-1] = i 
+                    res.append(tmp)
+
+            res: pd.DataFrame = pd.concat(res)
+            res = res.reset_index(names=-2)
+            cols_map = stocks_map.copy()
+            cols_map[-1] = 'i'
+            cols_map[-2] = 'j'
+            
+            res = res.rename(columns = cols_map)
+            res = res.set_index(['i', 'j'])
+            write_pickle(f"/home/ubuntu/Dang/pickles/{file_name}.pkl", res)
+
 
         @staticmethod
         def join_ursi_result(n, day_ls):
@@ -2208,6 +2225,40 @@ class Vectorized:
             Vectorized.JoinResults.join_wr_re_nt_data(n_strats, stocks_map)
 
         @staticmethod
+        def compute_wr_re_nt_yearly(recompute_signals: bool = True):
+            print("---------------------------------------------------------")
+            print("Start calculating yearly stats for each combination: ...")
+            stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+                                push_stocks_numpy=True, 
+                                push_return_numpy=True
+                            )
+            
+            n_strats = Vectorized.MultiProcess.compute_signals(recompute=recompute_signals)
+            
+            year_map = {}
+            year = None
+            for idx, d in enumerate(day_ls):
+                curr_year = int(d[0:4])
+                if curr_year != year:
+                    year_map[curr_year] = [idx]
+                    if idx != 0:
+                        year_map[year].append(idx)
+                    year = curr_year
+            year_map[year].append(idx+1)
+
+            for year, idxs in year_map.items():
+                start_idx, end_idx = idxs
+
+                print(f"Computing stats for {year} ... ", end = ' ')
+                Vectorized.MultiProcess.compute_wr_re_nt_2(n_strats, start_idx, end_idx)
+                print(f"Joining files ... ", end = ' ')
+                Vectorized.JoinResults.join_wr_re_nt_data_2(n_strats, stocks_map, f'/data/dang/tmp2/nt_wr_re_{start_idx}_{end_idx}', year)
+                print(f"Finished!")
+            print("---------------------------------------------------------")
+            print('Done!')
+
+            
+        @staticmethod
         def compute_ursi(recompute_signals: bool = False):
             stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma( 
                                                 push_stocks_numpy=True,
@@ -2222,28 +2273,46 @@ class Vectorized:
         @staticmethod
         def compute_ru_dd(recompute_signals: bool = False):
 
-            def test():
-                recompute_signals = True
             stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma( 
                                                 push_stocks_numpy=True,
                                                 push_ru_dd_numpy=True
                                             )
             
-            n_strats = Vectorized.MultiProcess.compute_signals(recompute=False)
+            n_strats = Vectorized.MultiProcess.compute_signals(recompute=recompute_signals)
 
             Vectorized.MultiProcess.compute_runup_drawdown_for_all_strats(n_strats)
             Vectorized.JoinResults.join_ru_dd_data(n_strats, stocks_map, dir="/data/dang/tmp2/ru_dd_0_-1", file_name="rudd")
+
+        @staticmethod
+        def compute_sharpe(recompute_signals: bool = False):
+            def test():
+                recompute_signals = True
+            stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+                    push_stocks_numpy=True, 
+                    push_return_numpy=True
+                )
             
+            n_strats = Vectorized.MultiProcess.compute_signals(recompute=recompute_signals)
+
+            Vectorized.MultiProcess.compute_sharpe_for_all_strats(n_strats)
+            Vectorized.JoinResults.join_sharpe_files(n_strats, stocks_map=stocks_map, dir="/data/dang/tmp2/sharpe_0_end/", file_name="sharpe")
+            
+        
 
 def run():     
     Vectorized.Runs.compute_nt_re_wr(recompute_signals=True)
     Vectorized.Runs.compute_ursi(recompute_signals=True)
+    Vectorized.Runs.compute_wr_re_nt_yearly(recompute_signals=True)
+    Vectorized.Runs.compute_ru_dd(recompute_signals=False)
+    Vectorized.Runs.compute_sharpe(recompute_signals=False)
 
 def test():
     df_ru: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/pickles/df_rudd_ru.pkl")
     df_dd: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/pickles/df_rudd_dd.pkl")
     df_rudd = df_ru.merge(df_dd, on=['i', 'j'])
     pd.to_pickle(df_rudd, "/home/ubuntu/Dang/pickles/df_rudd.pkl")
+
+    pd.read_pickle("/home/ubuntu/Dang/pickles/sharpe.pkl")
         
 
 glob_obj = Globs()
