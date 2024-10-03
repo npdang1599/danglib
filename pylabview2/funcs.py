@@ -105,6 +105,7 @@ class Globs:
     def load_stocks_data(self):
         """run to load stocks data"""
         df_stocks = Adapters.load_stocks_data_from_plasma()
+        df_stocks = df_stocks[df_stocks['stock'].isin(glob_obj.stocks)]
 
         df_stocks = df_stocks.pivot(index='day', columns='stock')
         df_stocks['day'] = df_stocks.index
@@ -636,7 +637,6 @@ class Conds:
         num_bars = int(num_bars)
 
         if use_flag:
-            num_bars = int(num_bars)
             # Calculating squeeze
             sqz_on, sqz_off, no_sqz  = Ta.squeeze(
                 df, src_name, bb_length, length_kc, mult_kc, use_true_range
@@ -1785,10 +1785,9 @@ class Vectorized:
         push_return_numpy: bool = False,
         push_ursi_numpy: bool = False,
         push_ru_dd_numpy: bool = False,
-
+        push_uptrend_downtrend: bool = False
     ):
         _, client_disconnect, psave, pload = gen_plasma_functions(db=5)
-
         df = glob_obj.df_stocks
         close: pd.DataFrame = df['close']
         stocks_map = {k: v for k, v in enumerate(close.columns)}
@@ -1831,6 +1830,31 @@ class Vectorized:
             df_drawdown = get_from_day(df_drawdown, '2018_01_01')
             dd_num = df_drawdown.to_numpy()
             psave("drawdown_vectorized", dd_num)
+
+        if push_uptrend_downtrend:
+            start_day = '2018_01_01'
+            df_index = glob_obj.df_vnindex
+            df_index = df_index[df_index['day'].isin(df['day'])].reset_index(drop=True)
+            exception_days = [d for d in df['day'].to_list() if d not in df_index['day'].to_list()]
+
+            df_ut = Conds.price_comp_ma(df_index, ma_len1=1, ma_len2=20, ma_dir='above')
+            df_ut.index = df_index['day']
+
+            df_dt = Conds.price_comp_ma(df_index, ma_len1=1, ma_len2=20, ma_dir='below')
+            df_dt.index = df_index['day']
+
+            for d in exception_days:
+                df_ut.loc[d] = False
+                df_dt.loc[d] = False
+            
+            df_ut = df_ut.sort_index()
+            df_dt = df_dt.sort_index()
+
+            ut_arr = df_ut[df_ut.index >= start_day].to_numpy()
+            dt_arr = df_dt[df_dt.index >= start_day].to_numpy()
+
+            psave("uptrend_array", ut_arr)
+            psave("downtrend_array", dt_arr)
 
         client_disconnect()
 
@@ -1878,14 +1902,13 @@ class Vectorized:
             return n_strats
 
         @staticmethod
-        def compute_wr_re_nt_for_all_strats(n_solo_strats):
+        def compute_wr_re_nt_for_all_strats(n_solo_strats, folder):
             from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies
             clean_redis()
-
             task_dic = {}
             print("Computing stats")
             for i in tqdm(range(0, n_solo_strats-1)):
-                task_dic[i] = compute_multi_strategies.delay(i)
+                task_dic[i] = compute_multi_strategies.delay(i, folder)
 
             while any(t.status!='SUCCESS' for t in task_dic.values()):
                 pass
@@ -1893,13 +1916,12 @@ class Vectorized:
             clean_redis()
 
         @staticmethod
-        def compute_wr_re_nt_2(n_strats, start_date_idx, end_date_idx):
+        def compute_wr_re_nt_2(n_strats, start_date_idx, end_date_idx, folder):
             from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_2
             clean_redis()
             task_dic = {}
             for i in tqdm(range(0, n_strats-1)):
-                
-                task_dic[i] = compute_multi_strategies_2.delay(i, start_date_idx, end_date_idx )
+                task_dic[i] = compute_multi_strategies_2.delay(i, start_date_idx, end_date_idx, folder)
 
             while any(t.status!='SUCCESS' for t in task_dic.values()):
                 pass
@@ -1908,14 +1930,17 @@ class Vectorized:
 
 
         @staticmethod
-        def compute_ursi_for_all_strats(n_solo_strats):
+        def compute_ursi_for_all_strats(n_solo_strats, folder):
             from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_ursi
             clean_redis()
+            
+            maybe_create_dir(f"{folder}/stocks_count_day")
+            maybe_create_dir(f"{folder}/ursi_sum")
 
             task_dic = {}
             print("Computing stats")
             for i in tqdm(range(0, n_solo_strats-1)):
-                task_dic[i] = compute_multi_strategies_ursi.delay(i)
+                task_dic[i] = compute_multi_strategies_ursi.delay(i, folder)
 
             while any(t.status!='SUCCESS' for t in task_dic.values()):
                 pass
@@ -1923,14 +1948,14 @@ class Vectorized:
             clean_redis()
 
         @staticmethod
-        def compute_runup_drawdown_for_all_strats(n_solo_strats):
+        def compute_runup_drawdown_for_all_strats(n_solo_strats, folder):
             from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_ru_dd
             clean_redis()
 
             task_dic = {}
             print("Computing stats")
             for i in tqdm(range(0, n_solo_strats-1)):
-                task_dic[i] = compute_multi_strategies_ru_dd.delay(i)
+                task_dic[i] = compute_multi_strategies_ru_dd.delay(i, folder=folder)
 
             while any(t.status!='SUCCESS' for t in task_dic.values()):
                 pass
@@ -1938,14 +1963,28 @@ class Vectorized:
             clean_redis()
 
         @staticmethod
-        def compute_sharpe_for_all_strats(n_solo_strats):
+        def compute_sharpe_for_all_strats(n_solo_strats, folder):
             from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_sharpe
             clean_redis()
 
             task_dic = {}
             print("Computing stats")
             for i in tqdm(range(0, n_solo_strats-1)):
-                task_dic[i] = compute_multi_strategies_sharpe.delay(i)
+                task_dic[i] = compute_multi_strategies_sharpe.delay(i, folder=folder)
+
+            while any(t.status!='SUCCESS' for t in task_dic.values()):
+                pass
+
+            clean_redis()
+
+        @staticmethod
+        def compute_ut_dt_for_all_strats(n_solo_strats, folder):
+            from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_utdt
+            clean_redis()
+            task_dic = {}
+            print("Computing stats")
+            for i in tqdm(range(0, n_solo_strats-1)):
+                task_dic[i] = compute_multi_strategies_utdt.delay(i, folder)
 
             while any(t.status!='SUCCESS' for t in task_dic.values()):
                 pass
@@ -1953,12 +1992,11 @@ class Vectorized:
             clean_redis()
 
 
-
     class JoinResults:
 
         @staticmethod
-        def join_wr_re_nt_data(n, stocks_map):
-            fns = walk_through_files("/data/dang/tmp/")
+        def join_wr_re_nt_data(n, stocks_map, src_folder, des_folder):
+            fns = walk_through_files(src_folder)
 
             def join_one_stats(name):
 
@@ -1989,55 +2027,18 @@ class Vectorized:
 
                 res = res.rename(columns = cols_map)
                 res = res.set_index(['i', 'j'])
-                write_pickle(f"/home/ubuntu/Dang/pickles/df_{name}.pkl", res)
+                dir = f"{des_folder}/df_{name}.pkl"
+                write_pickle(dir, res)
+                print(dir)
 
             join_one_stats('nt')
             join_one_stats('wt')
             join_one_stats('re')
 
-        @staticmethod
-        def join_wr_re_nt_data(n, stocks_map):
-            fns = walk_through_files("/data/dang/tmp/")
 
-            def join_one_stats(name):
-
-                # df_res: pd.DataFrame = None
-                res = []
-                print(f"Join {name} stats: ")
-                for f in tqdm(fns):
-                    f: str
-                    i = int(f.split('/')[-1].split(".")[0].split("_")[1])
-                    if i < 2013:
-                        nt_raw, re_raw, wt_raw = pd.read_pickle(f)
-                        src = None
-                        if name == 'nt':
-                            src = nt_raw
-                        if name == 're':
-                            src = re_raw
-                        if name == 'wt':
-                            src = wt_raw
-
-                        tmp = pd.DataFrame(src, index=list(range(i+1, n)))
-                        tmp[-1] = i 
-                        res.append(tmp)
-                res: pd.DataFrame = pd.concat(res)
-                res = res.reset_index(names=-2)
-                cols_map = stocks_map.copy()
-                cols_map[-1] = 'i'
-                cols_map[-2] = 'j'
-
-                res = res.rename(columns = cols_map)
-                res = res.set_index(['i', 'j'])
-                write_pickle(f"/home/ubuntu/Dang/pickles/df_{name}.pkl", res)
-
-            join_one_stats('nt')
-            join_one_stats('wt')
-            join_one_stats('re')
-
-    
 
         @staticmethod
-        def join_wr_re_nt_data_2(n, stocks_map, dir, file_name):
+        def join_wr_re_nt_data_2(n, stocks_map, src_folder, result_folder):
             def test():
                 n = 1418
                 stocks_map = stocks_map
@@ -2045,11 +2046,9 @@ class Vectorized:
                 file_name = '2018'
 
 
-            fns = walk_through_files(dir)
+            fns = walk_through_files(src_folder)
 
             def join_one_stats(name):
-
-                # df_res: pd.DataFrame = None
                 res = []
                 print(f"Join {name} stats: ")
                 for f in tqdm(fns):
@@ -2058,11 +2057,11 @@ class Vectorized:
                     if i < 2013:
                         nt_raw, re_raw, wt_raw = pd.read_pickle(f)
                         src = None
-                        if name == f'{file_name}_nt':
+                        if name == f'nt':
                             src = nt_raw
-                        if name == f'{file_name}_re':
+                        if name == f're':
                             src = re_raw
-                        if name == f'{file_name}_wt':
+                        if name == f'wt':
                             src = wt_raw
 
                         tmp = pd.DataFrame(src, index=list(range(i+1, n)))
@@ -2076,15 +2075,18 @@ class Vectorized:
 
                 res = res.rename(columns = cols_map)
                 res = res.set_index(['i', 'j'])
-                write_pickle(f"/home/ubuntu/Dang/pickles/df_{name}.pkl", res)
 
-            join_one_stats(f'{file_name}_nt')
-            join_one_stats(f'{file_name}_wt')
-            join_one_stats(f'{file_name}_re')
+                fn = f"{result_folder}/df_{name}.pkl"
+                print(f'Write data to {fn}')
+                write_pickle(fn, res)
+
+            join_one_stats(f'nt')
+            join_one_stats(f'wt')
+            join_one_stats(f're')
 
 
         @staticmethod
-        def join_ru_dd_data(n, stocks_map, dir, file_name):
+        def join_ru_dd_data(n, src_folder, des_folder):
             def test():
                 n = 1418
                 stocks_map = stocks_map
@@ -2092,7 +2094,7 @@ class Vectorized:
                 file_name = '2018'
 
 
-            fns = walk_through_files(dir)
+            fns = walk_through_files(src_folder)
 
             def join_one_stats(name):
 
@@ -2105,11 +2107,11 @@ class Vectorized:
                     if i < 2013:
                         ru_raw, dd_raw = pd.read_pickle(f)
                         src = None
-                        if name == f'{file_name}_ru':
+                        if name == f'ru':
                             src = ru_raw
                             cols_map = {0:'avg_ru'}
 
-                        if name == f'{file_name}_dd':
+                        if name == f'dd':
                             src = dd_raw
                             cols_map = {0:'avg_dd'}
 
@@ -2124,19 +2126,19 @@ class Vectorized:
 
                 res = res.rename(columns = cols_map)
                 res = res.set_index(['i', 'j'])
-                write_pickle(f"/home/ubuntu/Dang/pickles/df_{name}.pkl", res)
+                write_pickle(f"{des_folder}/df_{name}.pkl", res)
 
-            join_one_stats(f'{file_name}_ru')
-            join_one_stats(f'{file_name}_dd')
+            join_one_stats(f'ru')
+            join_one_stats(f'dd')
             # join_one_stats(f'{file_name}_re')
 
             
         @staticmethod
-        def join_sharpe_files(n, stocks_map, dir, file_name):
+        def join_sharpe_files(n, stocks_map, src_folder, des_folder):
             def test():
                 n =  1418
                 
-            fns = walk_through_files(dir)
+            fns = walk_through_files(src_folder)
             print(f"Join sharpe temp files: ")
             # df_res: pd.DataFrame = None
             res = []
@@ -2159,15 +2161,15 @@ class Vectorized:
             
             res = res.rename(columns = cols_map)
             res = res.set_index(['i', 'j'])
-            write_pickle(f"/home/ubuntu/Dang/pickles/{file_name}.pkl", res)
+            write_pickle(f"{des_folder}/df_sharpe.pkl", res)
 
 
         @staticmethod
-        def join_ursi_result(n, day_ls):
+        def join_ursi_result(n, day_ls, src_folder, des_folder):
             def test():
                 n =  1418
                 
-            fns = walk_through_files("/data/dang/tmp2/stocks_count_day/")
+            fns = walk_through_files(f"{src_folder}/stocks_count_day")
             print(f"Join stocks count: ")
             # df_res: pd.DataFrame = None
             res = []
@@ -2190,10 +2192,10 @@ class Vectorized:
             res.columns = cols
             res.sort_index(axis=1)
             
-            write_pickle(f"/home/ubuntu/Dang/pickles/stocks_matched_day.pkl", res)
+            write_pickle(f"{des_folder}/stocks_matched_day.pkl", res)
 
 
-            fns2 = walk_through_files("/data/dang/tmp2/ursi_sum/")
+            fns2 = walk_through_files(f"{src_folder}/ursi_sum")
             print(f"Join ursi: ")
             # df_res: pd.DataFrame = None
             res2 = []
@@ -2208,12 +2210,62 @@ class Vectorized:
             res2: pd.DataFrame = pd.concat(res2)
             res2 = res2.set_index(['i', 'j'])
 
-            write_pickle(f"/home/ubuntu/Dang/pickles/strats_stocks_ursi.pkl", res2)
+            write_pickle(f"{des_folder}/strats_stocks_ursi.pkl", res2)
+
+        @staticmethod
+        def join_ut_dt_data(n, stocks_map, src_folder, des_folder):
+            fns = walk_through_files(src_folder)
+
+            def join_one_stats(name):
+
+                # df_res: pd.DataFrame = None
+                res = []
+                print(f"Join {name} stats: ")
+                for f in tqdm(fns):
+                    f: str
+                    i = int(f.split('/')[-1].split(".")[0].split("_")[1])
+                    if i < 2013:
+                        ut_raw, dt_raw = pd.read_pickle(f)
+                        src = None
+                        if name == 'uptrend':
+                            src = ut_raw
+                        if name == 'downtrend':
+                            src = dt_raw
+
+                        tmp = pd.DataFrame(src, index=list(range(i+1, n)))
+                        tmp[-1] = i 
+                        res.append(tmp)
+                res: pd.DataFrame = pd.concat(res)
+                res = res.reset_index(names=-2)
+                cols_map = stocks_map.copy()
+                cols_map[-1] = 'i'
+                cols_map[-2] = 'j'
+
+                res = res.rename(columns = cols_map)
+                res = res.set_index(['i', 'j'])
+                dir = f"{des_folder}/df_{name}.pkl"
+                write_pickle(dir, res)
+                print(dir)
+
+            join_one_stats('uptrend')
+            join_one_stats('downtrend')
+
 
     class Runs:
         @staticmethod
-        def compute_nt_re_wr(recompute_signals: bool = True):
+        def compute_nt_re_wr():
+            ## PARAMS-------------------------------------------------------------------
+            name = 'nt_re_wr_3'
 
+            store_folder = f"/data/dang/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/home/ubuntu/Dang/pickles/{name}"
+            maybe_create_dir(result_folder)
+
+            recompute_signals = True
+            ## CALC  -------------------------------------------------------------------
+            
             stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
                                                 push_return_numpy=True, 
                                                 push_stocks_numpy=True
@@ -2221,11 +2273,24 @@ class Vectorized:
             
             n_strats = Vectorized.MultiProcess.compute_signals(recompute_signals)
 
-            Vectorized.MultiProcess.compute_wr_re_nt_for_all_strats(n_strats)
-            Vectorized.JoinResults.join_wr_re_nt_data(n_strats, stocks_map)
+            Vectorized.MultiProcess.compute_wr_re_nt_for_all_strats(n_strats, folder=store_folder)
+            Vectorized.JoinResults.join_wr_re_nt_data(n_strats, stocks_map, src_folder=store_folder, des_folder=result_folder)
+
 
         @staticmethod
-        def compute_wr_re_nt_yearly(recompute_signals: bool = True):
+        def compute_wr_re_nt_yearly():
+            ## PARAMS-------------------------------------------------------------------
+            name = 'nt_re_wr_yearly'
+            recompute_signals: bool = True
+
+            store_folder = f"/data/dang/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/home/ubuntu/Dang/pickles/{name}"
+            maybe_create_dir(result_folder)
+
+            ## CALC  -------------------------------------------------------------------
+
             print("---------------------------------------------------------")
             print("Start calculating yearly stats for each combination: ...")
             stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
@@ -2249,17 +2314,34 @@ class Vectorized:
             for year, idxs in year_map.items():
                 start_idx, end_idx = idxs
 
+                sub_store_folder = f"{store_folder}/{year}"
+                maybe_create_dir(sub_store_folder)
+
+                sub_res_folder = f"{result_folder}/{year}"
+                maybe_create_dir(sub_res_folder)
+
                 print(f"Computing stats for {year} ... ", end = ' ')
-                Vectorized.MultiProcess.compute_wr_re_nt_2(n_strats, start_idx, end_idx)
+                Vectorized.MultiProcess.compute_wr_re_nt_2(n_strats, start_idx, end_idx, folder=sub_store_folder)
                 print(f"Joining files ... ", end = ' ')
-                Vectorized.JoinResults.join_wr_re_nt_data_2(n_strats, stocks_map, f'/data/dang/tmp2/nt_wr_re_{start_idx}_{end_idx}', year)
+                Vectorized.JoinResults.join_wr_re_nt_data_2(n_strats, stocks_map, src_folder = sub_store_folder, result_folder=sub_res_folder)
                 print(f"Finished!")
             print("---------------------------------------------------------")
             print('Done!')
 
             
         @staticmethod
-        def compute_ursi(recompute_signals: bool = False):
+        def compute_ursi():
+            ## PARAMS-------------------------------------------------------------------
+            name = 'ursi'
+            recompute_signals: bool = False
+
+            store_folder = f"/data/dang/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/home/ubuntu/Dang/pickles/{name}"
+            maybe_create_dir(result_folder)
+            ## CALC  -------------------------------------------------------------------
+
             stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma( 
                                                 push_stocks_numpy=True,
                                                 push_ursi_numpy=True
@@ -2267,11 +2349,22 @@ class Vectorized:
             
             n_strats = Vectorized.MultiProcess.compute_signals(recompute_signals)
 
-            Vectorized.MultiProcess.compute_ursi_for_all_strats(n_strats)
-            Vectorized.JoinResults.join_ursi_result(n_strats, day_ls)
+            Vectorized.MultiProcess.compute_ursi_for_all_strats(n_strats, folder=store_folder)
+            Vectorized.JoinResults.join_ursi_result(n_strats, day_ls, src_folder=store_folder, des_folder=result_folder)
+
 
         @staticmethod
-        def compute_ru_dd(recompute_signals: bool = False):
+        def compute_ru_dd():
+            ## PARAMS-------------------------------------------------------------------
+            name = 'rudd'
+            recompute_signals: bool = False
+
+            store_folder = f"/data/dang/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/home/ubuntu/Dang/pickles/{name}"
+            maybe_create_dir(result_folder)
+            ## CALC  -------------------------------------------------------------------
 
             stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma( 
                                                 push_stocks_numpy=True,
@@ -2280,13 +2373,23 @@ class Vectorized:
             
             n_strats = Vectorized.MultiProcess.compute_signals(recompute=recompute_signals)
 
-            Vectorized.MultiProcess.compute_runup_drawdown_for_all_strats(n_strats)
-            Vectorized.JoinResults.join_ru_dd_data(n_strats, stocks_map, dir="/data/dang/tmp2/ru_dd_0_-1", file_name="rudd")
+            Vectorized.MultiProcess.compute_runup_drawdown_for_all_strats(n_strats, folder=store_folder)
+            Vectorized.JoinResults.join_ru_dd_data(n_strats, src_folder=store_folder, des_folder=result_folder)
+
 
         @staticmethod
-        def compute_sharpe(recompute_signals: bool = False):
-            def test():
-                recompute_signals = True
+        def compute_sharpe():
+            ## PARAMS-------------------------------------------------------------------
+            name = 'sharpe'
+            recompute_signals: bool = False
+
+            store_folder = f"/data/dang/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/home/ubuntu/Dang/pickles/{name}"
+            maybe_create_dir(result_folder)
+            ## CALC  -------------------------------------------------------------------
+
             stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
                     push_stocks_numpy=True, 
                     push_return_numpy=True
@@ -2294,17 +2397,33 @@ class Vectorized:
             
             n_strats = Vectorized.MultiProcess.compute_signals(recompute=recompute_signals)
 
-            Vectorized.MultiProcess.compute_sharpe_for_all_strats(n_strats)
-            Vectorized.JoinResults.join_sharpe_files(n_strats, stocks_map=stocks_map, dir="/data/dang/tmp2/sharpe_0_end/", file_name="sharpe")
+            Vectorized.MultiProcess.compute_sharpe_for_all_strats(n_strats, folder=store_folder)
+            Vectorized.JoinResults.join_sharpe_files(n_strats, stocks_map=stocks_map, src_folder=store_folder, des_folder=result_folder)
             
-        
+        @staticmethod
+        def compute_uptrend_downtrend():
+            ## PARAMS-------------------------------------------------------------------
+            name = 'uptrend_downtrend'
+            recompute_signals: bool = True
 
-def run():     
-    Vectorized.Runs.compute_nt_re_wr(recompute_signals=True)
-    Vectorized.Runs.compute_ursi(recompute_signals=True)
-    Vectorized.Runs.compute_wr_re_nt_yearly(recompute_signals=True)
-    Vectorized.Runs.compute_ru_dd(recompute_signals=False)
-    Vectorized.Runs.compute_sharpe(recompute_signals=False)
+            store_folder = f"/data/dang/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/home/ubuntu/Dang/pickles/{name}"
+            maybe_create_dir(result_folder)
+            ## CALC  -------------------------------------------------------------------
+            stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+                push_stocks_numpy=True, 
+                push_uptrend_downtrend=True
+            )
+
+            n_strats = Vectorized.MultiProcess.compute_signals(recompute=recompute_signals)
+
+            Vectorized.MultiProcess.compute_ut_dt_for_all_strats(n_strats, folder=store_folder)
+            Vectorized.JoinResults.join_ut_dt_data(n_strats, stocks_map=stocks_map, src_folder=store_folder, des_folder=result_folder)
+
+
+    
 
 def test():
     df_ru: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/pickles/df_rudd_ru.pkl")
@@ -2313,6 +2432,8 @@ def test():
     pd.to_pickle(df_rudd, "/home/ubuntu/Dang/pickles/df_rudd.pkl")
 
     pd.read_pickle("/home/ubuntu/Dang/pickles/sharpe.pkl")
+    pd.read_pickle("/home/ubuntu/Dang/pickles/uptrend_downtrend/df_uptrend.pkl")
+    pd.read_pickle("/home/ubuntu/Dang/pickles/uptrend_downtrend/df_downtrend.pkl")
         
 
 glob_obj = Globs()

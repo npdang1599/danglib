@@ -26,7 +26,7 @@ class Adapters:
         # df = df.rename(columns={"value": "volume"})
         db = MongoClient('localhost',27022)['stockdata']
         index_coll = db['index_value']
-        df = pd.DataFrame(index_coll.find({},{'_id':0}))
+        df: pd.DataFrame = pd.DataFrame(index_coll.find({},{'_id':0}))
 
         INDEX_LIST = ['VNINDEX','VN30','VNDIAMOND','VNMID','VNSML']
 
@@ -604,7 +604,7 @@ class Adapters:
             to_plasma=False,
         ):
         def example_params():
-            stocks = ['VGI', 'HPG']
+            stocks = ['SSI', 'HPG']
             start_day = '2019_07_11'
         
         # df_stocks: pd.DataFrame = Adapters.get_stocks_data_from_db_fiinpro(stocks=stocks, from_day=start_day)
