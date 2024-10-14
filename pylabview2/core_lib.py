@@ -402,9 +402,12 @@ class Adapters:
             stocks (list): stocks list,
             stocks_groups_map (dict): map stock with beta group
         """
+        drop_stocks = ['ITA', 'LTG']
         path = Fns.stock_beta_group
         df = pd.read_excel(path, sheet_name="Sheet3")
+        df = df[~df['Ticker'].isin(drop_stocks)]
         stocks = df["Ticker"].tolist()
+        
 
         group_name_map = {1: "Super High Beta", 2: "High Beta", 3: "Medium", 4: "Low"}
 
