@@ -17,6 +17,9 @@ pd.options.mode.chained_assignment = None
 # Tắt tất cả các FutureWarning
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
+class CeleryTaskError(Exception):
+    pass
+
 
 class Globs:
     """Class of objects for global using purposes"""
@@ -3040,12 +3043,14 @@ class Simulator:
             df["signal"] = signals
             
         df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
-        df["signal"].iloc[-(holding_periods+1):] = False
+        # df["signal"].iloc[-(holding_periods+1):] = False
 
         df["name"] = name
 
         # Update DataFrame
         df['isEntry'] = df['signal'].copy()
+        df["isEntry"].iloc[-(holding_periods+1):] = False
+
         df['isTrading'] = df['isEntry'].rolling(holding_periods).sum().fillna(0).astype(bool)
         df['numTrade'] = df['isEntry'].cumsum()
         
@@ -3079,7 +3084,7 @@ class Simulator:
         df['profitFactor'] = np.where(df['loss']!=0, df['profit'].cumsum() / df['loss'].cumsum(), np.nan)
         
         df = df.drop(['is_win', 'is_win1', 'is_win5', 'is_win10', 'is_win15', 'profit', 'loss' ], axis = 1)
-        df['isEntry'] = np.where(df['signal'], 1, np.nan)
+        df['isEntry'] = np.where(df['isEntry'], 1, np.nan)
 
         # df["numTrade"] = num_trades_arr
         # df["winrate"] = winrate_arr
@@ -3220,8 +3225,14 @@ class Scanner:
             
             task_dic[stock] = task
             
-        while any(t.status!='SUCCESS' for t in task_dic.values()):
-            pass
+        # while any(t.status!='SUCCESS' for t in task_dic.values()):
+        #     pass
+
+        while any(t.status not in ['SUCCESS', 'FAILURE'] for t in task_dic.values()):
+            if any(t.status == 'FAILURE' for t in task_dic.values()):
+                # Xử lý khi có task bị lỗi
+                raise CeleryTaskError("Có task bị lỗi. Thoát vòng lặp: ", [i for i, j in task_dic.items() if j.status == 'FAILURE'])
+            pass  #
 
         for k, v in task_dic.items():
             bt = v.result
@@ -3364,8 +3375,14 @@ class Scanner:
             
             task_dic[stock] = task
             
-        while any(t.status!='SUCCESS' for t in task_dic.values()):
-            pass
+        # while any(t.status!='SUCCESS' for t in task_dic.values()):
+        #     pass
+
+        while any(t.status not in ['SUCCESS', 'FAILURE'] for t in task_dic.values()):
+            if any(t.status == 'FAILURE' for t in task_dic.values()):
+                # Xử lý khi có task bị lỗi
+                raise CeleryTaskError("Có task bị lỗi. Thoát vòng lặp: ", [i for i, j in task_dic.items() if j.status == 'FAILURE'])
+            pass  #
 
         for k, v in task_dic.items():
             bt = v.result
@@ -3442,8 +3459,11 @@ class Scanner:
             
             task_dic[stock] = task
             
-        while any(t.status!='SUCCESS' for t in task_dic.values()):
-            pass
+        while any(t.status not in ['SUCCESS', 'FAILURE'] for t in task_dic.values()):
+            if any(t.status == 'FAILURE' for t in task_dic.values()):
+                # Xử lý khi có task bị lỗi
+                raise CeleryTaskError("Có task bị lỗi. Thoát vòng lặp: ", [i for i, j in task_dic.items() if j.status == 'FAILURE'])
+            pass  #
 
         for k, v in task_dic.items():
             bt = v.result
@@ -3528,8 +3548,14 @@ class Scanner:
             
             task_dic[stock] = task
             
-        while any(t.status!='SUCCESS' for t in task_dic.values()):
-            pass
+        # while any(t.status!='SUCCESS' for t in task_dic.values()):
+        #     pass
+
+        while any(t.status not in ['SUCCESS', 'FAILURE'] for t in task_dic.values()):
+            if any(t.status == 'FAILURE' for t in task_dic.values()):
+                # Xử lý khi có task bị lỗi
+                raise CeleryTaskError("Có task bị lỗi. Thoát vòng lặp: ", [i for i, j in task_dic.items() if j.status == 'FAILURE'])
+            pass  #
 
         for k, v in task_dic.items():
             bt = v.result
@@ -3595,8 +3621,14 @@ class Scanner:
             
             task_dic[stock] = task
             
-        while any(t.status!='SUCCESS' for t in task_dic.values()):
-            pass
+        # while any(t.status!='SUCCESS' for t in task_dic.values()):
+        #     pass
+
+        while any(t.status not in ['SUCCESS', 'FAILURE'] for t in task_dic.values()):
+            if any(t.status == 'FAILURE' for t in task_dic.values()):
+                # Xử lý khi có task bị lỗi
+                raise CeleryTaskError("Có task bị lỗi. Thoát vòng lặp: ", [i for i, j in task_dic.items() if j.status == 'FAILURE'])
+            pass  #
 
         for k, v in task_dic.items():
             bt = v.result
@@ -3626,7 +3658,12 @@ class Scanner:
     
 
 glob_obj = Globs()
+
 glob_obj.load_all_data2()
+try:
+    glob_obj.get_one_stock_data("HPG")
+except:
+    glob_obj.gen_stocks_data()
 
 def test():
 

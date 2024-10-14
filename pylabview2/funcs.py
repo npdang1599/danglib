@@ -1785,7 +1785,9 @@ class Vectorized:
         push_return_numpy: bool = False,
         push_ursi_numpy: bool = False,
         push_ru_dd_numpy: bool = False,
-        push_uptrend_downtrend: bool = False
+        push_uptrend_downtrend: bool = False,
+        push_peak_trough: bool = False,
+        shift: bool = False
     ):
         _, client_disconnect, psave, pload = gen_plasma_functions(db=5)
         df = glob_obj.df_stocks
@@ -1837,24 +1839,133 @@ class Vectorized:
             df_index = df_index[df_index['day'].isin(df['day'])].reset_index(drop=True)
             exception_days = [d for d in df['day'].to_list() if d not in df_index['day'].to_list()]
 
-            df_ut = Conds.price_comp_ma(df_index, ma_len1=1, ma_len2=20, ma_dir='above')
-            df_ut.index = df_index['day']
+            MA1 = 1
+            MA2 = 20
+            MA3 = 50
 
-            df_dt = Conds.price_comp_ma(df_index, ma_len1=1, ma_len2=20, ma_dir='below')
-            df_dt.index = df_index['day']
+
+            df_ut = Conds.price_comp_ma(df_index, ma_len1= MA1, ma_len2= MA2, ma_dir='above') & Conds.price_comp_ma(df_index, ma_len1= MA2, ma_len2= MA3, ma_dir='above')
+            df_ld = Conds.price_comp_ma(df_index, ma_len1= MA3, ma_len2= MA2, ma_dir='above') & Conds.price_comp_ma(df_index, ma_len1= MA2, ma_len2= MA1, ma_dir='above')
+            df_pb = Conds.price_comp_ma(df_index, ma_len1= MA2, ma_len2= MA1, ma_dir='above') & Conds.price_comp_ma(df_index, ma_len1= MA1, ma_len2= MA3, ma_dir='above')
+            df_rc = Conds.price_comp_ma(df_index, ma_len1= MA1, ma_len2= MA2, ma_dir='above') & Conds.price_comp_ma(df_index, ma_len1= MA3, ma_len2= MA2, ma_dir='above')
+            df_ed = Conds.price_comp_ma(df_index, ma_len1= MA2, ma_len2= MA3, ma_dir='above') & Conds.price_comp_ma(df_index, ma_len1= MA3, ma_len2= MA1, ma_dir='above')
+
+            df_ut.index = df_index['day']
+            df_ld.index = df_index['day']
+            df_pb.index = df_index['day']
+            df_rc.index = df_index['day']
+            df_ed.index = df_index['day']
 
             for d in exception_days:
                 df_ut.loc[d] = False
-                df_dt.loc[d] = False
-            
+                df_ld.loc[d] = False
+                df_pb.loc[d] = False
+                df_rc.loc[d] = False
+                df_ed.loc[d] = False
+
             df_ut = df_ut.sort_index()
-            df_dt = df_dt.sort_index()
+            df_ld = df_ld.sort_index()
+            df_pb = df_pb.sort_index()
+            df_rc = df_rc.sort_index()
+            df_ed = df_ed.sort_index()
+
+            if shift: 
+                df_ut = df_ut.shift(5)
+                df_ld = df_ld.shift(5)
+                df_pb = df_pb.shift(5)
+                df_rc = df_rc.shift(5)
+                df_ed = df_ed.shift(5)
 
             ut_arr = df_ut[df_ut.index >= start_day].to_numpy()
-            dt_arr = df_dt[df_dt.index >= start_day].to_numpy()
+            ld_arr = df_ld[df_ld.index >= start_day].to_numpy()
+            pb_arr = df_pb[df_pb.index >= start_day].to_numpy()
+            rc_arr = df_rc[df_rc.index >= start_day].to_numpy()
+            ed_arr = df_ed[df_ed.index >= start_day].to_numpy()
 
-            psave("uptrend_array", ut_arr)
-            psave("downtrend_array", dt_arr)
+
+            psave("ut_array", ut_arr)
+            psave("ld_array", ld_arr)
+            psave("pb_array", pb_arr)
+            psave("rc_array", rc_arr)
+            psave("ed_array", ed_arr)
+
+        # if push_peak_trough:
+        #     start_day = '2018_01_01'
+        #     df_index = glob_obj.df_vnindex
+        #     df_index = df_index[df_index['day'].isin(df['day'])].reset_index(drop=True)
+        #     exception_days = [d for d in df['day'].to_list() if d not in df_index['day'].to_list()]
+
+            leftBar_trough = 31
+            rightBar_trough = 21
+            leftThreshold_trough = 7
+            rightThreshold_trough = 4
+
+            bars_to_keep = 5
+
+            df_index['right_upside'] = ((df_index['high'].rolling(rightBar_trough).max() / df_index['low'].rolling(rightBar_trough).min()).shift(-rightBar_trough)  - 1) * 100
+            df_index['left_downside'] = ((df_index['low'].rolling(leftBar_trough).min() / df_index['high'].rolling(leftBar_trough).max())  - 1) * 100
+
+            df_index['pivotLow'] = (df_index['low'] == df_index['low'].rolling(leftBar_trough).min()) & \
+                                   (df_index['low'] == df_index['low'].rolling(rightBar_trough+1).min().shift(-rightBar_trough))
+
+            df_index['trough'] = df_index['pivotLow'] & \
+                                 (df_index['left_downside'].abs() >= leftThreshold_trough) & \
+                                 (df_index['right_upside'].abs() >= rightThreshold_trough)
+
+            df_index['trough_count'] = df_index['trough'].cumsum() 
+            df_index['consecutive_after_trough'] = (df_index['trough'] == False).groupby(df_index['trough_count']).cumcount()
+            df_index['consecutive_before_trough'] = (df_index['trough'] == False)[::-1].groupby((df_index['trough'] == True)[::-1].cumsum()).cumcount()[::-1]
+
+            df_index['after_trough'] = df_index['consecutive_after_trough'] < bars_to_keep
+            df_index['before_trough'] = df_index['consecutive_before_trough'] < bars_to_keep
+            df_index.loc[df_index.index[-bars_to_keep:] ,'before_trough'] = False
+
+            ###
+            leftBar_peak = 31
+            rightBar_peak = 16
+            leftThreshold_peak = 2
+            rightThreshold_peak = 7
+
+            df_index['right_downside'] = ((df_index['low'].rolling(rightBar_peak).min() / df_index['high'].rolling(rightBar_peak).max()).shift(-rightBar_peak)  - 1) * 100
+            df_index['left_upside'] = ((df_index['high'].rolling(leftBar_peak).max() / df_index['low'].rolling(leftBar_peak).min())  - 1) * 100
+
+            df_index['pivotHigh'] = (df_index['high'] == df_index['high'].rolling(leftBar_peak).max()) & \
+                                   (df_index['high'] == df_index['high'].rolling(rightBar_peak+1).max().shift(-rightBar_peak))
+
+            df_index['peak'] = df_index['pivotHigh'] & \
+                                 (df_index['left_upside'].abs() >= leftThreshold_peak) & \
+                                 (df_index['right_upside'].abs() >= rightThreshold_peak)
+            
+            df_index['peak_count'] = df_index['peak'].cumsum() 
+            df_index['consecutive_after_peak'] = (df_index['peak'] == False).groupby(df_index['peak_count']).cumcount()
+            df_index['consecutive_before_peak'] = (df_index['peak'] == False)[::-1].groupby((df_index['peak'] == True)[::-1].cumsum()).cumcount()[::-1]
+
+            df_index['after_peak'] = df_index['consecutive_after_peak'] < bars_to_keep
+            df_index['before_peak'] = df_index['consecutive_before_peak'] < bars_to_keep
+            df_index.loc[df_index.index[-bars_to_keep:] ,'before_peak'] = False
+
+            
+            df_index = df_index[df_index['day']>=start_day]
+            day_index = glob_obj.df_stocks.index.to_frame().reset_index(drop=True)
+            day_index = day_index[day_index['day']>=start_day]
+            df_index = df_index.merge(day_index, on ='day', how ='right')
+            for d in exception_days:
+                df_index.loc[df_index['day']==d,'before_trough'] = False
+                df_index.loc[df_index['day']==d,'after_trough'] = False
+                df_index.loc[df_index['day']==d,'before_peak'] = False
+                df_index.loc[df_index['day']==d,'after_peak'] = False
+            df_index = df_index.sort_values('day')
+
+            before_trough_arr = df_index['before_trough'].to_numpy()
+            after_trough_arr = df_index['after_trough'].to_numpy()
+
+            before_peak_arr = df_index['before_peak'].to_numpy()
+            after_peak_arr = df_index['after_peak'].to_numpy()
+
+            psave("before_trough_arr", before_trough_arr)
+            psave("after_trough_arr", after_trough_arr)
+            psave("before_peak_arr", before_peak_arr)
+            psave("after_peak_arr", after_peak_arr)
 
         client_disconnect()
 
@@ -2225,12 +2336,27 @@ class Vectorized:
                     f: str
                     i = int(f.split('/')[-1].split(".")[0].split("_")[1])
                     if i < 2013:
-                        ut_raw, dt_raw = pd.read_pickle(f)
+                        ut_raw, ld_raw, pb_raw, rc_raw, ed_raw, bt_raw, at_raw, bp_raw, ap_raw = pd.read_pickle(f)
                         src = None
                         if name == 'uptrend':
                             src = ut_raw
                         if name == 'downtrend':
-                            src = dt_raw
+                            src = ld_raw
+                        if name == 'pullback':
+                            src = pb_raw
+                        if name == 'recovery':
+                            src = rc_raw
+                        if name == 'early_downtrend':
+                            src = ed_raw
+
+                        if name == 'before_trough':
+                            src = bt_raw
+                        if name == 'after_trough':
+                            src = at_raw
+                        if name == 'before_peak':
+                            src = bp_raw
+                        if name == 'after_peak':
+                            src = ap_raw
 
                         tmp = pd.DataFrame(src, index=list(range(i+1, n)))
                         tmp[-1] = i 
@@ -2249,6 +2375,14 @@ class Vectorized:
 
             join_one_stats('uptrend')
             join_one_stats('downtrend')
+            join_one_stats('pullback')
+            join_one_stats('recovery')
+            join_one_stats('early_downtrend')
+
+            join_one_stats('before_trough')
+            join_one_stats('after_trough')
+            join_one_stats('before_peak')
+            join_one_stats('after_peak')
 
 
     class Runs:
@@ -2422,6 +2556,27 @@ class Vectorized:
             Vectorized.MultiProcess.compute_ut_dt_for_all_strats(n_strats, folder=store_folder)
             Vectorized.JoinResults.join_ut_dt_data(n_strats, stocks_map=stocks_map, src_folder=store_folder, des_folder=result_folder)
 
+        # @staticmethod
+        # def compute_peak_trough():
+        #     ## PARAMS-------------------------------------------------------------------
+        #     name = 'peak_trough'
+        #     recompute_signals: bool = True
+
+        #     store_folder = f"/data/dang/{name}_tmp"
+        #     maybe_create_dir(store_folder)
+
+        #     result_folder = f"/home/ubuntu/Dang/pickles/{name}"
+        #     maybe_create_dir(result_folder)
+        #     ## CALC  -------------------------------------------------------------------
+        #     stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+        #         push_stocks_numpy=True, 
+        #         push_peak_trough= True
+        #     )
+
+        #     n_strats = Vectorized.MultiProcess.compute_signals(recompute=recompute_signals)
+
+        #     Vectorized.MultiProcess.compute_ut_dt_for_all_strats(n_strats, folder=store_folder)
+        #     Vectorized.JoinResults.join_ut_dt_data(n_strats, stocks_map=stocks_map, src_folder=store_folder, des_folder=result_folder)
 
     
 
@@ -2437,7 +2592,10 @@ def test():
         
 
 glob_obj = Globs()
-glob_obj.load_all_data()
+try:
+    glob_obj.load_all_data()
+except:
+    glob_obj.gen_stocks_data()
 
 def test_tai():
     params_df: pd.DataFrame = Vectorized.create_params_sets()
@@ -2604,3 +2762,5 @@ if __name__ == "__main__":
     
 #     app = create_dash_app()
 #     app.run(debug=True, host='localhost', port=1999)
+
+    # glob_obj.gen_stocks_data()

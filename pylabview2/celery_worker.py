@@ -133,14 +133,36 @@ def compute_multi_strategies_utdt(i, folder):
     _, disconnect, psave, pload = gen_plasma_functions(db=5)
 
     array_3d = pload("sig_3d_array")
-    ut_array = pload("uptrend_array")
-    dt_array = pload("downtrend_array")
+
+
+
+    ut_array = pload("ut_array")
+    ld_array = pload("ld_array")
+    pb_array = pload("pb_array")
+    rc_array = pload("rc_array")
+    ed_array = pload("ed_array")
+
+    bt_array = pload("before_trough_arr")
+    at_array = pload("after_trough_arr")
+    bp_array = pload("before_peak_arr")
+    ap_array = pload("after_peak_arr")
+
+         
 
 
     df1 = array_3d[i]
 
     ut_ls=[]
-    dt_ls=[]
+    ld_ls=[]
+    pb_ls=[]
+    rc_ls=[]
+    ed_ls=[]
+
+    bt_ls=[]
+    at_ls=[]
+    bp_ls=[]
+    ap_ls=[]
+
     for j in range(i+1, len(array_3d)):
         df2 = array_3d[j]
 
@@ -149,19 +171,45 @@ def compute_multi_strategies_utdt(i, folder):
 
         cond = df1 * df2
         ut_count = np.sum(cond.T * ut_array, axis=1)
-        dt_count = np.sum(cond.T * dt_array, axis=1)
+        ld_count = np.sum(cond.T * ld_array, axis=1)
+        pb_count = np.sum(cond.T * pb_array, axis=1)
+        rc_count = np.sum(cond.T * rc_array, axis=1)
+        ed_count = np.sum(cond.T * ed_array, axis=1)
 
         ut_ls.append(ut_count)
-        dt_ls.append(dt_count)
+        ld_ls.append(ld_count)
+        pb_ls.append(pb_count)
+        rc_ls.append(rc_count)
+        ed_ls.append(ed_count)
+
+        bt_count = np.sum(cond.T * bt_array, axis=1)
+        at_count = np.sum(cond.T * at_array, axis=1)
+        bp_count = np.sum(cond.T * bp_array, axis=1)
+        ap_count = np.sum(cond.T * ap_array, axis=1)
+
+        bt_ls.append(bt_count)
+        at_ls.append(at_count)
+        bp_ls.append(bp_count)
+        ap_ls.append(ap_count)
 
 
     disconnect()
 
     ut_arr = np.vstack(ut_ls)
-    dt_arr = np.vstack(dt_ls)
+    ld_arr = np.vstack(ld_ls)
+    pb_arr = np.vstack(pb_ls)
+    rc_arr = np.vstack(rc_ls)
+    ed_arr = np.vstack(ed_ls)
+
+    bt_arr = np.vstack(bt_ls)
+    at_arr = np.vstack(at_ls)
+    bp_arr = np.vstack(bp_ls)
+    ap_arr = np.vstack(ap_ls)
+
+
 
     with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
-        pickle.dump((ut_arr, dt_arr), f)
+        pickle.dump((ut_arr, ld_arr, pb_arr, rc_arr, ed_arr, bt_arr, at_arr, bp_arr, ap_arr), f)
 
 
 @app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_2)
