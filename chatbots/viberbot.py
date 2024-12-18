@@ -35,5 +35,7 @@ class ViberBot:
         except:
             pass
 
-F5bot = ViberBot(viber_token="4fd90f053967df59-d02a6f0d532cf9f6-ec99a115cfcfd19")
+# F5bot = ViberBot(viber_token="4fd90f053967df59-d02a6f0d532cf9f6-ec99a115cfcfd19")
 
+def create_f5bot():
+    return ViberBot(viber_token="4fd90f053967df59-d02a6f0d532cf9f6-ec99a115cfcfd19")
