@@ -6,7 +6,7 @@ from pymongo import MongoClient
 import logging
 import warnings
 from itertools import product
-from danglib.chatbots.viberbot import F5bot
+from danglib.chatbots.viberbot import create_f5bot
 from danglib.utils import write_pickle, walk_through_files
 from tqdm import tqdm
 from dc_server.lazy_core import gen_plasma_functions, maybe_create_dir
@@ -150,6 +150,7 @@ class Globs:
             logging.error(msg)
 
         if send_viber:
+            F5bot = create_f5bot()
             F5bot.send_viber(msg)        
 
     @staticmethod
@@ -334,7 +335,7 @@ class Conds:
             upper_thres (float): upper range threshold
 
         Returns:
-            pd.Series[bool]: True or False if use_flag is True else None
+            pd.DataFrame[bool]: True or False if use_flag is True else None
         """
         periods = int(periods)
         src = df[src_name]

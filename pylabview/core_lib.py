@@ -1516,7 +1516,7 @@ class VTa:
 
     @staticmethod
     def max(src1:pd.DataFrame, src2:pd.DataFrame):
-        return pd.DataFrame(np.maximum(src1.values, src2.values), columns=src1.columns, index=src1.index            )
+        return pd.DataFrame(np.maximum(src1.values, src2.values), columns=src1.columns, index=src1.index)
 
 
 class Math:

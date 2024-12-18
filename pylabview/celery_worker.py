@@ -48,6 +48,7 @@ class TaskName:
     SCAN_STOCK_V2 = 'scan_one_stock_v2'
     SCAN_STOCK_V3 = 'scan_one_stock_v3'
     SCAN_STOCK_V4 = 'scan_one_stock_v4'
+    COMPUTE_ONE_STOCK_SIGNALS = 'compute_one_stock_signals'
     
 @app.task(name=TaskName.SCAN_STOCK)
 def scan_one_stock(
@@ -208,6 +209,26 @@ def scan_one_stock_v4(
         print(f"scan error: {e}")
 
     return bt
+
+@app.task(name=TaskName.COMPUTE_ONE_STOCK_SIGNALS)
+def compute_one_stock_signals(params, stock):
+    def test():
+        params = {
+            'price_change': {'use_flag': True}
+        }
+        stock = 'KDC'
+
+    df_stock: pd.DataFrame = Adapters.load_stocks_data_from_plasma()
+    df = df_stock.pivot(index = 'day', columns = 'stock')\
+        .xs(stock, axis=1, level='stock')\
+        .reset_index(drop=False)
+    df['stock'] = stock
+
+    return Conds.compute_any_conds(df, params)
+
+
+
+    
     
 
 
