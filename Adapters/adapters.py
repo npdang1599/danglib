@@ -1,6 +1,6 @@
 from pymongo import MongoClient
 from redis import StrictRedis
-import pandas as pd
+import pandas as pd, os
 from datetime import datetime as dt
 from danglib.Adapters.pickle_adapter_ssi_ws import PICKLED_WS_ADAPTERS
 import json
@@ -39,7 +39,7 @@ class MongoCLIs:
             host='cmc',
             port=27022,
             username='admin', 
-            password='Adm1n$$F5tr@der&', 
+            password=os.getenv("CMC_MONGO_PASSWORD"), 
             authSource='admin',
             connectTimeoutMS=2000,
             serverSelectionTimeoutMS=2000)

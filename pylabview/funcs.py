@@ -81,6 +81,8 @@ class Globs:
             "dcm_ure": Conds.Sectors.dcm_ure,
             "dpm_ure": Conds.Sectors.dpm_ure,
             "ure_future": Conds.Sectors.ure_future,
+            'wavetrend': Conds.wavetrend,
+            'general_cond': Conds.general_cond
         }
         self.fa_funcs = [
             "net_income", 
@@ -470,6 +472,8 @@ class Conds:
         nbars: int = 10,
         low_range: float = 5,
         high_range: float = 100,
+        wait_bars: bool = False,
+        wbars: int = 5,
         *args, **kwargs
         ):
         """Check if the percentage change between `close` price with lowest(`low`) (if direction is increase) 
@@ -502,8 +506,28 @@ class Conds:
             if direction == "Decrease":
                 pct_change = pct_change * -1
 
-            return Utils.in_range(pct_change, low_range, high_range, equal=True)
+            if wait_bars == False:
+                return Utils.in_range(pct_change, low_range, high_range, equal=True)
 
+            inrange = Utils.in_range(pct_change, low_range, high_range, equal=True)
+            if direction == "Increase":
+                mark = np.where(inrange, df['high'], np.nan)
+                mark = pd.Series(mark, index=df.index)
+                hlofclose = Ta.highest(df['close'], wbars)
+            else:
+                mark = np.where(inrange, df['low'], np.nan)
+                mark = pd.Series(mark, index=df.index)
+                hlofclose = Ta.lowest(df['close'], wbars)
+                
+            fwmark = mark.shift(wbars)
+            rs = Utils.new_1val_series(False, df) 
+            if direction == "Increase":
+                isw = hlofclose < fwmark
+            else:
+                isw = hlofclose > fwmark
+            rs.loc[(fwmark.notna() & isw)] = True
+            return rs
+            
         return None
 
     @staticmethod
@@ -969,11 +993,160 @@ class Conds:
 
         if use_flag:
             wt1, wt2 = Ta.wavetrend(df)
-            res = Conds.Standards.two_line_pos(wt1, wt2, direction, use_flag)
+            res = Conds.Standards.two_line_pos(wt1, wt2, direction=direction, use_flag=use_flag)
         
         return res
 
+    @staticmethod
+    def general_cond(
+                    df: pd.DataFrame,
+                    src_name: str = 'close',
+                    pct_change_use_flag: bool = False,
+                    pct_change_n_bar: int = 1,
+                    pct_change_lower_thres: int = 0,
+                    pct_change_upper_thres: int = 10,
+                    ma_use_flag: bool = False,
+                    ma_type: str = 'EMA',
+                    ma_len1: int = 1,
+                    ma_len2: int = 15,
+                    ma_pos: str = 'above',
+                    range_use_flag: bool = False,
+                    range_lower_thres: float = 0,
+                    range_upper_thres: float = 100,
+                    hline_use_flag: bool = False,
+                    hline_thres: float = 0,
+                    hline_pos: str = 'above',
+                    pct_use_flag: bool = False,
+                    pct_ranking_window: int = 128,
+                    pct_lower_thres: float = 0,
+                    pct_upper_thres: float = 100,
+                    no_cross_use_flag: bool = False,
+                    no_cross_pos: str = 'crossover',
+                    # no_cross_matype: str = 'EMA',
+                    # no_cross_malen1: int =1,
+                    # no_cross_malen2: int = 15,
+                    no_break_use_flag: bool = False,
+                    no_break_mark: str = 'high',
+                    no_break_compare_value: str = 'close',
+                    no_break_compare_direction: str = 'higher',
+                    change_use_flag: bool = False,
+                    change_mark: str = 'close',
+                    change_lower_thres: float = 0,
+                    change_upper_thres: float = 100,
+                    wait_bars: int = 5,
+                    lookback_use_flag: bool = False,
+                    lookback_n_bars: int = 5
+                    ):
+        series = df[src_name]
+        
+        pct_change_value = series.pct_change(periods = pct_change_n_bar) * 100
+        pct_change_cond = Conds.Standards.range_cond(pct_change_value, 
+                                                     lower_thres= pct_change_lower_thres,
+                                                     upper_thres= pct_change_upper_thres,
+                                                     use_flag = pct_change_use_flag)
+        
+        ma1 = Ta.ma(series, length = ma_len1, ma_type= ma_type)
+        ma2 = Ta.ma(series, length = ma_len2, ma_type= ma_type)
+        ma_cond = Conds.Standards.two_line_pos(line1 = ma1, line2 = ma2, direction= ma_pos, use_flag= ma_use_flag)
 
+        range_cond = Conds.Standards.range_cond(series, lower_thres= range_lower_thres, upper_thres= range_upper_thres, use_flag= range_use_flag)
+        
+        hline = Utils.new_1val_series(hline_thres, series_to_copy_index= series)
+        hline_cond = Conds.Standards.two_line_pos(line1 = series, line2 = hline, direction= hline_pos, use_flag= hline_use_flag)
+        
+        pct_series = Ta.rolling_rank(series, ranking_window= pct_ranking_window)
+        pct_cond = Conds.Standards.range_cond(pct_series, lower_thres= pct_lower_thres, upper_thres= pct_upper_thres, use_flag= pct_use_flag)
+        
+        cond = Utils.combine_conditions([pct_change_cond, ma_cond, range_cond, hline_cond, pct_cond])
+        if cond is None:
+            cond = Utils.new_1val_series(True, series_to_copy_index= series)
+            
+        if no_cross_use_flag:
+            no_cross_cfm_cond = Conds.Standards.two_line_pos(line1 = ma1, line2 = ma2, direction= no_cross_pos, use_flag= True)
+            no_cross_cfm_cond_rolling = (no_cross_cfm_cond.rolling(wait_bars).sum() == 0)
+            cond = cond.shift(wait_bars) & no_cross_cfm_cond_rolling
+        
+        if no_break_use_flag:
+            if no_break_mark == 'threshold':
+                no_break_mark_src = pd.Series(hline_thres, index = series.index)    
+            else:
+                no_break_mark_src = np.where(cond, df[no_break_mark], np.nan) 
+                no_break_mark_src = pd.Series(no_break_mark_src, index = series.index)
+            
+            no_break_mark_src = no_break_mark_src.ffill()
+            no_break_compare_src = df[no_break_compare_value]
+            no_break_cfm_cond = no_break_compare_src < no_break_mark_src if no_break_compare_direction == 'higher' else no_break_compare_src > no_break_mark_src
+            no_break_cfm_cond_rolling = no_break_cfm_cond.rolling(wait_bars).sum() == 0
+            cond = cond.shift(wait_bars) & no_break_cfm_cond_rolling
+        
+        if change_use_flag:
+            change_mark = np.where(cond, series, np.nan)
+            change_mark = pd.Series(change_mark, index=df.index)
+            
+            non_nan_marks = change_mark.notna()
+            within_5_rows = non_nan_marks.rolling(window=wait_bars, min_periods=1).sum().shift(1).fillna(0) > 0
+            change_mark_filled = change_mark.ffill()
+            percent_change = np.where(
+                                within_5_rows,
+                                (series - change_mark_filled) / change_mark_filled * 100,
+                                np.nan
+                                )
+            percent_change = pd.Series(percent_change, index = df.index)
+            
+            cond = Conds.Standards.range_cond(
+                percent_change, change_lower_thres, change_upper_thres, use_flag=change_use_flag
+            )
+        if lookback_use_flag:
+            cond = cond.rolling(lookback_n_bars, closed = 'right').max().fillna(False).astype(bool)
+
+        return cond
+
+    @staticmethod
+    def no_break_cond(df: pd.DataFrame,
+                      signals: pd.Series,
+                      mark_src: str,
+                      compare_src: str,
+                      direction: str = 'higher',
+                      wait_bars: int = 5
+                      ):
+        mark = np.where(signals, df[mark_src], np.nan)
+        
+        pass
+    @staticmethod
+    def wait_cond(df: pd.DataFrame,
+                  entry_params: dict,
+                  cfm_params: dict,
+                  wait_bars: int = 5,
+                  use_flag: bool = False):
+        entry_signals = Conds.compute_any_conds(entry_params)
+        def test_cfm_params():
+            cfm_params = {
+                'func_name':
+                    {
+                         'wait_bars' : 5
+                    }
+            }
+        pass
+    @staticmethod
+    def wait_cond2(df: pd.DataFrame,
+                  signals: pd.Series,
+                  no_cross_use_flag: bool = False,
+                  no_cross_type: str = 'crossover',
+                  no_cross_matype: str = 'EMA',
+                  no_cross_malen1: int =1,
+                  no_cross_malen2: int = 15,
+                  no_break_use_flag: bool = False,
+                  no_break_mark: str = 'high',
+                  no_break_compare_value: str = 'close',
+                  change_use_flag: bool = False,
+                  change_mark: str = 'close',
+                  change_lower_thres: float = 0,
+                  change_upper_thres: float = 100,
+                  wait_bars: int = 5,
+                  use_flag: bool = False):
+        # if no_cross_use_flag:
+            #   no_cross_ma1 = Ta.
+        pass
     class Fa:
         """FA conditions"""
         
@@ -2006,7 +2179,10 @@ class Simulator:
     def prepare_data_for_backtesting(
         df: pd.DataFrame, trade_direction="Long", holding_periods=8
     ):
-        """Prepare data"""
+        """
+        Chuẩn bị dữ liệu (entryDay, entryPrice, exitDay, exitPrice) và tính toán lợi nhuận cho các kỳ hạn khác nhau.                                                     
+        ► Được dùng bởi: 'run', 'run3' (không xét params: profit_thres và loss_thres)
+        """
         df = df.copy()
         try:
             df["entryDay"] = df["day"].copy()
@@ -2064,7 +2240,23 @@ class Simulator:
         profit_thres=5,
         loss_thres=5
     ):
-# %%
+        """
+        Compute trading metrics based on entry and exit signals, with options to use holding periods, take-profit, and stop-loss levels.
+        Note: The function also supports using holding periods and take-profit/stop-loss thresholds.(different from compute_trade_stats)
+            Hàm này được sử dụng cho hàm run2.
+        Purpose:
+        --------
+        This function calculates various trading metrics, including: Number of trades, Win rate, Average profit, 
+        Profit across different time periods (1 day, 5 days, 10 days, 15 days), Maximum upside and downside during trades, Profit factor (profit ratio).
+
+        Method:
+        -------
+        - The function iterates through each bar of data, checking the `entry_signals` and `exit_signals`.
+        - Based on these signals, it records metrics such as profits, win rate, upside, downside, etc.
+        - Exit signals can be defined in multiple ways: by signal, holding periods, or take-profit/stop-loss thresholds.
+      
+        """
+
         def test():
             entry_condition = {
                 'price_comp_ma':{
@@ -2417,7 +2609,16 @@ class Simulator:
             profit_thres=5,
             loss_thres=5
             ):
+        """
+        Backtest có xét thêm params: take profit and cutloss (khác so với run và run3); 
+        Gọi 'compute_trade_stats2'
         
+        Purpose:
+        --------
+        This function runs a full backtest simulation based on entry and exit signals, evaluating 
+        the performance of trades using metrics such as win rate, average returns, upside/downside, and profit factor. 
+        It processes input data and merges additional market data to produce comprehensive backtest results.
+        """
         df = self.df
         func = self.func
         params = self.params
@@ -2707,7 +2908,26 @@ class Simulator:
         downsides, 
         holding_periods
     ):
-        """Computing trade stats, using numba"""
+
+        """
+        Calculate trade statistics using Numba for performance optimization; uses a for loop.
+        Note: this function is used within the "run" function.
+
+        Method:
+        -------
+        - The function calculates metrics in cycles for each trade signal (whenever a buy/sell signal occurs).
+        - For each trade signal, it calculates profits (both short-term and long-term), updates the trade state, and tracks metrics like win rate, average profit, and profit factor.
+        - When a trade is completed (based on the number of holding days - `holding_periods`), the trade state is updated to reflect the end of the trade.
+
+        How it works:
+        -------------
+        1. Initialize tracking variables: number of trades, wins/losses, total profit, total loss, upside, downside, and arrays to store the results.
+        2. Loop through each trade signal (`signals`):
+        - When a new trade signal occurs (True), start the trade and calculate relevant metrics.
+        - When the specified holding period (`holding_periods`) is reached, end the trade.
+
+        """
+
         num_trades = 0
         num_win = 0
         num_win1 = 0
@@ -2868,7 +3088,14 @@ class Simulator:
         params = self.params
         name = self.name
         
-        """Run simmulation"""
+        """
+        Backtest ko có params chốt lời, cắt lỗ
+        Gọi: 'compute_trade_stats'
+        
+        Note: Unlike `run3`, this `run` function uses `compute_trade_stats`, processing each trade individually with a for-loop. 
+        This version doesn’t include take-profit or cut-loss parameters, as found in `run2`.
+        """
+
         if "return" not in df.columns:
             if Globs.verbosity == 1:
                 logging.warning(
@@ -3023,7 +3250,11 @@ class Simulator:
         params = self.params
         name = self.name
         
-        """Run simmulation"""
+        """
+        Backtest ko có params: chốt lời/cắt lỗ, tính toán trực tiếp trên Dataframe
+        without using a separate calculation function like `compute_trade_stats()` like 'run'.
+        """
+
         if "return" not in df.columns:
             if Globs.verbosity == 1:
                 logging.warning(
@@ -3075,6 +3306,11 @@ class Simulator:
         df['avgUpside'] = (df['isEntry'] * df['upside']).cumsum() / df['numTrade']
         df['avgDownside'] = (df['isEntry'] * df['downside']).cumsum() / df['numTrade']
 
+        df['75thRunup'] = (df['isEntry'] * df['upside']).expanding().apply(lambda x: np.percentile(x[(x != 0) & ~np.isnan(x)] , 75) if (x[(x != 0) & ~np.isnan(x)].size > 0) else np.nan, raw=True)
+      
+        df['75thDrawdown'] = (df['isEntry'] * df['downside']).expanding().apply(lambda x: np.percentile(x[(x != 0) & ~np.isnan(x)], 25) if (x[(x != 0) & ~np.isnan(x)].size > 0) else np.nan, raw=True)
+
+
         df['maxRunup'] = (df['isEntry'] * df['upside']).cummax()
         df['maxDrawdown'] = (df['isEntry'] * df['downside']).cummin()
 
@@ -3123,7 +3359,9 @@ class Simulator:
                 "avgUpside",
                 "avgDownside",
                 "maxRunup",
-                "maxDrawdown"
+                "maxDrawdown",
+                "75thRunup",
+                "75thDrawdown"
             ]
         ] = df[
             [
@@ -3142,7 +3380,9 @@ class Simulator:
                 "avgUpside",
                 "avgDownside",
                 "maxRunup",
-                "maxDrawdown"
+                "maxDrawdown",
+                "75thRunup",
+                "75thDrawdown"
             ]
         ].ffill().fillna(0)
         self.df = df
@@ -3178,7 +3418,10 @@ class Scanner:
         use_shift=False,
         n_shift=15,
         holding_periods=60):
-
+        """Backtest on multiple stocks
+        Sử dụng `scan_one_stock`, không xét params cắt lỗ/chốt lời (khác `scan_multiple_stocks3`), 
+        cũng không có điều kiện lọc theo ngày (khác `scan_multiple_stocks_v4`).
+        """
         def test():
             params = (
                 {
@@ -3268,8 +3511,11 @@ class Scanner:
         use_shift=False,
         n_shift=15,
         holding_periods=60):
-        """Backtest on multiple stocks"""
-        
+        """
+        Backtest on multiple stocks, cho phép dùng hàm điều kiện tùy chọn.
+
+        Cho phép sử dụng hàm điều kiện tùy chọn, phù hợp cho các chiến lược phức tạp hơn (không áp dụng trong các hàm khác).
+        """
         def test():
             func = Conds.compute_any_conds
             params = {
@@ -3346,7 +3592,12 @@ class Scanner:
         use_shift=False,
         n_shift=15,
         holding_periods=60):
-        """Backtest on multiple stocks"""
+        """
+        Backtest nhóm cổ phiếu cụ thể 
+
+        Sử dụng 'scan_one_stock', Chỉ định nhóm cổ phiếu cụ thể (khác `scan_multiple_stocks`, `v3`, `v4`).
+        """
+
         from danglib.pylabview.celery_worker import scan_one_stock, clean_redis
         from tqdm import tqdm
 
@@ -3422,9 +3673,12 @@ class Scanner:
         profit_thres=5,
         loss_thres=5
         ):
-
+        """
+        Backtest xét thêm params cắt lỗ/chốt lời tùy chỉnh cho cổ phiếu.
+   
+        - Hỗ trợ cấu hình cắt lỗ/chốt lời tùy chỉnh cao nhất (khác với các phiên bản còn lại).
+        """
         # exit_params = params.pop('exit_cond') if 'exit_cond' in params else {}
-        """Backtest on multiple stocks"""  
         from danglib.pylabview.celery_worker import scan_one_stock_v2, clean_redis
         from tqdm import tqdm
 
@@ -3508,7 +3762,12 @@ class Scanner:
         use_shift=False,
         n_shift=15,
         holding_periods=60):
-        """Backtest on multiple stocks"""
+        """
+        Backtest không hỗ trợ cắt lỗ/chốt lời
+
+        - Sử dụng `scan_one_stock_v3` không có cắt lỗ/chốt lời (khác với `v2` và `3`).
+        """
+
         from danglib.pylabview.celery_worker import scan_one_stock_v3, clean_redis
         from tqdm import tqdm
 
@@ -3592,7 +3851,13 @@ class Scanner:
         use_shift=False,
         n_shift=15,
         holding_periods=60):
-        """Backtest on multiple stocks"""
+        """
+        Backtest với điều kiện lọc dữ liệu theo ngày.
+        Gọi `scan_one_stock_v4`, giúp phân tích chi tiết theo ngày (khác tất cả các phiên bản khác).
+        Trong scan_one_stock_v4, dữ liệu cổ phiếu được định dạng lại để phân tích chi tiết theo từng ngày. 
+        Việc lọc và xét điều kiện theo ngày được thực hiện trong nội dung của scan_one_stock_v4, giúp hàm scan_multiple_stocks_v4 hỗ trợ phân tích backtest chi tiết hơn, khác biệt với các phiên bản khác.
+        """
+        
         from danglib.pylabview.celery_worker import scan_one_stock_v4, clean_redis
         from tqdm import tqdm
         if stocks is None:
@@ -3677,9 +3942,10 @@ def test():
         }
     )
 
-    res, df = Scanner.scan_multiple_stocks_v3(
+    res, df = Scanner.scan_multiple_stocks_v4(
             params=params,
             trade_direction='Long', 
+            # stocks =['HPG'],
             # use_holding_periods=True,
             holding_periods=15,
             # use_takeprofit_cutloss=False,
