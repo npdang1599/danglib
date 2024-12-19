@@ -1,10 +1,6 @@
 from pymongo import MongoClient
 from redis import StrictRedis
-<<<<<<< HEAD
-import pandas as pd, os
-=======
 import pandas as pd, os, os
->>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
 from datetime import datetime as dt
 from danglib.Adapters.pickle_adapter_ssi_ws import PICKLED_WS_ADAPTERS
 import json
