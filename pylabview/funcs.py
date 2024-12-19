@@ -81,6 +81,9 @@ class Globs:
             "dcm_ure": Conds.Sectors.dcm_ure,
             "dpm_ure": Conds.Sectors.dpm_ure,
             "ure_future": Conds.Sectors.ure_future,
+            'wavetrend': Conds.wavetrend,
+            'general_cond': Conds.general_cond
+
         }
         self.fa_funcs = [
             "net_income", 
@@ -94,6 +97,7 @@ class Globs:
         ]
         self.sectors = {}
         self.df_all_index: pd.DataFrame = None
+        self.index_names = ['VN30', 'VNDIAMOND', 'VNINDEX', 'VNMID', 'VNSML']
         
     # def __getattribute__(self, name):
     #     if name == "df_stocks":
@@ -969,10 +973,113 @@ class Conds:
 
         if use_flag:
             wt1, wt2 = Ta.wavetrend(df)
-            res = Conds.Standards.two_line_pos(wt1, wt2, direction, use_flag)
+            res = Conds.Standards.two_line_pos(wt1, wt2, direction = direction, use_flag = use_flag)
         
         return res
 
+    @staticmethod
+    def general_cond(
+                    df: pd.DataFrame,
+                    src_name: str = 'close',
+                    pct_change_use_flag: bool = False,
+                    pct_change_n_bar: int = 1,
+                    pct_change_lower_thres: int = 0,
+                    pct_change_upper_thres: int = 10,
+                    ma_use_flag: bool = False,
+                    ma_type: str = 'EMA',
+                    ma_len1: int = 1,
+                    ma_len2: int = 15,
+                    ma_pos: str = 'above',
+                    range_use_flag: bool = False,
+                    range_lower_thres: float = 0,
+                    range_upper_thres: float = 100,
+                    hline_use_flag: bool = False,
+                    hline_thres: float = 0,
+                    hline_pos: str = 'above',
+                    pct_use_flag: bool = False,
+                    pct_ranking_window: int = 128,
+                    pct_lower_thres: float = 0,
+                    pct_upper_thres: float = 100,
+                    no_cross_use_flag: bool = False,
+                    no_cross_pos: str = 'crossover',
+                    # no_cross_matype: str = 'EMA',
+                    # no_cross_malen1: int =1,
+                    # no_cross_malen2: int = 15,
+                    no_break_use_flag: bool = False,
+                    no_break_mark: str = 'high',
+                    no_break_compare_value: str = 'close',
+                    no_break_compare_direction: str = 'higher',
+                    change_use_flag: bool = False,
+                    change_mark: str = 'close',
+                    change_lower_thres: float = 0,
+                    change_upper_thres: float = 100,
+                    wait_bars: int = 5,
+                    lookback_use_flag: bool = False,
+                    lookback_n_bars: int = 5
+                    ):
+        series = df[src_name]
+        
+        pct_change_value = series.pct_change(periods = pct_change_n_bar) * 100
+        pct_change_cond = Conds.Standards.range_cond(pct_change_value, 
+                                                     lower_thres= pct_change_lower_thres,
+                                                     upper_thres= pct_change_upper_thres,
+                                                     use_flag = pct_change_use_flag)
+        
+        ma1 = Ta.ma(series, length = ma_len1, ma_type= ma_type)
+        ma2 = Ta.ma(series, length = ma_len2, ma_type= ma_type)
+        ma_cond = Conds.Standards.two_line_pos(line1 = ma1, line2 = ma2, direction= ma_pos, use_flag= ma_use_flag)
+
+        range_cond = Conds.Standards.range_cond(series, lower_thres= range_lower_thres, upper_thres= range_upper_thres, use_flag= range_use_flag)
+        
+        hline = Utils.new_1val_series(hline_thres, series_to_copy_index= series)
+        hline_cond = Conds.Standards.two_line_pos(line1 = series, line2 = hline, direction= hline_pos, use_flag= hline_use_flag)
+        
+        pct_series = Ta.rolling_rank(series, ranking_window= pct_ranking_window)
+        pct_cond = Conds.Standards.range_cond(pct_series, lower_thres= pct_lower_thres, upper_thres= pct_upper_thres, use_flag= pct_use_flag)
+        
+        cond = Utils.combine_conditions([pct_change_cond, ma_cond, range_cond, hline_cond, pct_cond])
+        if cond is None:
+            cond = Utils.new_1val_series(True, series_to_copy_index= series)
+            
+        if no_cross_use_flag:
+            no_cross_cfm_cond = Conds.Standards.two_line_pos(line1 = ma1, line2 = ma2, direction= no_cross_pos, use_flag= True)
+            no_cross_cfm_cond_rolling = (no_cross_cfm_cond.rolling(wait_bars).sum() == 0)
+            cond = cond.shift(wait_bars) & no_cross_cfm_cond_rolling
+        
+        if no_break_use_flag:
+            if no_break_mark == 'threshold':
+                no_break_mark_src = pd.Series(hline_thres, index = series.index)    
+            else:
+                no_break_mark_src = np.where(cond, df[no_break_mark], np.nan) 
+                no_break_mark_src = pd.Series(no_break_mark_src, index = series.index)
+            
+            no_break_mark_src = no_break_mark_src.ffill()
+            no_break_compare_src = df[no_break_compare_value]
+            no_break_cfm_cond = no_break_compare_src < no_break_mark_src if no_break_compare_direction == 'higher' else no_break_compare_src > no_break_mark_src
+            no_break_cfm_cond_rolling = no_break_cfm_cond.rolling(wait_bars).sum() == 0
+            cond = cond.shift(wait_bars) & no_break_cfm_cond_rolling
+        
+        if change_use_flag:
+            change_mark = np.where(cond, series, np.nan)
+            change_mark = pd.Series(change_mark, index=df.index)
+            
+            non_nan_marks = change_mark.notna()
+            within_5_rows = non_nan_marks.rolling(window=wait_bars, min_periods=1).sum().shift(1).fillna(0) > 0
+            change_mark_filled = change_mark.ffill()
+            percent_change = np.where(
+                                within_5_rows,
+                                (series - change_mark_filled) / change_mark_filled * 100,
+                                np.nan
+                                )
+            percent_change = pd.Series(percent_change, index = df.index)
+            
+            cond = Conds.Standards.range_cond(
+                percent_change, change_lower_thres, change_upper_thres, use_flag=change_use_flag
+            )
+        if lookback_use_flag:
+            cond = cond.rolling(lookback_n_bars, closed = 'left').max().fillna(False).astype(bool)
+
+        return cond
 
     class Fa:
         """FA conditions"""
@@ -1981,6 +2088,8 @@ class Conds:
 
         return None
     
+    
+
 
 class Simulator:
     """Backtest class"""
@@ -2407,6 +2516,7 @@ class Simulator:
         )
         
     def run2(self, 
+            signals = None,
             trade_direction="Long", 
             use_shift = False,
             n_shift = 15,
@@ -2415,7 +2525,8 @@ class Simulator:
             holding_periods=60,
             use_takeprofit_cutloss=False,
             profit_thres=5,
-            loss_thres=5
+            loss_thres=5,
+            *args, **kwargs
             ):
         
         df = self.df
@@ -2459,8 +2570,8 @@ class Simulator:
         
 # %%
         
-        
-        signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
+        if signals is None:
+            signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
         
         df['signal'] = Utils.new_1val_series(True, df) if signals is None else signals
         df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
@@ -2857,11 +2968,13 @@ class Simulator:
 
     def run(
         self, 
+        signals = None,
         trade_direction="Long", 
         compute_start_time="2018_01_01", 
         use_shift=False,
         n_shift=15, 
-        holding_periods=8
+        holding_periods=8,
+        *args, **kwargs
     ):
         df = self.df
         func = self.func
@@ -2879,7 +2992,8 @@ class Simulator:
                 trade_direction=trade_direction,
                 holding_periods=holding_periods,
             )
-        signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
+        if signals is None:
+            signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
         
         if signals is None:
             df["signal"] = Utils.new_1val_series(True, df) 
@@ -3015,8 +3129,9 @@ class Simulator:
   
 
     def run3(
-        self, trade_direction="Long", compute_start_time="2018_01_01", use_shift=False,
+        self, signals = None, trade_direction="Long", compute_start_time="2018_01_01", use_shift=False,
         n_shift=15, holding_periods=8,
+        *args, **kwargs
     ):
         df = self.df
         func = self.func
@@ -3035,7 +3150,8 @@ class Simulator:
                 holding_periods=holding_periods,
             )
         
-        signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
+        if signals is None:
+            signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
         
         if signals is None:
             df["signal"] = Utils.new_1val_series(True, df) 
@@ -3074,6 +3190,10 @@ class Simulator:
 
         df['avgUpside'] = (df['isEntry'] * df['upside']).cumsum() / df['numTrade']
         df['avgDownside'] = (df['isEntry'] * df['downside']).cumsum() / df['numTrade']
+
+        df['75thRunup'] = (df['isEntry'] * df['upside']).expanding().apply(lambda x: np.percentile(x[(x != 0) & ~np.isnan(x)], 75) if (x[(x != 0) & ~np.isnan(x)].size > 0) else np.nan, raw=True)
+      
+        df['75thDrawdown'] = (df['isEntry'] * df['downside']).expanding().apply(lambda x: np.percentile(x[(x != 0) & ~np.isnan(x)], 25) if (x[(x != 0) & ~np.isnan(x)].size > 0) else np.nan, raw=True)
 
         df['maxRunup'] = (df['isEntry'] * df['upside']).cummax()
         df['maxDrawdown'] = (df['isEntry'] * df['downside']).cummin()
@@ -3123,7 +3243,9 @@ class Simulator:
                 "avgUpside",
                 "avgDownside",
                 "maxRunup",
-                "maxDrawdown"
+                "maxDrawdown",
+                "75thRunup",
+                "75thDrawdown"
             ]
         ] = df[
             [
@@ -3142,7 +3264,9 @@ class Simulator:
                 "avgUpside",
                 "avgDownside",
                 "maxRunup",
-                "maxDrawdown"
+                "maxDrawdown",
+                "75thRunup",
+                "75thDrawdown"
             ]
         ].ffill().fillna(0)
         self.df = df
@@ -3655,6 +3779,172 @@ class Scanner:
         trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups).fillna('unknown')
         return res_df, trades_df
     
+    @staticmethod
+    def compute_signals_for_multiple_stocks(params, stocks = None):
+
+        def test():
+            params = {
+                'price_change': {
+                    'use_flag': True
+                }
+            }
+            stocks = None
+            stocks = glob_obj.stocks
+
+
+        from danglib.pylabview.celery_worker import compute_one_stock_signals, clean_redis
+        clean_redis()
+
+        if stocks is None:
+            stocks = glob_obj.stocks
+
+        ls = []
+        task_dic = {}
+        
+        for stock in stocks:  
+            task = compute_one_stock_signals.delay(
+                params = params,
+                stock = stock
+            )
+            task_dic[stock] = task
+
+        while any(t.status not in ['SUCCESS', 'FAILURE'] for t in task_dic.values()):
+            if any(t.status == 'FAILURE' for t in task_dic.values()):
+                # Xử lý khi có task bị lỗi
+                raise CeleryTaskError("Có task bị lỗi. Thoát vòng lặp: ", [i for i, j in task_dic.items() if j.status == 'FAILURE'])
+            pass  #
+
+        for k, v in task_dic.items():
+            res = v.result
+            if res is not None:
+                ls.append(res)
+
+        df_signals: pd.DataFrame = pd.concat(ls, axis =1, join='outer')
+
+        return df_signals
+    
+    @staticmethod
+    def scan_multiple_stocks_with_signals(
+        df_signals: pd.DataFrame,
+        calc_type: int = 1,
+        trade_direction: str = "Long",
+        use_shift: bool = False,
+        n_shift: int = 15,
+        use_holding_periods: bool = True,
+        holding_periods: int = 60,
+        use_takeprofit_cutloss: bool = False,
+        profit_thres: float = 5,
+        loss_thres: float = 5
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Backtest multiple stocks using pre-computed signals.
+
+        Args:
+            df_signals: DataFrame containing signals for multiple stocks (columns are stock symbols)
+            calc_type: Type of calculation to use (1, 2, or 3)
+            trade_direction: Trading direction ('Long' or 'Short')
+            use_shift: Whether to shift signals
+            n_shift: Number of periods to shift
+            use_holding_periods: Whether to use holding periods
+            holding_periods: Number of periods to hold position
+            use_takeprofit_cutloss: Whether to use take profit/cut loss
+            profit_thres: Take profit threshold percentage
+            loss_thres: Stop loss threshold percentage
+
+        Returns:
+            tuple containing:
+                - Summary DataFrame with performance metrics for each stock
+                - Detailed trades DataFrame for all stocks
+        """
+        def test():
+            df_signals = Scanner.compute_signals_for_multiple_stocks(
+            params={
+                    'price_change': {
+                        'periods': 1,
+                        'direction': 'increase',
+                        'lower_thres': 3,
+                        'upper_thres': 100,
+                        'use_flag': True
+                    }
+                },
+                stocks=glob_obj.index_names[:3]  # Test with first 3 indexes
+            )
+            calc_type: int = 1
+            trade_direction: str = "Long"
+            use_shift: bool = False
+            n_shift: int = 15
+            use_holding_periods: bool = True
+            holding_periods: int = 60
+            use_takeprofit_cutloss: bool = False
+            profit_thres: float = 5
+            loss_thres: float = 5
+        
+
+        from danglib.pylabview.celery_worker import scan_one_stock_v5, clean_redis
+            
+        clean_redis()
+        
+        sum_ls = []
+        trades_ls = []
+        task_dic = {}
+
+        trading_params = {
+            "trade_direction": trade_direction,
+            "use_shift": use_shift, 
+            "n_shift": n_shift,
+            "use_holding_periods": use_holding_periods,
+            "holding_periods": holding_periods,
+            "use_takeprofit_cutloss": use_takeprofit_cutloss,
+            "profit_thres": profit_thres,
+            "loss_thres": loss_thres
+        }
+        
+        # Start tasks for each stock
+        for stock in df_signals.columns:  
+            task = scan_one_stock_v5.delay(
+                signals=df_signals[stock].dropna().reset_index(drop=True),
+                calc_type=calc_type,
+                stock=stock,
+                **trading_params
+            )
+            task_dic[stock] = task
+
+        # Monitor tasks and handle failures
+        while any(t.status not in ['SUCCESS', 'FAILURE'] for t in task_dic.values()):
+            failed_tasks = [i for i, j in task_dic.items() if j.status == 'FAILURE']
+            if failed_tasks:
+                raise CeleryTaskError(f"Tasks failed for stocks: {failed_tasks}")
+
+        # Process results
+        for stock, task in task_dic.items():
+            bt = task.result
+            if bt is not None:
+                sum_ls.append(bt.result)
+                trades_ls.append(bt.df)
+                
+        # Create summary DataFrame
+        res_df = pd.DataFrame(sum_ls)
+        summary_cols = [
+            "name",
+            "numTrade",
+            "winrate",
+            "profitFactor",
+            "avgReturn",
+            "avgUpside",
+            "avgDownside",
+        ]
+        res_df = res_df[summary_cols].round(2).fillna(-999)
+        res_df["beta_group"] = res_df["name"].map(glob_obj.dic_groups).fillna('unknown')
+
+        # Create trades DataFrame
+        trades_df = pd.concat(trades_ls)    
+        trades_df['beta_group'] = trades_df['stock'].map(glob_obj.dic_groups).fillna('unknown')
+        
+        return res_df, trades_df
+    
+
+    
+
+    
     
 
 glob_obj = Globs()
@@ -3689,6 +3979,8 @@ def test():
     
     from danglib.pylabview.celery_worker import clean_redis
     clean_redis()
+
+
 
 
 
@@ -3749,4 +4041,5 @@ if __name__ == "__main__":
         df_res
         
         # glob_obj.gen_stocks_data()
+
 

@@ -48,6 +48,8 @@ class TaskName:
     SCAN_STOCK_V2 = 'scan_one_stock_v2'
     SCAN_STOCK_V3 = 'scan_one_stock_v3'
     SCAN_STOCK_V4 = 'scan_one_stock_v4'
+    SCAN_STOCK_V5 = 'scan_one_stock_v5'
+    COMPUTE_ONE_STOCK_SIGNALS = 'compute_one_stock_signals'
     
 @app.task(name=TaskName.SCAN_STOCK)
 def scan_one_stock(
@@ -209,6 +211,55 @@ def scan_one_stock_v4(
 
     return bt
     
+
+@app.task(name=TaskName.COMPUTE_ONE_STOCK_SIGNALS)
+def compute_one_stock_signals(params, stock):
+    def test():
+        params = {
+            'price_change': {'use_flag': True}
+        }
+        stock = 'KDC'
+
+    df_stock: pd.DataFrame = Adapters.load_stocks_data_from_plasma()
+    df = df_stock[df_stock['stock'] == stock].reset_index(drop=True)
+    df['stock'] = stock
+
+    df['signal'] = Conds.compute_any_conds(df, params)
+    res = df.set_index('day')['signal']
+    res.name = stock
+    return res
+
+@app.task(name=TaskName.SCAN_STOCK_V5)
+def scan_one_stock_v5(
+    signals: pd.Series, 
+    stock,
+    calc_type,
+    **trade_prams,
+    ):
+    
+    df_stock: pd.DataFrame = Adapters.load_stocks_data_from_plasma()
+    df = df_stock[df_stock['stock'] == stock].reset_index(drop=True)
+    df['stock'] = stock
+
+    bt = Simulator(
+        df_ohlcv=df,
+        name = stock
+    )
+
+    if calc_type == 1:
+        run_func = bt.run
+    elif calc_type == 2:
+        run_func = bt.run2
+    else:
+        run_func = bt.run3
+
+    try:
+        run_func(signals=signals, **trade_prams)
+    except Exception as e:
+        print(f"scan error: {e}")
+
+    return bt
+
 
 
 # celery -A celery_worker worker --concurrency=30 --loglevel=INFO -n celery_worker@pylabview

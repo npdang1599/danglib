@@ -187,6 +187,9 @@ class PICKLED_WS_ADAPTERS:
 
     @staticmethod
     def load_hose500_from_db(col_name, do_return_df_only=False):
+        def test():
+            col_name = "2024_10_11"
+            do_return_df_only = False
         print(f"\x1b[90mPICKLED_WS_ADAPTERS.load_hose500_from_db: \x1b[93m{col_name}\x1b[0m", end=" ")
         print('...', end='')
         dic = PICKLED_WS_ADAPTERS.read_pickled_ssi_ws_hose500_from_mongodb(
@@ -199,6 +202,15 @@ class PICKLED_WS_ADAPTERS:
     @staticmethod
     def read_pickled_ssi_ws_hose500_from_mongodb(col_name, verbosity=1, do_restore=True, restore_cols=None,
                                                  do_return_df_only=True, not_temp_vn30=False):
+        
+        def test():
+            col_name = "2024_10_11"
+            verbosity=1
+            do_restore=True
+            restore_cols=None
+            do_return_df_only=True
+            not_temp_vn30=False
+
         import zlib
         db_pickled = PICKLED_WS_ADAPTERS.get_target_pickled_db()
         col = db_pickled[col_name]
