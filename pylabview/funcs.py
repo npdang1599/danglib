@@ -83,10 +83,6 @@ class Globs:
             "ure_future": Conds.Sectors.ure_future,
             'wavetrend': Conds.wavetrend,
             'general_cond': Conds.general_cond
-<<<<<<< HEAD
-
-=======
->>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
         }
         self.fa_funcs = [
             "net_income", 
@@ -1110,7 +1106,7 @@ class Conds:
 
         if use_flag:
             wt1, wt2 = Ta.wavetrend(df)
-            res = Conds.Standards.two_line_pos(wt1, wt2, direction=direction, use_flag=use_flag)
+            res = Conds.Standards.two_line_pos(wt1, wt2, direction = direction, use_flag = use_flag)
         
         return res
 
@@ -2226,9 +2222,6 @@ class Conds:
 
         return None
     
-<<<<<<< HEAD
-    
-=======
     @staticmethod
     def consecutive_lower(df: pd.DataFrame, src_name, compare_with, n_bar):
         src = df[src_name]
@@ -2377,7 +2370,6 @@ class Conds:
         result = result.fillna(False)
         
         return result
->>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
 
 
 class Simulator:
@@ -3193,8 +3185,8 @@ class Simulator:
         
 # %%
         
-        if signals is None:
-            signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
+        if signals is None:if signals is None:
+                signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
         
         df['signal'] = Utils.new_1val_series(True, df) if signals is None else signals
         df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
@@ -3749,7 +3741,7 @@ class Simulator:
   
 
     def run3(
-        self, signals = None, trade_direction="Long", compute_start_time="2018_01_01", use_shift=False,
+        self, signals = None, signals = None, trade_direction="Long", compute_start_time="2018_01_01", use_shift=False,
         n_shift=15, holding_periods=8,
         *args, **kwargs
     ):
@@ -3815,18 +3807,11 @@ class Simulator:
         df['avgUpside'] = (df['isEntry'] * df['upside']).cumsum() / df['numTrade']
         df['avgDownside'] = (df['isEntry'] * df['downside']).cumsum() / df['numTrade']
 
-<<<<<<< HEAD
-        df['75thRunup'] = (df['isEntry'] * df['upside']).expanding().apply(lambda x: np.percentile(x[(x != 0) & ~np.isnan(x)], 75) if (x[(x != 0) & ~np.isnan(x)].size > 0) else np.nan, raw=True)
-      
-        df['75thDrawdown'] = (df['isEntry'] * df['downside']).expanding().apply(lambda x: np.percentile(x[(x != 0) & ~np.isnan(x)], 25) if (x[(x != 0) & ~np.isnan(x)].size > 0) else np.nan, raw=True)
-
-=======
         df['75thRunup'] = (df['isEntry'] * df['upside']).expanding().apply(lambda x: np.percentile(x[(x != 0) & ~np.isnan(x)] , 75) if (x[(x != 0) & ~np.isnan(x)].size > 0) else np.nan, raw=True)
       
         df['75thDrawdown'] = (df['isEntry'] * df['downside']).expanding().apply(lambda x: np.percentile(x[(x != 0) & ~np.isnan(x)], 25) if (x[(x != 0) & ~np.isnan(x)].size > 0) else np.nan, raw=True)
 
 
->>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
         df['maxRunup'] = (df['isEntry'] * df['upside']).cummax()
         df['maxDrawdown'] = (df['isEntry'] * df['downside']).cummin()
 
@@ -3878,6 +3863,8 @@ class Simulator:
                 "avgDownside",
                 "maxRunup",
                 "maxDrawdown",
+                "75thRunup",
+                "75thDrawdown",
                 "75thRunup",
                 "75thDrawdown"
             ]
@@ -4429,7 +4416,6 @@ class Scanner:
 
 
         from danglib.pylabview.celery_worker import compute_one_stock_signals, clean_redis
-<<<<<<< HEAD
         clean_redis()
 
         if stocks is None:
@@ -4439,33 +4425,11 @@ class Scanner:
         task_dic = {}
         
         for stock in stocks:  
-=======
-
-        clean_redis()
-
-        # if stocks is None:
-        #     stocks = glob_obj.stocks
-
-
-        res_ls = []
-        task_dic = {}
-        
-        # params = Globs.old_saved_adapters(params)
-        
-        for stock in stocks:  
-            
->>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
             task = compute_one_stock_signals.delay(
                 params = params,
                 stock = stock
             )
-<<<<<<< HEAD
             task_dic[stock] = task
-=======
-            
-            task_dic[stock] = task
-            
->>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
 
         while any(t.status not in ['SUCCESS', 'FAILURE'] for t in task_dic.values()):
             if any(t.status == 'FAILURE' for t in task_dic.values()):
@@ -4476,7 +4440,6 @@ class Scanner:
         for k, v in task_dic.items():
             res = v.result
             if res is not None:
-<<<<<<< HEAD
                 ls.append(res)
 
         df_signals: pd.DataFrame = pd.concat(ls, axis =1, join='outer')
@@ -4606,16 +4569,6 @@ class Scanner:
 
     
     
-=======
-                res_ls.append(res)
-
-        return res_ls 
-
-
-
-
-
->>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
 
 glob_obj = Globs()
 
@@ -4651,14 +4604,11 @@ def test():
     from danglib.pylabview.celery_worker import clean_redis
     clean_redis()
 
-<<<<<<< HEAD
 
 
 
 
 
-=======
->>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
 if __name__ == "__main__":
     
     
