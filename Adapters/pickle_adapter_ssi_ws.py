@@ -190,13 +190,8 @@ class PICKLED_WS_ADAPTERS:
         def test():
             col_name = "2024_10_11"
             do_return_df_only = False
-<<<<<<< HEAD
-        print(f"\x1b[90mPICKLED_WS_ADAPTERS.load_hose500_from_db: \x1b[93m{col_name}\x1b[0m", end=" ")
-        print('...', end='')
-=======
         # print(f"\x1b[90mPICKLED_WS_ADAPTERS.load_hose500_from_db: \x1b[93m{col_name}\x1b[0m", end=" ")
         # print('...', end='')
->>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
         dic = PICKLED_WS_ADAPTERS.read_pickled_ssi_ws_hose500_from_mongodb(
             col_name=col_name,
             do_restore=False,
