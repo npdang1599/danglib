@@ -988,7 +988,7 @@ class Ta:
     
     @staticmethod
     def bbpctb(
-        df: pd.DataFrame, src_name: str = "close", length: int = 20, mult: float = 2
+        df: pd.DataFrame, src_name: str = "close", length: int = 20, mult: float = 2, return_upper_lower = False
     ):
         """bbpctb"""
         src = df[src_name].copy()
@@ -997,9 +997,11 @@ class Ta:
         upper = basic + dev
         lower = basic - dev
         bbpctb = (src - lower) / (upper - lower) * 100
-
-        return bbpctb
-    
+        if not return_upper_lower:
+            return bbpctb
+        else:
+            return bbpctb, upper, lower
+        
     @staticmethod
     def ursi(
         src: pd.DataFrame,

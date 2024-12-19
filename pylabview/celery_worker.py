@@ -10,6 +10,14 @@ class CELERY_RESOURCES:
     CELERY_INPUT_REDIS = 8
 
 def clean_redis():
+    """Xóa tất cả dữ liệu trong Redis để chuẩn bị tài nguyên cho các tác vụ Celery mới.
+
+    Hàm này kết nối đến Redis tại các cơ sở dữ liệu `CELERY_INPUT_REDIS` và `CELERY_INPUT_REDIS + 1`,
+    sau đó xóa tất cả các khóa (keys) hiện có trong cả hai cơ sở dữ liệu để đảm bảo rằng không còn dữ liệu cũ nào còn lại.
+
+    Returns:
+        int: Số lượng khóa đã xóa từ Redis.
+    """
     r_input = Redis(
         CELERY_RESOURCES.HOST,
         db=CELERY_RESOURCES.CELERY_INPUT_REDIS,
@@ -60,6 +68,10 @@ def scan_one_stock(
         n_shift=15, 
         holding_periods=15
     ):
+    """ Backtest 1 cp, không có điều kiện loss threshold và take-profit threshold
+    - Tải dữ liệu cổ phiếu từ Plasma.
+    - Khởi tạo đối tượng Simulator (bt) với hàm Conds.compute_any_conds, và hàm "run"
+    """
     def test():
         params = (
             {
@@ -112,7 +124,11 @@ def scan_one_stock_v2(
         profit_thres=5,
         loss_thres=5
     ):
-    
+    """
+    Backtest 1 cp, xét thêm loss threshold và take-profit threshold
+
+    Tải dữ liệu cổ phiếu từ Plasma, tạo "Simulator" (bt) với hàm compute_any_conds  và sử dụng hàm `bt.run2()` để thực hiện backtest. 
+    """
     exit_params = params.pop('exit_cond') if 'exit_cond' in params else {}
     
     df_stock: pd.DataFrame = Adapters.load_stocks_data_from_plasma()
@@ -152,7 +168,10 @@ def scan_one_stock_v3(
     n_shift=15, 
     holding_periods=15
     ):
-    
+    """ Backtest 1 cp không có điều kiện loss threshold và take-profit threshold
+    - Tải dữ liệu cổ phiếu từ Plasma.
+    - Tạo đối tượng Simulator với hàm compute_any_conds và gọi bt.run3() 
+    """
     df_stock: pd.DataFrame = Adapters.load_stocks_data_from_plasma()
     df = df_stock[df_stock['stock'] == stock].reset_index(drop=True)
     
@@ -184,7 +203,11 @@ def scan_one_stock_v4(
     n_shift=15, 
     holding_periods=15
     ):
-    
+    """ 
+    Backtest tương tự scan_one_stock_v3 nhưng với định dạng dữ liệu đầu vào khác,
+    dữ liệu được pivot lại trước khi đưa vào mô hình.
+
+    """
     df_stock: pd.DataFrame = Adapters.load_stocks_data_from_plasma()
     df = df_stock.pivot(index = 'day', columns = 'stock')\
         .xs(stock, axis=1, level='stock')\

@@ -6,15 +6,9 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-import redis, pickle
 import dash
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
-import dash_bootstrap_components as dbc
-
-redis_client = redis.Redis(host='localhost', port=6379, db=0)
-
-chooseStocks = ['SHS','VGS','MBS','VIX','CTS','ORS','CEO','FTS','DTD','AGR','GEX','BSI','HUT','VCI','DIG','VND','VDS','L14','DXG','DGW','PDR','HCM','CII','HTN','GVR','NKG','BVS','HSG','TCI','NVL','SSI','GIL','PXL','KSB','PLC','NLG','KBC','DDV','FCN','LCG','DPG','DBC','TCH','VOS','VPG','HDC','IDJ','ANV','VCG','PET','VGC','PC1','HAH','ASM','IJC','C4G','BCG','HHV','DXS','CSV','IDI','TNG','SZC','HHS','CTD','KHG','ADS','PVC','TLH','DCM','DGC','SCR','S99','TIG','MWG','LAS','PVD','AAA','PVT','POM','MSN','HBC','PVS','CMX','VTP','PVB','LSS','IDC','TIP','DPM','HDG','VSC','HQC','HPG','SMC','EVF','NTL','VGI','DRI','PAN','VHC','CSC','CNG','VRE','EIB','STB','DSC','TCB','KDH','MSB','VHM','TV2','CTR','LDG','VGT','CTI','BSR','SHB','MSH','CTG','ELC','PHR','VIB','VIC','PSH','TTF','BFC','TPB','MSR','LHG','VCS','SIP','OCB','SKG','DPR','GMD','VPB','MBB','BID','APH','HAG','PLX','AGG','HAX','SBT','LPB','BMP','BCM','GEG','FPT','POW','HVN','PVP','TNH','DHC','NT2','OIL','DRC','BVH','REE','FRT','ABB','ACB','HNG','CMG','GAS','GSP','VIP','HDB','DHA','SAB','VTO','PNJ','BAF','QNS','NAF','YEG','VJC','VNM','NAB','PTB','VCB','ITD','TCM','VPI','VEA','SJS','MCH','SSB','FOX','ACV','SCS','BWE','NCT','KDC']
 
 def get_data_days():
     db = PICKLED_WS_ADAPTERS.get_target_pickled_db()
@@ -31,8 +25,8 @@ def load_data_for_date(day=None):
     db = PICKLED_WS_ADAPTERS.load_hose500_from_db(day)
     df = pd.DataFrame.from_dict(db.get("data"))
 
-
-    stocks = [s for s in chooseStocks if s in df['stock'].unique()]
+    stocks = ['SHS','VGS','MBS','VIX','CTS','ORS','CEO','FTS','DTD','AGR','GEX','BSI','HUT','VCI','DIG','VND','VDS','L14','DXG','DGW','PDR','HCM','CII','HTN','GVR','NKG','BVS','HSG','TCI','NVL','SSI','GIL','PXL','KSB','PLC','NLG','KBC','DDV','FCN','LCG','DPG','DBC','TCH','VOS','VPG','HDC','IDJ','ANV','VCG','PET','VGC','PC1','HAH','ASM','IJC','C4G','BCG','HHV','DXS','CSV','IDI','TNG','SZC','HHS','CTD','KHG','ADS','PVC','TLH','DCM','DGC','SCR','S99','TIG','MWG','LAS','PVD','AAA','PVT','POM','MSN','HBC','PVS','CMX','VTP','PVB','LSS','IDC','TIP','DPM','HDG','VSC','HQC','HPG','SMC','EVF','NTL','VGI','DRI','PAN','VHC','CSC','CNG','VRE','EIB','STB','DSC','TCB','KDH','MSB','VHM','TV2','CTR','LDG','VGT','CTI','BSR','SHB','MSH','CTG','ELC','PHR','VIB','VIC','PSH','TTF','BFC','TPB','MSR','LHG','VCS','SIP','OCB','SKG','DPR','GMD','VPB','MBB','BID','APH','HAG','PLX','AGG','HAX','SBT','LPB','BMP','BCM','GEG','FPT','POW','HVN','PVP','TNH','DHC','NT2','OIL','DRC','BVH','REE','FRT','ABB','ACB','HNG','CMG','GAS','GSP','VIP','HDB','DHA','SAB','VTO','PNJ','BAF','QNS','NAF','YEG','VJC','VNM','NAB','PTB','VCB','ITD','TCM','VPI','VEA','SJS','MCH','SSB','FOX','ACV','SCS','BWE','NCT','KDC']
+    stocks = [s for s in stocks if s in df['stock'].unique()]
     df['datetime'] = day + ' ' + df['time'].astype(str).str[2:]
 
     return df[df['stock'].isin(stocks) & (df['last'] != 0)].sort_values('time').copy()
@@ -54,10 +48,8 @@ def resample(df: pd.DataFrame, timeframe):
 
     # Calculate cumulative value
     df['cumVal'] = df.groupby(['stock', 'matchedBy'])['matchingValue'].cumsum() / 1e9
-    df['bu'] = np.where(df['matchedBy'] >= 0, df['cumVal'],np.nan)
-    df['bu'] = df['bu'].ffill()
-    df['sd'] = np.where(df['matchedBy'] == -1, df['cumVal'], np.nan)
-    df['sd'] = df['sd'].ffill()
+    df['bu'] = np.where(df['matchedBy'] >= 0, df['cumVal'], 0)
+    df['sd'] = np.where(df['matchedBy'] == -1, df['cumVal'], 0)
 
     # Calculate Bid/Ask
     df['bid'] = df['bestBid1'] * df['bestBid1Volume'] + df['bestBid2'] * df['bestBid2Volume'] + df['bestBid2'] * df['bestBid2Volume'] + df['bestBid3'] * df['bestBid3Volume']
@@ -139,7 +131,8 @@ def plot(df: pd.DataFrame, symbol, timeframe):
     # Update layout
     fig.update_layout(title='Stock Price, Volume, Return, BUSD, and Bid-Ask Spread',
                     xaxis_rangeslider_visible=False,
-                    height=1500)
+                    height=1200,
+                    width=1200)
 
     # Update y-axis labels
     fig.update_yaxes(title_text='Price', row=1, col=1)
@@ -154,7 +147,7 @@ def plot(df: pd.DataFrame, symbol, timeframe):
 
 
 # Khởi tạo ứng dụng Dash
-app = dash.Dash(__name__, prevent_initial_callbacks=True, external_stylesheets=[dbc.themes.BOOTSTRAP])
+app = dash.Dash(__name__)
 
 # Layout của ứng dụng
 app.layout = html.Div([
@@ -165,7 +158,6 @@ app.layout = html.Div([
             options=get_data_days(),
             value=get_max_datatime()
         ),
-        dbc.Button("Load Data",id='cfm_load_data'),
         dcc.Dropdown(
             id='timeframe-dropdown',
             options=[
@@ -177,43 +169,27 @@ app.layout = html.Div([
         ),
         dcc.Dropdown(
             id='stock-dropdown',
-            options=[{'label': stock, 'value': stock} for stock in chooseStocks],  # Thêm các mã cổ phiếu khác vào đây
+            options=[{'label': stock, 'value': stock} for stock in ['HPG', 'VNM', 'FPT']],  # Thêm các mã cổ phiếu khác vào đây
             value='HPG'
         )
     ]),
-    dcc.Loading(dcc.Graph(id='stock-graph'))
+    dcc.Graph(id='stock-graph')
 ])
 
 @app.callback(
-    Output('stock-graph', 'figure', allow_duplicate=True),
-    [
-        State('timeframe-dropdown', 'value'),
-        State('stock-dropdown', 'value'),
-        State('date-picker', 'value')
-    ],
-    [
-        Input('cfm_load_data', 'n_clicks')
-    ]
-)
-def update_graph(timeframe, symbol, day, n_clicks):
-    stock_data = load_data_for_date(day)
-    if stock_data is not None:
-        redis_client.set("dang_demo_cached", pickle.dumps(stock_data))
-    fig = plot(stock_data, symbol, timeframe)
-    return fig
-
-@app.callback(
-    Output('stock-graph', 'figure', allow_duplicate=True),
+    Output('stock-graph', 'figure'),
     [
         Input('timeframe-dropdown', 'value'),
-        Input('stock-dropdown', 'value')
+        Input('stock-dropdown', 'value'),
+        Input('date-picker', 'value')
     ]
 )
-def update_graph2(timeframe, symbol):
-    stock_data = pickle.loads(redis_client.get("dang_demo_cached"))
-    if stock_data is not None:
-        fig = plot(stock_data, symbol, timeframe)
+def update_graph(timeframe, symbol, day):
+    stock_data = load_data_for_date(day)
+    fig = plot(stock_data, symbol, timeframe)
     return fig
 
 if __name__ == '__main__':
     app.run_server(debug=True, host='localhost', port = 1599)
+
+    

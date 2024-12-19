@@ -302,6 +302,9 @@ class Conds:
             use_range: bool = False,
             lower_thres: float = 0,
             upper_thres: float = 0,
+            use_vs_hline: bool = False,
+            hline: float = 0,
+            hline_direction: str = "crossover"
         ):
             """Two line conditions"""
             pos_cond = Conds.Standards.two_line_pos(
@@ -310,7 +313,9 @@ class Conds:
             range_cond = Conds.Standards.range_cond(
                 line1, lower_thres, upper_thres, use_flag=use_range
             )
-            res = Utils.combine_conditions([pos_cond, range_cond])
+            hline_series = pd.Series(hline, index = line1.index)
+            hline_cond = Conds.Standards.two_line_pos(line1, hline_series, hline_direction, use_flag = use_vs_hline)
+            res = Utils.combine_conditions([pos_cond, range_cond, hline_cond])
             return res
             
 
@@ -391,7 +396,9 @@ class Conds:
         direction: str = "Increase",
         nbars: int = 10,
         low_range: float = 5,
-        high_range: float = 10000
+        high_range: float = 10000,
+        wait_bars: bool = False,
+        wbars: int = 5
         ):
         """Check if the percentage change between `close` price with lowest(`low`) (if direction is increase) 
         or highest(`high`)(decrease) over a period of time falls within the specified range.
@@ -421,8 +428,33 @@ class Conds:
             pct_change = Utils.calc_percentage_change(comp_src, close)
             if direction == "Decrease":
                 pct_change = pct_change * -1
+            if wait_bars == False:
+                return Utils.in_range(pct_change, low_range, high_range, equal=True)
 
-            return Utils.in_range(pct_change, low_range, high_range, equal=True)
+            inrange = Utils.in_range(pct_change, low_range, high_range, equal=True)
+            if direction == "Increase":
+                mark = np.where(inrange, df['high'], np.nan)
+                mark = pd.DataFrame(mark, index=close.index, columns= close.columns)
+                hlofclose = Ta.highest(df['close'], wbars)
+            else:
+                mark = np.where(inrange, df['low'], np.nan)
+                mark = pd.Series(mark, index=close.index, columns = close.columns)
+                hlofclose = Ta.lowest(df['close'], wbars)
+                
+            fwmark = mark.shift(wbars)
+            rs = Utils.new_1val_df(False, close) 
+            if direction == "Increase":
+                isw = hlofclose < fwmark
+            else:
+                isw = hlofclose > fwmark
+            rs_arr = rs.values
+            fwmark_arr = fwmark.values
+            isw_arr = isw.values
+            rs_arr[(~np.isnan(fwmark_arr) & isw_arr)] = True
+            rs = pd.DataFrame(rs_arr, index = close.index, columns = close.columns)
+            return rs
+            
+
 
         return None
     
@@ -734,6 +766,9 @@ class Conds:
         use_range: bool = False,
         lower_thres: float = 0,
         upper_thres: float = 0,
+        use_vs_hline: bool = False,
+        hline: float = 0,
+        hline_direction: str = "crossover",
         use_flag: bool = False,
     ):
         """Conditions base on URSI and URSI Signal
@@ -773,6 +808,8 @@ class Conds:
             use_range: bool = True
             lower_thres: float = 0
             upper_thres: float = 0
+            use_vs_hline: bool = False
+            hline: float = 0
             use_flag: bool = True
 
         src = df["close"]
@@ -795,6 +832,9 @@ class Conds:
                 use_range,
                 lower_thres,
                 upper_thres,
+                use_vs_hline,
+                hline,
+                hline_direction
             )
 
         return res
@@ -1021,6 +1061,31 @@ class Conds:
             # Show the figure
             fig.show()
 
+    @staticmethod
+    def no_break_cond(df: pd.DataFrame,
+                      mark: pd.Series,
+                      direction: str = 'higher',
+                      wait_bars: int = 5
+                      ):
+        pass
+    @staticmethod
+    def wait_cond(df: pd.DataFrame,
+                  entry_params: dict,
+                  cfm_params: dict,
+                  wait_bars: int = 5,
+                  use_flag: bool = False):
+        entry_signals = Conds.compute_any_conds(entry_params)
+        def test_cfm_params():
+            cfm_params = {
+                'func_name':
+                    {
+                         'wait_bars' : 5
+                    }
+            }
+        pass
+    
+
+                      
     
 class FilteringStocks:
 
@@ -1159,6 +1224,8 @@ class FilteringStocks:
                 logging.error(f"function `filter_all` error: {func_name}: {e}", exc_info=True)
 
         return stocks_list
+
+
 
 
 class Vectorized:
