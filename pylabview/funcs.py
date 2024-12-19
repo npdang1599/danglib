@@ -8,7 +8,7 @@ from pymongo import MongoClient
 import logging
 import warnings
 import argparse
-from danglib.chatbots.viberbot import F5bot
+from danglib.chatbots.viberbot import create_f5bot
 from danglib.utils import show_ram_usage_mb
 
 pd.options.mode.chained_assignment = None
@@ -83,7 +83,10 @@ class Globs:
             "ure_future": Conds.Sectors.ure_future,
             'wavetrend': Conds.wavetrend,
             'general_cond': Conds.general_cond
+<<<<<<< HEAD
 
+=======
+>>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
         }
         self.fa_funcs = [
             "net_income", 
@@ -136,8 +139,8 @@ class Globs:
             Adapters.prepare_stocks_data(
                 stocks, 
                 fn=fn, 
-                db_collection=collection, 
-                to_pickle=False, 
+                db_collection=collection,
+                to_pickle=False,
                 to_mongo=True, 
                 to_plasma=True
             )
@@ -151,6 +154,7 @@ class Globs:
             logging.error(msg)
 
         if send_viber:
+            F5bot = create_f5bot()
             F5bot.send_viber(msg)        
 
     @staticmethod
@@ -260,7 +264,6 @@ class Globs:
     def load_all_data2(self):
         # self.load_vnindex()
         self.load_sectors_data() 
-        
         
     def load_index_data(self):
         self.df_all_index = Adapters.get_index_data(self.data_from_day)
@@ -389,6 +392,118 @@ class Conds:
             
             return None
 
+    @staticmethod
+    def is_in_top_bot_percentile(
+        df: pd.DataFrame, 
+        src_name: str = "close",
+        lookback_period: int = 20,
+        direction: str = 'top',
+        percentile_threshold: float = 90,
+        use_flag: bool = False,
+        *args, **kwargs
+    ):
+        if use_flag:
+            src = df[src_name]
+            rank = Ta.rolling_rank(src, lookback_period)
+
+            thres = percentile_threshold if direction == 'top' else 100 - percentile_threshold
+            cond = rank >= thres if direction == 'top' else rank <= thres
+
+            return cond
+
+        return None
+
+    @staticmethod
+    def consecutive_above_below(
+        line1: pd.Series,
+        line2: pd.Series,
+        direction: str = "above",
+        num_bars: int = 5,
+        use_flag: bool = False,
+        *args, **kwargs
+    ):
+        """Check if line1 is continuously above/below line2 for X bars
+        
+        Args:
+            df (pd.DataFrame): Input dataframe
+            line1_name (str): Name of first line/source in dataframe
+            line2_name (str): Name of second line/source in dataframe
+            direction (str): "above" or "below"
+            num_bars (int): Number of consecutive bars needed 
+            use_flag (bool): Whether to perform calculation
+            
+        Returns:
+            pd.Series: Boolean series where True means condition is met
+        """
+        if use_flag:
+            # Calculate condition for each bar
+            condition = line1 > line2 if direction == "above" else line1 < line2
+            
+            # Count consecutive occurrences 
+            consecutive_count = condition.astype(int).rolling(window=num_bars).sum()
+            
+            # True if we have num_bars consecutive occurrences
+            signal = consecutive_count >= num_bars
+            
+            return signal
+            
+        return None
+
+    @staticmethod
+    def cross_no_reverse(
+        line1: pd.Series,
+        line2: pd.Series,
+        direction: str = "crossover", 
+        bars_no_reverse: int = 5,
+        use_flag: bool = False,
+        *args, **kwargs
+    ):
+        """Check if line1 crosses over/under line2 and there is no reverse cross signal
+        within the next X bars, using vectorized operations.
+
+        Args:
+            df (pd.DataFrame): Input dataframe
+            src1_name (str): Name of first line/source in dataframe
+            src2_name (str): Name of second line/source in dataframe
+            direction (str): "crossover" or "crossunder"  
+            bars_no_reverse (int): Number of bars to check for no reverse signal
+            use_flag (bool): Whether to perform calculation
+
+        Returns:
+            pd.Series: Boolean series where True means condition is met
+        """
+        def test():
+            ursi, sig = Ta.ursi(df_raw['close'])
+            line1 = ursi
+            line2 = sig
+            direction: str = "crossover" 
+            bars_no_reverse: int = 5
+            use_flag: bool = False
+
+        if use_flag:
+            
+            # Get initial cross signals
+            if direction == "crossover":
+                cross_signals = Ta.crossover(line1, line2)
+                reverse_signals = Ta.crossunder(line1, line2)
+            else:  # crossunder
+                cross_signals = Ta.crossunder(line1, line2)
+                reverse_signals = Ta.crossover(line1, line2)
+
+            # Create a rolling window view of reverse signals
+            # For each point, look at next X bars for reverse signals
+            reverse_windows = reverse_signals.rolling(
+                window=bars_no_reverse,
+                min_periods=1
+            ).sum()
+
+            # Valid signals are cross points where there are no reverse signals 
+            # in the next X bars
+            valid_signals = cross_signals.shift(bars_no_reverse) & (reverse_windows == 0)
+
+            return valid_signals.fillna(False)
+
+        return None
 
     @staticmethod
     def price_change(
@@ -474,6 +589,8 @@ class Conds:
         nbars: int = 10,
         low_range: float = 5,
         high_range: float = 100,
+        wait_bars: bool = False,
+        wbars: int = 5,
         *args, **kwargs
         ):
         """Check if the percentage change between `close` price with lowest(`low`) (if direction is increase) 
@@ -506,8 +623,28 @@ class Conds:
             if direction == "Decrease":
                 pct_change = pct_change * -1
 
-            return Utils.in_range(pct_change, low_range, high_range, equal=True)
+            if wait_bars == False:
+                return Utils.in_range(pct_change, low_range, high_range, equal=True)
 
+            inrange = Utils.in_range(pct_change, low_range, high_range, equal=True)
+            if direction == "Increase":
+                mark = np.where(inrange, df['high'], np.nan)
+                mark = pd.Series(mark, index=df.index)
+                hlofclose = Ta.highest(df['close'], wbars)
+            else:
+                mark = np.where(inrange, df['low'], np.nan)
+                mark = pd.Series(mark, index=df.index)
+                hlofclose = Ta.lowest(df['close'], wbars)
+                
+            fwmark = mark.shift(wbars)
+            rs = Utils.new_1val_series(False, df) 
+            if direction == "Increase":
+                isw = hlofclose < fwmark
+            else:
+                isw = hlofclose > fwmark
+            rs.loc[(fwmark.notna() & isw)] = True
+            return rs
+            
         return None
 
     @staticmethod
@@ -973,7 +1110,7 @@ class Conds:
 
         if use_flag:
             wt1, wt2 = Ta.wavetrend(df)
-            res = Conds.Standards.two_line_pos(wt1, wt2, direction = direction, use_flag = use_flag)
+            res = Conds.Standards.two_line_pos(wt1, wt2, direction=direction, use_flag=use_flag)
         
         return res
 
@@ -1807,6 +1944,7 @@ class Conds:
             
             return cond
         
+
         @staticmethod
         def check_5sectors_macrodata(
             df: pd.DataFrame,
@@ -2088,7 +2226,158 @@ class Conds:
 
         return None
     
+<<<<<<< HEAD
     
+=======
+    @staticmethod
+    def consecutive_lower(df: pd.DataFrame, src_name, compare_with, n_bar):
+        src = df[src_name]
+        src2 = df[compare_with]
+        res = None
+        "...."
+        return res
+
+
+    @staticmethod 
+    def min_inc_dec_bars_old(
+        src: pd.Series,
+        n_bars: int = 10,
+        n_bars_inc: int = None,
+        n_bars_dec: int = None,
+        use_flag: bool = True,
+        *args, **kwargs
+    ) -> pd.Series:
+        """Check if within the latest n_bars, there are at least n_bars_inc increasing bars
+        and n_bars_dec decreasing bars. Uses vectorized operations.
+
+        Args:
+            src (pd.Series): Input source series
+            n_bars (int, optional): Number of bars to look back. Defaults to 10.
+            n_bars_inc (int, optional): Minimum number of increasing bars required. 
+                Defaults to None.
+            n_bars_dec (int, optional): Minimum number of decreasing bars required.
+                Defaults to None. 
+            use_flag (bool, optional): Whether to perform calculation. Defaults to True.
+
+        Returns:
+            pd.Series: Boolean series where True means conditions are met
+        """
+        if not use_flag:
+            return None
+
+        # Input validation
+        if n_bars_inc is None and n_bars_dec is None:
+            raise ValueError("At least one of n_bars_inc or n_bars_dec must be specified")
+
+        if n_bars_inc is not None and n_bars_inc > n_bars:
+            raise ValueError("n_bars_inc cannot be greater than n_bars")
+
+        if n_bars_dec is not None and n_bars_dec > n_bars:
+            raise ValueError("n_bars_dec cannot be greater than n_bars")
+
+        # Calculate changes
+        changes = src.diff()
+        
+        # Calculate rolling counts of increasing and decreasing bars
+        inc_count = changes.rolling(n_bars).apply(lambda x: (x > 0).sum())
+        dec_count = changes.rolling(n_bars).apply(lambda x: (x < 0).sum())
+        
+        # Create conditions based on requirements
+        inc_condition = True if n_bars_inc is None else inc_count >= n_bars_inc
+        dec_condition = True if n_bars_dec is None else dec_count >= n_bars_dec
+        
+        # Combine conditions
+        result = inc_condition & dec_condition
+        
+        # Handle NaN values from rolling window startup
+        result = result.fillna(False)
+        
+        return result
+    
+    @staticmethod
+    def min_inc_dec_bars(
+        src: pd.Series,
+        n_bars: int = 10,
+        n_bars_inc: int = None,
+        n_bars_dec: int = None,
+        use_flag: bool = True,
+        *args, **kwargs
+    ) -> pd.Series:
+        if not use_flag:
+            return None
+        
+        if n_bars_inc is None and n_bars_dec is None:
+            raise ValueError("At least one of n_bars_inc or n_bars_dec must be specified")
+        
+        if n_bars_inc is not None and n_bars_inc > n_bars:
+            raise ValueError("n_bars_inc cannot be greater than n_bars")
+        
+        if n_bars_dec is not None and n_bars_dec > n_bars:
+            raise ValueError("n_bars_dec cannot be greater than n_bars")
+        
+        changes: pd.Series = src.diff()
+        
+        inc_mask = (changes > 0).astype(int)
+        dec_mask = (changes < 0).astype(int)
+        
+        inc_cumsum = inc_mask.cumsum()
+        dec_cumsum = dec_mask.cumsum()
+        
+        inc_count = inc_cumsum - inc_cumsum.shift(n_bars).fillna(0)
+        dec_count = dec_cumsum - dec_cumsum.shift(n_bars).fillna(0)
+        
+        inc_condition = True if n_bars_inc is None else inc_count >= n_bars_inc
+        dec_condition = True if n_bars_dec is None else dec_count >= n_bars_dec
+        
+        result = inc_condition & dec_condition
+        
+        result.iloc[:n_bars-1] = False
+        
+        return result
+
+    @staticmethod
+    def percent_change_in_range(
+        src: pd.Series,
+        n_bars: int = 10,
+        lower_thres: float = 0,
+        upper_thres: float = 100,
+        use_flag: bool = True,
+        use_absolute: bool = False,
+        *args, **kwargs
+    ) -> pd.Series:
+        """Check if percentage change over n_bars falls within specified range.
+        
+        Args:
+            src (pd.Series): Input source series
+            n_bars (int): Lookback period for calculating change
+            lower_thres (float): Lower threshold for change
+            upper_thres (float): Upper threshold for change
+            use_flag (bool): Whether to perform calculation
+            use_absolute (bool): Whether to use absolute change
+            
+        Returns:
+            pd.Series: Boolean series where True means conditions are met
+        """
+        if not use_flag:
+            return None
+            
+        if lower_thres > upper_thres:
+            raise ValueError("lower_thres must be less than or equal to upper_thres")
+
+        # Calculate percentage change
+        if use_absolute:
+            pct_change = src.diff(periods=n_bars)
+        else:
+            pct_change = src.pct_change(periods=n_bars) * 100
+
+        # Check if within range
+        result = (pct_change >= lower_thres) & (pct_change <= upper_thres)
+        
+        # Handle NaN values from the rolling calculation
+        result = result.fillna(False)
+        
+        return result
+>>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
 
 
 class Simulator:
@@ -2115,7 +2404,10 @@ class Simulator:
     def prepare_data_for_backtesting(
         df: pd.DataFrame, trade_direction="Long", holding_periods=8
     ):
-        """Prepare data"""
+        """
+        Chuẩn bị dữ liệu (entryDay, entryPrice, exitDay, exitPrice) và tính toán lợi nhuận cho các kỳ hạn khác nhau.                                                     
+        ► Được dùng bởi: 'run', 'run3' (không xét params: profit_thres và loss_thres)
+        """
         df = df.copy()
         try:
             df["entryDay"] = df["day"].copy()
@@ -2153,6 +2445,168 @@ class Simulator:
             df = None
         return df
     
+    @staticmethod
+    @njit
+    def compute_trade_stats(
+        price_changes, 
+        returns, 
+        returns1,
+        returns5,
+        returns10,
+        returns15,
+        signals, 
+        upsides, 
+        downsides, 
+        holding_periods
+    ):
+        """Computing trade stats, using numba"""
+        num_trades = 0
+        num_win = 0
+        num_win1 = 0
+        num_win5 = 0
+        num_win10 = 0
+        num_win15 = 0
+
+        
+        
+        num_loss = 0
+        total_profit = 0.0
+        total_loss = 0.0
+        total_return = 0.0
+        total_return1 = 0.0
+        total_return5 = 0.0
+        total_return10 = 0.0
+        total_return15 = 0.0
+        
+        
+        total_upside = 0.0
+        total_downside = 0.0
+        
+        max_runup = np.NaN
+        max_drawdown = np.NaN
+
+        is_trading = False
+        entry_idx = 0
+        trading_status = np.full(len(signals), np.NaN)
+        num_trades_arr = np.full(len(signals), np.NaN)
+        
+        winrate_arr = np.full(len(signals), np.NaN)
+        winrate1_arr = np.full(len(signals), np.NaN)
+        winrate5_arr = np.full(len(signals), np.NaN)
+        winrate10_arr = np.full(len(signals), np.NaN)
+        winrate15_arr = np.full(len(signals), np.NaN)
+        
+        avg_returns_arr = np.full(len(signals), np.NaN)
+        avg_returns1_arr = np.full(len(signals), np.NaN)
+        avg_returns5_arr = np.full(len(signals), np.NaN)
+        avg_returns10_arr = np.full(len(signals), np.NaN)
+        avg_returns15_arr = np.full(len(signals), np.NaN)
+        
+        profit_factor_arr = np.full(len(signals), np.NaN)
+        is_entry_arr = np.full(len(signals), np.NaN)
+
+        avg_upside_arr = np.full(len(signals), np.NaN)
+        avg_downside_arr = np.full(len(signals), np.NaN)
+        
+        max_runup_arr = np.full(len(signals), np.NaN)
+        max_drawdown_arr = np.full(len(signals), np.NaN)
+
+        for index, signal in enumerate(signals):
+            if signal and not is_trading:
+                is_trading = True
+                entry_idx = index
+
+                trade_return = returns[index]
+
+                if not np.isnan(trade_return):
+                    num_trades += 1
+                    trade_profit = price_changes[index]
+
+                    total_return += trade_return
+                    total_return1 += returns1[index]
+                    total_return5 += returns5[index]
+                    total_return10 += returns10[index]
+                    total_return15 += returns15[index]
+                    
+                    total_upside += upsides[index]
+                    total_downside += downsides[index]
+                    
+                    # max runup, max drawdown
+                    if np.isnan(max_runup):
+                        max_runup = upsides[index]
+                    else:
+                        max_runup = max(max_runup, upsides[index])
+                        
+                    if np.isnan(max_drawdown):
+                        max_drawdown = downsides[index]
+                    else:
+                        max_drawdown = min(max_drawdown, downsides[index])
+                    
+                    if trade_profit > 0:
+                        num_win += 1
+                        total_profit += trade_profit
+                    else:
+                        num_loss += 1
+                        total_loss += trade_profit
+                        
+                    num_win1  += 1 if returns1[index]  > 0 else 0
+                    num_win5  += 1 if returns5[index]  > 0 else 0
+                    num_win10 += 1 if returns10[index] > 0 else 0
+                    num_win15 += 1 if returns15[index] > 0 else 0
+
+                    num_trades_arr[index] = num_trades
+                    
+                    winrate_arr[index] = num_win / num_trades * 100
+                    winrate1_arr[index] = num_win1 / num_trades * 100
+                    winrate5_arr[index] = num_win5 / num_trades * 100
+                    winrate10_arr[index] = num_win10 / num_trades * 100
+                    winrate15_arr[index] = num_win15 / num_trades * 100
+                    
+                    avg_returns_arr[index] = total_return / num_trades
+                    avg_returns1_arr[index] = total_return1 / num_trades
+                    avg_returns5_arr[index] = total_return5 / num_trades
+                    avg_returns10_arr[index] = total_return10 / num_trades
+                    avg_returns15_arr[index] = total_return15 / num_trades
+                    
+                    avg_upside_arr[index] = total_upside / num_trades
+                    avg_downside_arr[index] = total_downside / num_trades
+                    
+                    max_runup_arr[index] = max_runup
+                    max_drawdown_arr[index] = max_drawdown
+                    
+                    profit_factor_arr[index] = (
+                        total_profit / (total_loss * -1) if total_loss != 0 else np.NaN
+                    )
+
+                is_entry_arr[index] = 1
+
+            if is_trading and (index - entry_idx == holding_periods):
+                is_trading = False
+
+            if is_trading:
+                trading_status[index] = 1
+
+        return (
+            trading_status,
+            num_trades_arr,
+            winrate_arr,
+            winrate1_arr,
+            winrate5_arr,
+            winrate10_arr,
+            winrate15_arr,
+            avg_returns_arr,
+            avg_returns1_arr,
+            avg_returns5_arr,
+            avg_returns10_arr,
+            avg_returns15_arr,
+            avg_upside_arr,
+            avg_downside_arr,
+            max_runup_arr,
+            max_drawdown_arr,
+            profit_factor_arr,
+            is_entry_arr,
+        )
+
     @staticmethod
     def compute_trade_stats2(
         day,
@@ -2514,7 +2968,167 @@ class Simulator:
             avg_upside_arr_i,
             avg_downside_arr_i,
         )
+
+    def run(
+        self, 
+        signals = None,
+        trade_direction="Long", 
+        compute_start_time="2018_01_01", 
+        use_shift=False,
+        n_shift=15, 
+        holding_periods=8
+    ):
+        df = self.df
+        func = self.func
+        params = self.params
+        name = self.name
         
+        """Run simmulation"""
+        if "return" not in df.columns:
+            if Globs.verbosity == 1:
+                logging.warning(
+                    "Input dataframe was not prepared for backtesting,It will be prepared now!"
+                )
+            df = self.prepare_data_for_backtesting(
+                df,
+                trade_direction=trade_direction,
+                holding_periods=holding_periods,
+            )
+
+        if signals is None:
+            signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
+        
+        if signals is None:
+            df["signal"] = Utils.new_1val_series(True, df) 
+        else:
+            df["signal"] = signals
+        
+        df["signal"] = np.where((df["day"] < compute_start_time) | (df["signal"].isna()), False, df["signal"]).astype(bool)
+        df["name"] = name
+
+        # Compute trade stats using Numba
+        price_changes = df["priceChange"].values
+        returns = df["return"].values
+        returns1 = df["return1"].values
+        returns5 = df["return5"].values
+        returns10 = df["return10"].values
+        returns15 = df["return15"].values
+        signals = df["signal"].values
+        upsides = df["upside"].values
+        downsides = df["downside"].values
+        (
+            trading_status,
+            num_trades_arr,
+            winrate_arr,
+            winrate1_arr,
+            winrate5_arr,
+            winrate10_arr,
+            winrate15_arr,
+            avg_returns_arr,
+            avg_returns1_arr,
+            avg_returns5_arr,
+            avg_returns10_arr,
+            avg_returns15_arr,
+            avg_upside_arr,
+            avg_downside_arr,
+            max_runup_arr,
+            max_drawdown_arr,
+            profit_factor_arr,
+            is_entry_arr,
+        ) = self.compute_trade_stats(
+            price_changes, 
+            returns, 
+            returns1, 
+            returns5, 
+            returns10, 
+            returns15, 
+            signals, 
+            upsides, 
+            downsides, 
+            holding_periods
+        )
+
+        # Update DataFrame
+        df["numTrade"] = num_trades_arr
+        df["winrate"] = winrate_arr
+        df["winrateT1"] = winrate1_arr
+        df["winrateT5"] = winrate5_arr
+        df["winrateT10"] = winrate10_arr
+        df["winrateT15"] = winrate15_arr
+        df["avgReturn"] = avg_returns_arr
+        df["avgReturnT1"] = avg_returns1_arr
+        df["avgReturnT5"] = avg_returns5_arr
+        df["avgReturnT10"] = avg_returns10_arr
+        df["avgReturnT15"] = avg_returns15_arr
+        df["avgUpside"] = avg_upside_arr
+        df["avgDownside"] = avg_downside_arr
+        df["maxRunup"] = max_runup_arr
+        df["maxDrawdown"] = max_drawdown_arr
+        df["profitFactor"] = profit_factor_arr
+        df["isEntry"] = is_entry_arr
+        df["isTrading"] = trading_status
+
+        df["matched"] = np.where(df["signal"], 1, np.NaN)
+        df[
+            [
+                "numTrade",
+                "winrate",
+                "winrateT1",
+                "winrateT5",
+                "winrateT10",
+                "winrateT15",
+                "profitFactor",
+                "avgReturn",
+                "avgReturnT1",
+                "avgReturnT5",
+                "avgReturnT10",
+                "avgReturnT15",
+                "avgUpside",
+                "avgDownside",
+                "maxRunup",
+                "maxDrawdown"
+            ]
+        ] = df[
+            [
+                "numTrade",
+                "winrate",
+                "winrateT1",
+                "winrateT5",
+                "winrateT10",
+                "winrateT15",
+                "profitFactor",
+                "avgReturn",
+                "avgReturnT1",
+                "avgReturnT5",
+                "avgReturnT10",
+                "avgReturnT15",
+                "avgUpside",
+                "avgDownside",
+                "maxRunup",
+                "maxDrawdown"
+            ]
+        ].ffill().fillna(0)
+        self.df = df
+
+        result = df[
+            [
+                "name",
+                "numTrade",
+                "winrate",
+                "profitFactor",
+                "avgReturn",
+                "avgUpside",
+                "avgDownside",
+                "maxRunup",
+                "maxDrawdown",
+                "isEntry",
+                "matched",
+                "isTrading",
+            ]
+        ].iloc[-1]
+        result.name = self.name
+        self.result = result
+   
     def run2(self, 
             signals = None,
             trade_direction="Long", 
@@ -2528,7 +3142,16 @@ class Simulator:
             loss_thres=5,
             *args, **kwargs
             ):
+        """
+        Backtest có xét thêm params: take profit and cutloss (khác so với run và run3); 
+        Gọi 'compute_trade_stats2'
         
+        Purpose:
+        --------
+        This function runs a full backtest simulation based on entry and exit signals, evaluating 
+        the performance of trades using metrics such as win rate, average returns, upside/downside, and profit factor. 
+        It processes input data and merges additional market data to produce comprehensive backtest results.
+        """
         df = self.df
         func = self.func
         params = self.params
@@ -2658,8 +3281,6 @@ class Simulator:
         def strday(x):  
             y = str(x)
             return y[:4] +'_'+ y[4:6] +'_'+ y[6:8]
-
-
 
         df["entryPrice"] =   entry_price_arr
         df["entryDay"] =     entry_day_arr
@@ -2800,7 +3421,6 @@ class Simulator:
         ].iloc[-1]
 
         
-# %%
         self.df = df    
         self.result = result
 
@@ -3138,7 +3758,11 @@ class Simulator:
         params = self.params
         name = self.name
         
-        """Run simmulation"""
+        """
+        Backtest ko có params: chốt lời/cắt lỗ, tính toán trực tiếp trên Dataframe
+        without using a separate calculation function like `compute_trade_stats()` like 'run'.
+        """
+
         if "return" not in df.columns:
             if Globs.verbosity == 1:
                 logging.warning(
@@ -3191,10 +3815,18 @@ class Simulator:
         df['avgUpside'] = (df['isEntry'] * df['upside']).cumsum() / df['numTrade']
         df['avgDownside'] = (df['isEntry'] * df['downside']).cumsum() / df['numTrade']
 
+<<<<<<< HEAD
         df['75thRunup'] = (df['isEntry'] * df['upside']).expanding().apply(lambda x: np.percentile(x[(x != 0) & ~np.isnan(x)], 75) if (x[(x != 0) & ~np.isnan(x)].size > 0) else np.nan, raw=True)
       
         df['75thDrawdown'] = (df['isEntry'] * df['downside']).expanding().apply(lambda x: np.percentile(x[(x != 0) & ~np.isnan(x)], 25) if (x[(x != 0) & ~np.isnan(x)].size > 0) else np.nan, raw=True)
 
+=======
+        df['75thRunup'] = (df['isEntry'] * df['upside']).expanding().apply(lambda x: np.percentile(x[(x != 0) & ~np.isnan(x)] , 75) if (x[(x != 0) & ~np.isnan(x)].size > 0) else np.nan, raw=True)
+      
+        df['75thDrawdown'] = (df['isEntry'] * df['downside']).expanding().apply(lambda x: np.percentile(x[(x != 0) & ~np.isnan(x)], 25) if (x[(x != 0) & ~np.isnan(x)].size > 0) else np.nan, raw=True)
+
+
+>>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
         df['maxRunup'] = (df['isEntry'] * df['upside']).cummax()
         df['maxDrawdown'] = (df['isEntry'] * df['downside']).cummin()
 
@@ -3205,25 +3837,6 @@ class Simulator:
         
         df = df.drop(['is_win', 'is_win1', 'is_win5', 'is_win10', 'is_win15', 'profit', 'loss' ], axis = 1)
         df['isEntry'] = np.where(df['isEntry'], 1, np.nan)
-
-        # df["numTrade"] = num_trades_arr
-        # df["winrate"] = winrate_arr
-        # df["winrateT1"] = winrate1_arr
-        # df["winrateT5"] = winrate5_arr
-        # df["winrateT10"] = winrate10_arr
-        # df["winrateT15"] = winrate15_arr
-        # df["avgReturn"] = avg_returns_arr
-        # df["avgReturnT1"] = avg_returns1_arr
-        # df["avgReturnT5"] = avg_returns5_arr
-        # df["avgReturnT10"] = avg_returns10_arr
-        # df["avgReturnT15"] = avg_returns15_arr
-        # df["avgUpside"] = avg_upside_arr
-        # df["avgDownside"] = avg_downside_arr
-        # df["maxRunup"] = max_runup_arr
-        # df["maxDrawdown"] = max_drawdown_arr
-        # df["profitFactor"] = profit_factor_arr
-        # df["isEntry"] = is_entry_arr
-        # df["isTrading"] = trading_status
 
         df["matched"] = np.where(df["signal"], 1, np.NaN)
         df[
@@ -3289,7 +3902,7 @@ class Simulator:
         ].iloc[-1]
         result.name = self.name
         self.result = result
-    
+
 
 class Scanner:
     """Scanner"""
@@ -3302,7 +3915,10 @@ class Scanner:
         use_shift=False,
         n_shift=15,
         holding_periods=60):
-
+        """Backtest on multiple stocks
+        Sử dụng `scan_one_stock`, không xét params cắt lỗ/chốt lời (khác `scan_multiple_stocks3`), 
+        cũng không có điều kiện lọc theo ngày (khác `scan_multiple_stocks_v4`).
+        """
         def test():
             params = (
                 {
@@ -3392,8 +4008,11 @@ class Scanner:
         use_shift=False,
         n_shift=15,
         holding_periods=60):
-        """Backtest on multiple stocks"""
-        
+        """
+        Backtest on multiple stocks, cho phép dùng hàm điều kiện tùy chọn.
+
+        Cho phép sử dụng hàm điều kiện tùy chọn, phù hợp cho các chiến lược phức tạp hơn (không áp dụng trong các hàm khác).
+        """
         def test():
             func = Conds.compute_any_conds
             params = {
@@ -3470,7 +4089,12 @@ class Scanner:
         use_shift=False,
         n_shift=15,
         holding_periods=60):
-        """Backtest on multiple stocks"""
+        """
+        Backtest nhóm cổ phiếu cụ thể 
+
+        Sử dụng 'scan_one_stock', Chỉ định nhóm cổ phiếu cụ thể (khác `scan_multiple_stocks`, `v3`, `v4`).
+        """
+
         from danglib.pylabview.celery_worker import scan_one_stock, clean_redis
         from tqdm import tqdm
 
@@ -3546,9 +4170,12 @@ class Scanner:
         profit_thres=5,
         loss_thres=5
         ):
-
+        """
+        Backtest xét thêm params cắt lỗ/chốt lời tùy chỉnh cho cổ phiếu.
+   
+        - Hỗ trợ cấu hình cắt lỗ/chốt lời tùy chỉnh cao nhất (khác với các phiên bản còn lại).
+        """
         # exit_params = params.pop('exit_cond') if 'exit_cond' in params else {}
-        """Backtest on multiple stocks"""  
         from danglib.pylabview.celery_worker import scan_one_stock_v2, clean_redis
         from tqdm import tqdm
 
@@ -3632,12 +4259,18 @@ class Scanner:
         use_shift=False,
         n_shift=15,
         holding_periods=60):
-        """Backtest on multiple stocks"""
+        """
+        Backtest không hỗ trợ cắt lỗ/chốt lời
+
+        - Sử dụng `scan_one_stock_v3` không có cắt lỗ/chốt lời (khác với `v2` và `3`).
+        """
+
         from danglib.pylabview.celery_worker import scan_one_stock_v3, clean_redis
         from tqdm import tqdm
 
         def test():
-            params = {'stock_scanner': {'trade_direction': 'Long', 'use_shift': False, 'n_shift': 15, 'holding_periods': 15}, 'price_change': {'use_flag': False, 'periods': 1, 'direction': 'increase', 'lower_thres': 5, 'upper_thres': 100}, 'price_comp_ma': {'use_flag': True, 'ma_len1': 5, 'ma_len2': 15, 'ma_type': 'EMA', 'ma_dir': 'crossover'}, 'price_gap': {'use_flag': False, 'gap_dir': 'Use Gap Up'}, 'price_change_vs_hl': {'use_flag': False, 'direction': 'Increase', 'nbars': 10, 'low_range': 5, 'high_range': 100}, 'price_highest_lowest': {'use_flag': False, 'method': 'Highest', 'num_bars': 10}, 'consecutive_conditional_bars': {'use_flag': False, 'src1_name': 'close', 'src2_name': 'close', 'direction': 'Increase', 'num_bars': 5, 'num_matched': 4}, 'vol_comp_ma': {'use_flag': False, 'n_bars': 1, 'ma_len': 20, 'comp_ma_dir': 'higher', 'comp_ma_perc': 20}, 'vol_percentile': {'use_flag': False, 'ma_length': 10, 'ranking_window': 128, 'low_range': 0, 'high_range': 100}, 'consecutive_squeezes': {'bb_length': 20, 'length_kc': 20, 'mult_kc': 1.5, 'use_true_range': True, 'use_flag': False, 'num_bars': 1}, 'ursi': {'length': 14, 'smo_type1': 'RMA', 'smooth': 14, 'smo_type2': 'EMA', 'use_flag': True, 'use_vs_signal': True, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'macd': {'r2_period': 20, 'fast': 10, 'slow': 20, 'signal_length': 9, 'use_flag': False, 'use_vs_signal': False, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'bbwp': {'src_name': 'close', 'basic_type': 'SMA', 'bbwp_len': 13, 'bbwp_lkbk': 128, 'use_flag': False, 'use_low_thres': False, 'low_thres': 20, 'use_high_thres': False, 'high_thres': 80}, 'bbpctb': {'src_name': 'close', 'length': 20, 'mult': 2, 'use_flag': False, 'use_range': False, 'low_range': 80, 'high_range': 100, 'use_cross': False, 'direction': 'crossover', 'cross_line': 'Upper band'}, 'net_income': {'use_flag': False, 'calc_type': 'QoQ', 'roll_len': 2, 'direction': 'positive', 'percentage': 0}, 'index_cond': {'price_comp_ma': {'use_flag': False, 'ma_len1': 5, 'ma_len2': 15, 'ma_type': 'EMA', 'ma_dir': 'crossover'}, 'ursi': {'length': 14, 'smo_type1': 'RMA', 'smooth': 14, 'smo_type2': 'EMA', 'use_flag': False, 'use_vs_signal': False, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'bbwp': {'src_name': 'close', 'basic_type': 'SMA', 'bbwp_len': 13, 'bbwp_lkbk': 128, 'use_flag': False, 'use_low_thres': False, 'low_thres': 20, 'use_high_thres': False, 'high_thres': 80}, 'bbpctb': {'src_name': 'close', 'length': 20, 'mult': 2, 'use_flag': False, 'use_range': False, 'low_range': 80, 'high_range': 100, 'use_cross': False, 'direction': 'crossover', 'cross_line': 'Upper band'}}, 'lookback_cond': {'n_bars': 5, 'price_change': {'use_flag': False, 'periods': 1, 'direction': 'increase', 'lower_thres': 0, 'upper_thres': 100}, 'price_comp_ma': {'use_flag': False, 'ma_len1': 5, 'ma_len2': 15, 'ma_type': 'EMA', 'ma_dir': 'crossover'}, 'price_gap': {'use_flag': False, 'gap_dir': 'Use Gap Up'}, 'price_change_vs_hl': {'use_flag': False, 'direction': 'Increase', 'nbars': 10, 'low_range': 5, 'high_range': 100}, 'price_highest_lowest': {'use_flag': False, 'method': 'Highest', 'num_bars': 10}, 'consecutive_conditional_bars': {'use_flag': False, 'src1_name': 'close', 'src2_name': 'close', 'direction': 'Increase', 'num_bars': 5, 'num_matched': 4}, 'vol_comp_ma': {'use_flag': False, 'n_bars': 1, 'ma_len': 20, 'comp_ma_dir': 'higher', 'comp_ma_perc': 20}, 'vol_percentile': {'use_flag': False, 'ma_length': 10, 'ranking_window': 128, 'low_range': 0, 'high_range': 100}, 'consecutive_squeezes': {'bb_length': 20, 'length_kc': 20, 'mult_kc': 1.5, 'use_true_range': True, 'use_flag': False, 'num_bars': 1}, 'ursi': {'length': 14, 'smo_type1': 'RMA', 'smooth': 14, 'smo_type2': 'EMA', 'use_flag': False, 'use_vs_signal': False, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'macd': {'r2_period': 20, 'fast': 10, 'slow': 20, 'signal_length': 9, 'use_flag': False, 'use_vs_signal': False, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'bbwp': {'src_name': 'close', 'basic_type': 'SMA', 'bbwp_len': 13, 'bbwp_lkbk': 128, 'use_flag': False, 'use_low_thres': False, 'low_thres': 20, 'use_high_thres': False, 'high_thres': 80}, 'bbpctb': {'src_name': 'close', 'length': 20, 'mult': 2, 'use_flag': False, 'use_range': False, 'low_range': 80, 'high_range': 100, 'use_cross': False, 'direction': 'crossover', 'cross_line': 'Upper band'}}, 'default_selector_stocks': []}
+            params = {'stock_scanner': {'trade_direction': 'Long', 'use_shift': False, 'n_shift': 15, 'holding_periods': 15}, 'price_change': {'use_flag': False, 'periods': 1, 'direction': 'increase', 'lower_thres': 5, 'upper_thres': 100}, 'price_comp_ma': {'use_flag': True, 'ma_len1': 5, 'ma_len2': 15, 'ma_type': 'EMA', 'ma_dir': 'crossover'}, 'price_gap': {'use_flag': False, 'gap_dir': 'Use Gap Up'}, 'price_change_vs_hl': {'use_flag': False, 'direction': 'Increase', 'nbars': 10, 'low_range': 5, 'high_range': 100}, 'price_highest_lowest': {'use_flag': False, 'method': 'Highest', 'num_bars': 10}, 'consecutive_conditional_bars': {'use_flag': False, 'src1_name': 'close', 'src2_name': 'close', 'direction': 'Increase', 'num_bars': 5, 'num_matched': 4}, 'vol_comp_ma': {'use_flag': False, 'n_bars': 1, 'ma_len': 20, 'comp_ma_dir': 'higher', 'comp_ma_perc': 20}, 'vol_percentile': {'use_flag': False, 'ma_length': 10, 'ranking_window': 128, 'low_range': 0, 'high_range': 100}, 'consecutive_squeezes': {'bb_length': 20, 'length_kc': 20, 'mult_kc': 1.5, 'use_true_range': True, 'use_flag': False, 'num_bars': 1}, 
+                      'ursi': {'length': 14, 'smo_type1': 'RMA', 'smooth': 14, 'smo_type2': 'EMA', 'use_flag': True, 'use_vs_signal': True, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'macd': {'r2_period': 20, 'fast': 10, 'slow': 20, 'signal_length': 9, 'use_flag': False, 'use_vs_signal': False, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'bbwp': {'src_name': 'close', 'basic_type': 'SMA', 'bbwp_len': 13, 'bbwp_lkbk': 128, 'use_flag': False, 'use_low_thres': False, 'low_thres': 20, 'use_high_thres': False, 'high_thres': 80}, 'bbpctb': {'src_name': 'close', 'length': 20, 'mult': 2, 'use_flag': False, 'use_range': False, 'low_range': 80, 'high_range': 100, 'use_cross': False, 'direction': 'crossover', 'cross_line': 'Upper band'}, 'net_income': {'use_flag': False, 'calc_type': 'QoQ', 'roll_len': 2, 'direction': 'positive', 'percentage': 0}, 'index_cond': {'price_comp_ma': {'use_flag': False, 'ma_len1': 5, 'ma_len2': 15, 'ma_type': 'EMA', 'ma_dir': 'crossover'}, 'ursi': {'length': 14, 'smo_type1': 'RMA', 'smooth': 14, 'smo_type2': 'EMA', 'use_flag': False, 'use_vs_signal': False, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'bbwp': {'src_name': 'close', 'basic_type': 'SMA', 'bbwp_len': 13, 'bbwp_lkbk': 128, 'use_flag': False, 'use_low_thres': False, 'low_thres': 20, 'use_high_thres': False, 'high_thres': 80}, 'bbpctb': {'src_name': 'close', 'length': 20, 'mult': 2, 'use_flag': False, 'use_range': False, 'low_range': 80, 'high_range': 100, 'use_cross': False, 'direction': 'crossover', 'cross_line': 'Upper band'}}, 'lookback_cond': {'n_bars': 5, 'price_change': {'use_flag': False, 'periods': 1, 'direction': 'increase', 'lower_thres': 0, 'upper_thres': 100}, 'price_comp_ma': {'use_flag': False, 'ma_len1': 5, 'ma_len2': 15, 'ma_type': 'EMA', 'ma_dir': 'crossover'}, 'price_gap': {'use_flag': False, 'gap_dir': 'Use Gap Up'}, 'price_change_vs_hl': {'use_flag': False, 'direction': 'Increase', 'nbars': 10, 'low_range': 5, 'high_range': 100}, 'price_highest_lowest': {'use_flag': False, 'method': 'Highest', 'num_bars': 10}, 'consecutive_conditional_bars': {'use_flag': False, 'src1_name': 'close', 'src2_name': 'close', 'direction': 'Increase', 'num_bars': 5, 'num_matched': 4}, 'vol_comp_ma': {'use_flag': False, 'n_bars': 1, 'ma_len': 20, 'comp_ma_dir': 'higher', 'comp_ma_perc': 20}, 'vol_percentile': {'use_flag': False, 'ma_length': 10, 'ranking_window': 128, 'low_range': 0, 'high_range': 100}, 'consecutive_squeezes': {'bb_length': 20, 'length_kc': 20, 'mult_kc': 1.5, 'use_true_range': True, 'use_flag': False, 'num_bars': 1}, 'ursi': {'length': 14, 'smo_type1': 'RMA', 'smooth': 14, 'smo_type2': 'EMA', 'use_flag': False, 'use_vs_signal': False, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'macd': {'r2_period': 20, 'fast': 10, 'slow': 20, 'signal_length': 9, 'use_flag': False, 'use_vs_signal': False, 'direction': 'crossover', 'use_range': False, 'lower_thres': 0, 'upper_thres': 0}, 'bbwp': {'src_name': 'close', 'basic_type': 'SMA', 'bbwp_len': 13, 'bbwp_lkbk': 128, 'use_flag': False, 'use_low_thres': False, 'low_thres': 20, 'use_high_thres': False, 'high_thres': 80}, 'bbpctb': {'src_name': 'close', 'length': 20, 'mult': 2, 'use_flag': False, 'use_range': False, 'low_range': 80, 'high_range': 100, 'use_cross': False, 'direction': 'crossover', 'cross_line': 'Upper band'}}, 'default_selector_stocks': []}
             # stock_scanner_params = params['stock_scanner']
             trade_direction =  'Long',
             use_shift =  False,
@@ -3707,7 +4340,6 @@ class Scanner:
 
         return res_df, trades_df
 
-
     @staticmethod
     def scan_multiple_stocks_v4(
         params, 
@@ -3716,7 +4348,13 @@ class Scanner:
         use_shift=False,
         n_shift=15,
         holding_periods=60):
-        """Backtest on multiple stocks"""
+        """
+        Backtest với điều kiện lọc dữ liệu theo ngày.
+        Gọi `scan_one_stock_v4`, giúp phân tích chi tiết theo ngày (khác tất cả các phiên bản khác).
+        Trong scan_one_stock_v4, dữ liệu cổ phiếu được định dạng lại để phân tích chi tiết theo từng ngày. 
+        Việc lọc và xét điều kiện theo ngày được thực hiện trong nội dung của scan_one_stock_v4, giúp hàm scan_multiple_stocks_v4 hỗ trợ phân tích backtest chi tiết hơn, khác biệt với các phiên bản khác.
+        """
+        
         from danglib.pylabview.celery_worker import scan_one_stock_v4, clean_redis
         from tqdm import tqdm
         if stocks is None:
@@ -3745,8 +4383,6 @@ class Scanner:
             
             task_dic[stock] = task
             
-        # while any(t.status!='SUCCESS' for t in task_dic.values()):
-        #     pass
 
         while any(t.status not in ['SUCCESS', 'FAILURE'] for t in task_dic.values()):
             if any(t.status == 'FAILURE' for t in task_dic.values()):
@@ -3793,6 +4429,7 @@ class Scanner:
 
 
         from danglib.pylabview.celery_worker import compute_one_stock_signals, clean_redis
+<<<<<<< HEAD
         clean_redis()
 
         if stocks is None:
@@ -3802,11 +4439,33 @@ class Scanner:
         task_dic = {}
         
         for stock in stocks:  
+=======
+
+        clean_redis()
+
+        # if stocks is None:
+        #     stocks = glob_obj.stocks
+
+
+        res_ls = []
+        task_dic = {}
+        
+        # params = Globs.old_saved_adapters(params)
+        
+        for stock in stocks:  
+            
+>>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
             task = compute_one_stock_signals.delay(
                 params = params,
                 stock = stock
             )
+<<<<<<< HEAD
             task_dic[stock] = task
+=======
+            
+            task_dic[stock] = task
+            
+>>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
 
         while any(t.status not in ['SUCCESS', 'FAILURE'] for t in task_dic.values()):
             if any(t.status == 'FAILURE' for t in task_dic.values()):
@@ -3817,6 +4476,7 @@ class Scanner:
         for k, v in task_dic.items():
             res = v.result
             if res is not None:
+<<<<<<< HEAD
                 ls.append(res)
 
         df_signals: pd.DataFrame = pd.concat(ls, axis =1, join='outer')
@@ -3946,6 +4606,16 @@ class Scanner:
 
     
     
+=======
+                res_ls.append(res)
+
+        return res_ls 
+
+
+
+
+
+>>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
 
 glob_obj = Globs()
 
@@ -3967,9 +4637,10 @@ def test():
         }
     )
 
-    res, df = Scanner.scan_multiple_stocks_v3(
+    res, df = Scanner.scan_multiple_stocks_v4(
             params=params,
             trade_direction='Long', 
+            # stocks =['HPG'],
             # use_holding_periods=True,
             holding_periods=15,
             # use_takeprofit_cutloss=False,
@@ -3980,11 +4651,14 @@ def test():
     from danglib.pylabview.celery_worker import clean_redis
     clean_redis()
 
+<<<<<<< HEAD
 
 
 
 
 
+=======
+>>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
 if __name__ == "__main__":
     
     

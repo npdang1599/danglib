@@ -247,14 +247,20 @@ class Components:
 
     @staticmethod
     def radio_items(id, defval, options, inline):
+<<<<<<< HEAD
 
+=======
+>>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
         return dbc.RadioItems(
             options=options,
             value=defval,
             id=id,
             inline=inline,
         )
+<<<<<<< HEAD
 
+=======
+>>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
         # return dcc.RadioItems(options, defval, inline=inline, id=id)
 
     @staticmethod

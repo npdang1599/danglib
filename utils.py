@@ -1,12 +1,14 @@
 # from dc_server.lazy_core import get_stock_daily
 from danglib.Adapters.adapters import MongoDBs
 import libtmux
-from danglib.chatbots.viberbot import F5bot
+from danglib.chatbots.viberbot import create_f5bot
 from datetime import datetime as dt
-import pandas as pd
+import pandas as pd, numpy as np
 import requests, os, sys
 from datetime import date, timedelta
 import pickle
+import pyarrow.parquet as pq
+from pathlib import Path
 
 # Disable
 def blockPrint():
@@ -118,6 +120,74 @@ def walk_through_files(TARGET, ext="*"):
 
     return lst
 
+class FileHandler:
+    @staticmethod
+    def isExists(file_path):
+        return Path(file_path).is_file()
+    
+    @staticmethod
+    def walk_through_files(TARGET, ext="*"):
+        lst = []
+        for root, dirs, files in os.walk(TARGET):
+            for file in files:
+                if ext == "*" or file.endswith(ext):
+                    lst.append(os.path.join(root, file))
+
+        return lst
+    
+    @staticmethod
+    def delete(file_path):
+        try:
+            path = Path(file_path)
+            path.unlink()
+            print(f"File deleted: {file_path}")
+        except FileNotFoundError:
+            print("File does not exist.")
+        except PermissionError:
+            print("Permission denied to delete the file.")
+        except Exception as e:
+            print(f"An error occurred: {e}")
+
+    @staticmethod
+    def maybe_create_dir(path, verbose=0):
+        if not os.path.exists(path):
+            os.makedirs(path)
+            if verbose > 0:
+                print(f"Created folder {DIR}")
+
+    @staticmethod
+    def write_pickle(path, data):
+        with open(path, 'wb') as file:
+            pickle.dump(data, file)
+            
+    @staticmethod
+    def read_pickle(path):
+        with open(path, 'rb') as file:
+            data = pickle.load(file)
+        return data
+    
+    @staticmethod
+    def write_parquet(file_path, df: pd.DataFrame):
+        """Write data to parquet file using pandas"""
+        df.to_parquet(file_path, compression='snappy')
+
+    @staticmethod
+    def read_parquet(file_path):
+        """Read data from parquet file using pandas"""
+        df = pd.read_parquet(file_path)
+        return df
+    
+    @staticmethod
+    def get_parquet_columns(path, substrs: list=None):
+        parquet_file = pq.ParquetFile(path)
+        all_columns = parquet_file.schema.names
+        if substrs is None:
+            return all_columns
+        if isinstance(substrs, str):
+            substrs = [substrs]
+        return [col for col in all_columns if any(substr in col for substr in substrs)]
+
+
 def get_stock_daily(symbol='HPG', start_day=None, end_day=None, resolution='1D'):
 
     TIME_GAP = 34128060  # 395 days
@@ -140,7 +210,6 @@ def get_stock_daily(symbol='HPG', start_day=None, end_day=None, resolution='1D')
 
     if start_day >= end_day:
         return 
-
 
     headers = {
         'Connection': 'keep-alive',
@@ -226,6 +295,94 @@ def get_traday_from_gsd(start_day=None, end_day=None):
     return tradays
 
 
+@staticmethod
+def flatten_columns(df: pd.DataFrame, separator='_'):
+    """
+    Làm phẳng MultiIndex columns của DataFrame thành single-level columns.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame có MultiIndex columns cần làm phẳng
+    separator : str, default='_'
+        Ký tự để nối các level của columns
+        
+    Returns:
+    --------
+    pandas.DataFrame
+        DataFrame mới với columns đã được làm phẳng
+    """
+    
+    # Kiểm tra nếu columns không phải MultiIndex thì return nguyên DataFrame
+    if not isinstance(df.columns, pd.MultiIndex):
+        return df
+    
+    # Tạo tên mới cho columns bằng cách nối các level
+    flat_columns = []
+    for col in df.columns:
+        # Loại bỏ các giá trị rỗng và khoảng trắng
+        cleaned_col = [str(level).strip() for level in col if pd.notna(level) and str(level).strip() != '']
+        # Nối các level bằng separator
+        new_col = separator.join(cleaned_col)
+        flat_columns.append(new_col)
+    
+    # Tạo DataFrame mới với columns đã làm phẳng
+    df_flat = df.copy()
+    df_flat.columns = flat_columns
+    
+    return df_flat
+
+@staticmethod
+def unflatten_columns(df: pd.DataFrame, separator='_', level_names=None):
+    """
+    Chuyển đổi columns đã được làm phẳng thành MultiIndex columns.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame có columns đã được làm phẳng cần chuyển về MultiIndex
+    separator : str, default='_'
+        Ký tự đã dùng để ngăn cách các level trong tên cột
+    level_names : list, default=None
+        Tên cho các level của MultiIndex. Nếu None, sẽ dùng số thứ tự
+        
+    Returns:
+    --------
+    pandas.DataFrame
+        DataFrame với columns đã được chuyển thành MultiIndex
+    """
+    # Tách các columns thành các phần theo separator
+    split_cols = [col.split(separator) for col in df.columns]
+    
+    # Xác định số lượng levels
+    max_levels = max(len(parts) for parts in split_cols)
+    
+    # Chuẩn hóa độ dài của tất cả các phần
+    normalized_cols = []
+    for parts in split_cols:
+        # Nếu thiếu level thì thêm chuỗi rỗng vào
+        if len(parts) < max_levels:
+            parts.extend([''] * (max_levels - len(parts)))
+        normalized_cols.append(tuple(parts))
+    
+    # Tạo tên cho các level nếu không được cung cấp
+    if level_names is None:
+        level_names = [f'level_{i}' for i in range(max_levels)]
+    elif len(level_names) < max_levels:
+        # Nếu thiếu tên level thì thêm vào
+        level_names.extend([f'level_{i}' for i in range(len(level_names), max_levels)])
+    
+    # Tạo MultiIndex mới
+    df_multi = df.copy()
+    df_multi.columns = pd.MultiIndex.from_tuples(
+        normalized_cols,
+        names=level_names
+    )
+    
+    return df_multi
+
+
+
 class Tmuxlib5014:
 
 
@@ -260,6 +417,7 @@ class Tmuxlib5014:
 
     @staticmethod
     def restart_db22_worker():
+        F5bot = create_f5bot()
         ss = Tmuxlib5014.init_session(session_name='5104')
         wd:libtmux.Window = ss.windows[0]
 
@@ -280,6 +438,7 @@ class Tmuxlib5014:
 
     @staticmethod
     def restart_5104_server():
+        F5bot = create_f5bot()
         ss = Tmuxlib5014.init_session(session_name='5104')
         wd: libtmux.Window = ss.windows[0]
 
@@ -296,7 +455,7 @@ def maybe_create_dir(path, verbose=0):
     if not os.path.exists(path):
         os.makedirs(path)
         if verbose > 0:
-            print(f"Created folder {DIR}")
+            print(f"Created folder {path}")
 
 
 def execute_cmd(cmd: str, print_result=True, wait_til_finish=True):
@@ -330,3 +489,132 @@ def show_ram_usage_mb():
     python_process = psutil.Process(pid)
     memoryUse = round(python_process.memory_info()[0] / 2. ** 20, 2) # memory use in GB
     return memoryUse
+
+
+def check_column_sorted(src: pd.Series, ascending=True):
+    """
+    Kiểm tra xem một cột trong DataFrame đã được sắp xếp hay chưa
+    
+    Parameters:
+    src (pandas.Series): Series cần kiểm tra
+    column_name (str): Tên cột cần kiểm tra
+    ascending (bool): True nếu kiểm tra sắp xếp tăng dần, False nếu giảm dần
+    
+    Returns:
+    bool: True nếu cột đã được sắp xếp, False nếu chưa
+    dict: Thông tin chi tiết về việc sắp xếp
+    """
+    
+    
+    # Lấy giá trị của cột
+    column_values = src.values
+    
+    # Bỏ qua các giá trị NaN
+    valid_values = column_values[~pd.isna(column_values)]
+    
+    # So sánh với phiên bản đã sắp xếp
+    sorted_values = np.sort(valid_values)
+    if not ascending:
+        sorted_values = sorted_values[::-1]
+    
+    is_sorted = np.array_equal(valid_values, sorted_values)
+    
+    # Tạo thông tin chi tiết
+    details = {
+        'is_sorted': is_sorted,
+        'direction': 'tăng dần' if ascending else 'giảm dần',
+        'total_values': len(valid_values),
+        'nan_count': len(column_values) - len(valid_values)
+    }
+    
+    if not is_sorted:
+        # Tìm vị trí đầu tiên không theo thứ tự
+        for i in range(len(valid_values)-1):
+            if ascending:
+                if valid_values[i] > valid_values[i+1]:
+                    details['first_unsorted_index'] = i
+                    details['unsorted_values'] = (valid_values[i], valid_values[i+1])
+                    break
+            else:
+                if valid_values[i] < valid_values[i+1]:
+                    details['first_unsorted_index'] = i
+                    details['unsorted_values'] = (valid_values[i], valid_values[i+1])
+                    break
+    
+    return is_sorted, details
+
+def day_to_timestamp(day: str):
+    return int(pd.to_datetime(day, format='%Y_%m_%d').timestamp()) * 1000000000
+
+
+def unflatten_columns(df: pd.DataFrame, separator='_', level_names=None):
+    """
+    Chuyển đổi columns đã được làm phẳng thành MultiIndex columns.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame có columns đã được làm phẳng cần chuyển về MultiIndex
+    separator : str, default='_'
+        Ký tự đã dùng để ngăn cách các level trong tên cột
+    level_names : list, default=None
+        Tên cho các level của MultiIndex. Nếu None, sẽ dùng số thứ tự
+        
+    Returns:
+    --------
+    pandas.DataFrame
+        DataFrame với columns đã được chuyển thành MultiIndex
+    """
+    # Tách các columns thành các phần theo separator
+    split_cols = [col.split(separator) for col in df.columns]
+    
+    # Xác định số lượng levels
+    max_levels = max(len(parts) for parts in split_cols)
+    
+    # Chuẩn hóa độ dài của tất cả các phần
+    normalized_cols = []
+    for parts in split_cols:
+        # Nếu thiếu level thì thêm chuỗi rỗng vào
+        if len(parts) < max_levels:
+            parts.extend([''] * (max_levels - len(parts)))
+        normalized_cols.append(tuple(parts))
+    
+    # Tạo tên cho các level nếu không được cung cấp
+    if level_names is None:
+        level_names = [f'level_{i}' for i in range(max_levels)]
+    elif len(level_names) < max_levels:
+        # Nếu thiếu tên level thì thêm vào
+        level_names.extend([f'level_{i}' for i in range(len(level_names), max_levels)])
+    
+    # Tạo MultiIndex mới
+    df_multi = df.copy()
+    df_multi.columns = pd.MultiIndex.from_tuples(
+        normalized_cols,
+        names=level_names
+    )
+    
+    return df_multi
+
+def underscore_to_camel(text):
+    """
+    Chuyển đổi chuỗi từ dạng underscore sang CamelCase
+    
+    Args:
+        text (str): Chuỗi đầu vào dạng underscore (ví dụ: hello_world)
+        
+    Returns:
+        str: Chuỗi đã chuyển đổi sang CamelCase (ví dụ: HelloWorld)
+        
+    Examples:
+        >>> underscore_to_camel('hello_world')
+        'HelloWorld'
+        >>> underscore_to_camel('user_first_name')
+        'UserFirstName'
+        >>> underscore_to_camel('api_response_data')
+        'ApiResponseData'
+    """
+    # Tách chuỗi theo dấu gạch dưới và loại bỏ khoảng trắng
+    words = text.strip().split('_')
+    
+    # Chuyển đổi chữ đầu tiên của mỗi từ thành chữ hoa
+    return ''.join(word.capitalize() for word in words)
