@@ -3864,8 +3864,6 @@ class Simulator:
                 "maxRunup",
                 "maxDrawdown",
                 "75thRunup",
-                "75thDrawdown",
-                "75thRunup",
                 "75thDrawdown"
             ]
         ].ffill().fillna(0)
