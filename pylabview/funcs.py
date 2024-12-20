@@ -3185,7 +3185,7 @@ class Simulator:
         
 # %%
         
-        if signals is None:if signals is None:
+        if signals is None:
                 signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
         
         df['signal'] = Utils.new_1val_series(True, df) if signals is None else signals
@@ -3741,7 +3741,7 @@ class Simulator:
   
 
     def run3(
-        self, signals = None, signals = None, trade_direction="Long", compute_start_time="2018_01_01", use_shift=False,
+        self, signals = None, trade_direction="Long", compute_start_time="2018_01_01", use_shift=False,
         n_shift=15, holding_periods=8,
         *args, **kwargs
     ):
@@ -3750,6 +3750,20 @@ class Simulator:
         params = self.params
         name = self.name
         
+        def test():
+            stock = 'HPG'
+            df_stock: pd.DataFrame = Adapters.load_stocks_data_from_plasma()
+            df = df_stock.pivot(index = 'day', columns = 'stock')\
+                .xs(stock, axis=1, level='stock')\
+                .reset_index(drop=False)
+            df['stock'] = stock
+            df = Simulator.prepare_data_for_backtesting(
+                df,
+                trade_direction=trade_direction,
+                holding_periods=holding_periods,
+            )
+            func = Conds.compute_any_conds
+
         """
         Backtest ko có params: chốt lời/cắt lỗ, tính toán trực tiếp trên Dataframe
         without using a separate calculation function like `compute_trade_stats()` like 'run'.
@@ -3863,8 +3877,6 @@ class Simulator:
                 "avgDownside",
                 "maxRunup",
                 "maxDrawdown",
-                "75thRunup",
-                "75thDrawdown",
                 "75thRunup",
                 "75thDrawdown"
             ]
@@ -4341,7 +4353,12 @@ class Scanner:
         Trong scan_one_stock_v4, dữ liệu cổ phiếu được định dạng lại để phân tích chi tiết theo từng ngày. 
         Việc lọc và xét điều kiện theo ngày được thực hiện trong nội dung của scan_one_stock_v4, giúp hàm scan_multiple_stocks_v4 hỗ trợ phân tích backtest chi tiết hơn, khác biệt với các phiên bản khác.
         """
-        
+        def test():
+            stocks = None
+            use_shift=False,
+            n_shift =15
+            holding_periods = 60
+
         from danglib.pylabview.celery_worker import scan_one_stock_v4, clean_redis
         from tqdm import tqdm
         if stocks is None:

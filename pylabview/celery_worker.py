@@ -56,10 +56,7 @@ class TaskName:
     SCAN_STOCK_V2 = 'scan_one_stock_v2'
     SCAN_STOCK_V3 = 'scan_one_stock_v3'
     SCAN_STOCK_V4 = 'scan_one_stock_v4'
-<<<<<<< HEAD
     SCAN_STOCK_V5 = 'scan_one_stock_v5'
-=======
->>>>>>> 6381af538e9410cd92c717e32c645881616ab9e8
     COMPUTE_ONE_STOCK_SIGNALS = 'compute_one_stock_signals'
     
 @app.task(name=TaskName.SCAN_STOCK)

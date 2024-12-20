@@ -8,7 +8,7 @@ from danglib.pslab.utils import Utils
 from typing import Union
 from dataclasses import dataclass
 
-USE_SAMPLE_DATA = True
+USE_SAMPLE_DATA = False
 PandasObject = Union[pd.Series, pd.DataFrame]
 
 def append_to_file(filename: str, content: str) -> None:
