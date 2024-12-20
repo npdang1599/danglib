@@ -3185,7 +3185,7 @@ class Simulator:
         
 # %%
         
-        if signals is None:if signals is None:
+        if signals is None:
                 signals = func(df, params, use_shift = use_shift, n_shift=n_shift)
         
         df['signal'] = Utils.new_1val_series(True, df) if signals is None else signals
@@ -3741,7 +3741,7 @@ class Simulator:
   
 
     def run3(
-        self, signals = None, signals = None, trade_direction="Long", compute_start_time="2018_01_01", use_shift=False,
+        self, signals = None, trade_direction="Long", compute_start_time="2018_01_01", use_shift=False,
         n_shift=15, holding_periods=8,
         *args, **kwargs
     ):
