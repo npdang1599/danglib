@@ -38,6 +38,8 @@ class Globs:
     STOCKSTATS_SRC = ['open', 'high', 'low', 'close', 'matchingValue', 'bu', 'sd', 'bu2',
        'sd2', 'bid', 'ask', 'refPrice', 'fBuyVol', 'fSellVol', 'return']
     
+    DAILYINDEX_SRC = ['F1Open', 'Vn30Open', 'VnindexOpen', 'F1High', 'Vn30High', 'VnindexHigh', 'F1Low', 'Vn30Low', 'VnindexLow', 'F1Close', 'Vn30Close', 'VnindexClose', 'F1Volume', 'Vn30Volume', 'VnindexVolume']
+    
     STOCKS_SRC = ['bu', 'sd', 'bu2', 'sd2', 'bid', 'ask', 'fBuyVol', 'fSellVol']
 
     GROUP_SRC = ['ask', 'bid', 'bu', 'bu2', 'fBuyVol', 'fSellVol','sd', 'sd2']

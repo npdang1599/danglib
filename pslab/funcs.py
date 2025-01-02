@@ -104,7 +104,7 @@ def function_mapping():
         },
         'is_in_top_bot_percentile': {
             'function': Conds.is_in_top_bot_percentile,
-            'title': 'Top/Bottom Percentile Check',
+            'title': 'Top/Bottom Percentile',
             'inputs': ['src'],
             'params': {
                 'lookback_period': {'type': 'int', 'default': 20},
