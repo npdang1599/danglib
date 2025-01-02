@@ -880,7 +880,26 @@ class CombiConds:
         return required_data, updated_conditions
 
     @staticmethod
-    def load_and_process_one_series_data(conditions_params: list[dict]):
+    def load_and_process_one_series_data(conditions_params: list[dict], data_src: str = 'market_stats'):
+
+        def test():
+            conditions_params = [
+                {
+                    "function": "absolute_change_in_range",
+                    "inputs": {
+                    "src": "VnindexClose",
+                    },
+                    "params": {
+                    "n_bars": 5,
+                    "lower_thres": 1,
+                    "upper_thres": 999,
+                    "use_as_lookback_cond": False,
+                    "lookback_cond_nbar": 5
+                    }
+                }
+            ]
+
+        assert data_src in ['market_stats', 'daily_index'], "`data_src` must be one in `['market_stats', 'daily_index']"
 
         required_data = {}  # Will store all needed data series/frames
         original_cols = set()  # Track original columns needed
@@ -912,7 +931,10 @@ class CombiConds:
         # Load all required data efficiently
         all_cols = {col for col in original_cols} | {col for col, _ in rolling_cols}
 
-        data = Adapters.load_market_stats_from_plasma(list(all_cols), USE_SAMPLE_DATA)
+        if data_src == 'market_stats':
+            data = Adapters.load_market_stats_from_plasma(list(all_cols), USE_SAMPLE_DATA)
+        else:
+            data = Adapters.load_index_daily_ohlcv_from_plasma(list(all_cols), USE_SAMPLE_DATA)
         
         # Add original columns
         for col in original_cols:
@@ -925,9 +947,6 @@ class CombiConds:
             required_data[key] = data[col].rolling(tf).sum()
 
         return required_data, updated_conditions
-    
-
-
 
     @staticmethod
     def load_and_process_stock_data(conditions_params: list[dict]):

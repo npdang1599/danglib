@@ -390,79 +390,122 @@ class Adapters:
         df1 = df1.sort_values('day')
         return df1
     
-    @staticmethod
-    def save_stock_data_to_plasma(create_sample=False):
-    
-        from danglib.lazy_core import gen_plasma_functions
-        _, disconnect, psave, pload = gen_plasma_functions(db=10)
 
-        df = Adapters.load_stock_data_from_parquet()
-
-        if create_sample:
-            dfs = df[df.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
-            FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/pslab_stock_data.parquet", dfs)
-
-        psave("pslab_stock_data", df)
-
-        disconnect()
-
-    @staticmethod
-    def save_market_data_to_plasma(create_sample=False):
-        from danglib.lazy_core import gen_plasma_functions
-        _, disconnect, psave, pload = gen_plasma_functions(db=10)
-
-        df_market_stats = Adapters.load_market_stats_from_parquet()
-
-        if create_sample:
-            dfs = df_market_stats[df_market_stats.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
-            FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/pslab_market_data.parquet", dfs)
-
-        psave("pslab_market_data", df_market_stats)
-
-        disconnect()
-
-    @staticmethod
-    def save_index_ohlcv_to_plasma(create_sample=False):
-
-        from danglib.lazy_core import gen_plasma_functions
-        _, disconnect, psave, pload = gen_plasma_functions(db=10)
-
-        df = Adapters.load_index_ohlc_from_pickle()
-
-        if create_sample:
-            dfs = df[df.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
-            FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/pslab_ohlcv_index_data.parquet", dfs)
-
-        psave("pslab_ohlcv_index_data", df)
-
-        disconnect()
-    
-    @staticmethod
-    def save_group_data_to_plasma(create_sample=False):
-        from danglib.lazy_core import gen_plasma_functions
-        _, disconnect, psave, pload = gen_plasma_functions(db=10)
-
-        ls = []
-        for g in Globs.SECTOR_DIC.keys():
-            path = Resources.get_group_stats_aggregated('30S', group=g)
-            df_tmp: pd.DataFrame = pd.read_pickle(path)
-            df_tmp = df_tmp.rename(columns={c:f"{c}_{g}" for c in df_tmp.columns})
-
-            ls.append(df_tmp)
+    class SaveDataToPlasma:
+        @staticmethod
+        def save_stock_data_to_plasma(create_sample=False):
         
-        df = pd.concat(ls, axis=1).sort_index()
+            from danglib.lazy_core import gen_plasma_functions
+            _, disconnect, psave, pload = gen_plasma_functions(db=10)
 
-        df = unflatten_columns(df)
-        df = df.sort_index(axis=1)
+            df = Adapters.load_stock_data_from_parquet()
 
-        if create_sample:
-            dfs = df[df.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
-            FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/pslab_group_stats_data.parquet", dfs)
+            if create_sample:
+                dfs = df[df.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
+                FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/pslab_stock_data.parquet", dfs)
 
+            psave("pslab_stock_data", df)
+
+            disconnect()
+
+        @staticmethod
+        def save_market_data_to_plasma(create_sample=False):
+            from danglib.lazy_core import gen_plasma_functions
+            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+
+            df_market_stats = Adapters.load_market_stats_from_parquet()
+
+            if create_sample:
+                dfs = df_market_stats[df_market_stats.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
+                FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/pslab_market_data.parquet", dfs)
+
+            psave("pslab_market_data", df_market_stats)
+
+            disconnect()
+
+        @staticmethod
+        def save_index_ohlcv_to_plasma(create_sample=False):
+
+            from danglib.lazy_core import gen_plasma_functions
+            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+
+            df = Adapters.load_index_ohlc_from_pickle()
+
+            if create_sample:
+                dfs = df[df.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
+                FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/pslab_ohlcv_index_data.parquet", dfs)
+
+            psave("pslab_ohlcv_index_data", df)
+
+            disconnect()
         
-        psave("pslab_group_stats_data", df)
+        @staticmethod
+        def save_group_data_to_plasma(create_sample=False):
+            from danglib.lazy_core import gen_plasma_functions
+            _, disconnect, psave, pload = gen_plasma_functions(db=10)
 
-        disconnect()
+            ls = []
+            for g in Globs.SECTOR_DIC.keys():
+                path = Resources.get_group_stats_aggregated('30S', group=g)
+                df_tmp: pd.DataFrame = pd.read_pickle(path)
+                df_tmp = df_tmp.rename(columns={c:f"{c}_{g}" for c in df_tmp.columns})
+
+                ls.append(df_tmp)
+            
+            df = pd.concat(ls, axis=1).sort_index()
+
+            df = unflatten_columns(df)
+            df = df.sort_index(axis=1)
+
+            if create_sample:
+                dfs = df[df.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
+                FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/pslab_group_stats_data.parquet", dfs)
+
+            
+            psave("pslab_group_stats_data", df)
+
+            disconnect()
+
+        @staticmethod
+        def save_index_daily_ohlcv_to_plasma(create_sample: bool = False):
+
+            from danglib.lazy_core import gen_plasma_functions
+            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+
+            key = "pslab_daily_index_ohlcv"
+
+            from danglib.utils import flatten_columns, underscore_to_camel
+
+            df_f1: pd.DataFrame = Adapters.load_f1_daily_from_db()
+
+            cols = ['open', 'high', 'low', 'close', 'volume']
+            df = Adapters.load_daily_stock_data_from_plasma(['VNINDEX', 'VN30'])
+            df = pd.concat([df, df_f1])
+            df = df[['stock', 'day'] + cols].copy()
+            df = df[df['day'] >= Globs.DATA_FROM_DAY]
+            df_pivot = df.pivot(index='day', columns='stock', values=cols).swaplevel(axis=1)
+
+            dfr = flatten_columns(df_pivot)
+            dfr = dfr.rename(columns= {k: underscore_to_camel(k) for k in dfr.columns})
+
+            if create_sample:
+                FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet", dfr)
+
+            psave(key, dfr)
+
+            disconnect()
+
+
+        @staticmethod
+        def run_save_all():
+            CREATE_SAMPLE = True
+
+            Adapters.SaveDataToPlasma.save_group_data_to_plasma(CREATE_SAMPLE)
+            Adapters.SaveDataToPlasma.save_index_ohlcv_to_plasma(CREATE_SAMPLE)
+            Adapters.SaveDataToPlasma.save_market_data_to_plasma(CREATE_SAMPLE)
+            Adapters.SaveDataToPlasma.save_stock_data_to_plasma(CREATE_SAMPLE)
+            Adapters.SaveDataToPlasma.save_index_daily_ohlcv_to_plasma(CREATE_SAMPLE)
+
 
 
     @staticmethod 
@@ -584,7 +627,6 @@ class Adapters:
         def test():
             stocks = ['VNINDEX', 'VN30']
 
-
         from danglib.lazy_core import gen_plasma_functions
         _, disconnect, psave, pload = gen_plasma_functions(db=5)
         
@@ -600,19 +642,28 @@ class Adapters:
         return df[df['stock'].isin(stocks)]
     
     @staticmethod
-    def save_index_daily_ohlcv_to_plasma(create_sample: bool = False):
-        def test():
-            symbols = None
-            required_stats = None
+    def load_index_daily_ohlcv_from_plasma(required_stats: list = None, load_sample: bool = False):
+        key = "pslab_daily_index_ohlcv"
 
-        df_f1: pd.DataFrame = Adapters.load_f1_daily_from_db()
+        if not load_sample:
+            from danglib.lazy_core import gen_plasma_functions
+            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+
+            df = pload(key)
+
+            disconnect()
+        else:
+            df: pd.DataFrame = FileHandler.read_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet")
+
+        if required_stats:
+            df = df[required_stats]
+
+        return df
 
 
-        cols = ['open', 'high', 'low', 'close', 'volume']
-        df = Adapters.load_daily_stock_data_from_plasma(['VNINDEX', 'VN30'])
-        df = pd.concat([df, df_f1])
-        df = df[['stock', 'day'] + cols]
-        df_pivot = df.pivot(index='day', columns='stock', values=cols)
+
+
+
 
 
         
