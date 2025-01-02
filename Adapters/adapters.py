@@ -292,9 +292,3 @@ class RedisAdapters:
 #         key = f'plasma.indicators.pssi_agg.pssi_dfs.{day}'
 #         df = pload(key)
 #         return df
-
-
-def test():
-    df = MongoAdapters.load_ps_data_from_db(day='2023_03_23')
-    df1 = MongoAdapters.load_F1_from_db(day='2023_03_23')
-

@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import pickle, zlib
 import pyarrow.parquet as pq
+from redis import StrictRedis
 
 from functools import reduce
 from pymongo import MongoClient
@@ -14,6 +15,7 @@ from danglib.Adapters.pickle_adapter_ssi_ws import PICKLED_WS_ADAPTERS
 from danglib.Adapters.adapters import MongoDBs
 from danglib.pslab.utils import day_to_timestamp, FileHandler, unflatten_columns
 
+r = StrictRedis()
 
 pd.options.mode.chained_assignment = None
 # Turn off all FutureWarnings
@@ -575,9 +577,53 @@ class Adapters:
         if required_stats is not None:
             df = df[required_stats]
 
+        return df
+
+    @staticmethod
+    def load_daily_stock_data_from_plasma(stocks: list = None):
+        def test():
+            stocks = ['VNINDEX', 'VN30']
+
+
+        from danglib.lazy_core import gen_plasma_functions
+        _, disconnect, psave, pload = gen_plasma_functions(db=5)
+        
+        nummeric_data = pload("stocks_data_nummeric")
+        stocks_i2s = pickle.loads(r.get("pylabview_stocks_i2s"))
+        columns = pickle.loads(r.get("pylabview_stocks_data_columns"))
+
+        df = pd.DataFrame(nummeric_data, columns=columns)
+        df['stock'] = df['stock'].map(stocks_i2s)
+        df['day'] = df['day'].astype(int).astype(str).apply(lambda x: f"{x[0:4]}_{x[4:6]}_{x[6:8]}")
+        disconnect()
+
+        return df[df['stock'].isin(stocks)]
+    
+    @staticmethod
+    def save_index_daily_ohlcv_to_plasma(create_sample: bool = False):
+        def test():
+            symbols = None
+            required_stats = None
+
+        df_f1: pd.DataFrame = Adapters.load_f1_daily_from_db()
+
+
+        cols = ['open', 'high', 'low', 'close', 'volume']
+        df = Adapters.load_daily_stock_data_from_plasma(['VNINDEX', 'VN30'])
+        df = pd.concat([df, df_f1])
+        df = df[['stock', 'day'] + cols]
+        df_pivot = df.pivot(index='day', columns='stock', values=cols)
+
+
         
 
-        return df
+
+
+       
+
+
+
+
     
 
     

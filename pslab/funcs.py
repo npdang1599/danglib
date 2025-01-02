@@ -8,7 +8,7 @@ from danglib.pslab.utils import Utils
 from typing import Union
 from dataclasses import dataclass
 
-USE_SAMPLE_DATA = False
+USE_SAMPLE_DATA = True
 PandasObject = Union[pd.Series, pd.DataFrame]
 
 def append_to_file(filename: str, content: str) -> None:
@@ -236,21 +236,36 @@ class Ta:
         
         return curr_cond & prev_cond
         
-    @staticmethod
+    @staticmethod 
     def streak_count(condition: PandasObject):
         """Count consecutive occurrences of a condition
         
         Args:
             condition: Boolean Series/DataFrame
-            
+                
         Returns:
-            Series/DataFrame with count of consecutive True values, resets on False
+            Same type as input with count of consecutive True values, resets on False
         """
-        # Create groups by detecting changes in condition
-        groups = (~condition).cumsum()
-        
-        # Count consecutive occurrences within each group
-        return condition.groupby(groups).cumsum() * condition
+        if isinstance(condition, pd.DataFrame):
+            # Convert to numpy array for faster computation
+            arr = condition.astype(int).values
+            
+            # Create array to accumulate counts
+            result = np.zeros_like(arr)
+            
+            # Set first row based on condition
+            result[0] = arr[0]
+            
+            # Accumulate counts where True, reset where False
+            for i in range(1, len(arr)):
+                result[i] = (result[i-1] + 1) * arr[i]
+                
+            # Convert back to DataFrame with original index and columns
+            return pd.DataFrame(result, index=condition.index, columns=condition.columns)
+        else:
+            # Original logic for Series
+            groups = (~condition).cumsum()
+            return condition.groupby(groups).cumsum() * condition
         
     @staticmethod
     def highest(src: PandasObject, window):
@@ -847,10 +862,6 @@ class CombiConds:
             data: pd.DataFrame = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks, USE_SAMPLE_DATA)
             data = data.groupby(level=0, axis=1).sum()
 
-            log_str = "None"
-            if data is not None:
-                log_str = f"{len(data)}"
-
             # append_to_file("/home/ubuntu/Dang/project_ps/logs/test_load_plasma_data.txt", f"{log_str}\n")
             # print(len(data))
             
@@ -914,6 +925,9 @@ class CombiConds:
             required_data[key] = data[col].rolling(tf).sum()
 
         return required_data, updated_conditions
+    
+
+
 
     @staticmethod
     def load_and_process_stock_data(conditions_params: list[dict]):
@@ -1219,7 +1233,22 @@ class ReturnStats:
 #   {
 #     "function": "absolute_change_in_range",
 #     "inputs": {
-#       "src": "bu",
+#       "src": [
+#                 {
+#                     "function": "absolute_change_in_range",
+#                     "inputs": {
+#                     "src": "bu",
+#                     "rolling_timeframe": "15Min"
+#                     },
+#                     "params": {
+#                     "n_bars": 1,
+#                     "lower_thres": 10,
+#                     "upper_thres": 999,
+#                     "use_as_lookback_cond": False,
+#                     "lookback_cond_nbar": 5
+#                     }
+#                 }
+#             ]
 #       "rolling_timeframe": "15Min"
 #     },
 #     "params": {
@@ -1233,6 +1262,21 @@ class ReturnStats:
 # ]
 
 
+# ls = [{
+#         "function": "absolute_change_in_range",
+#         "inputs": {
+#         "src": "bu",
+#         "rolling_timeframe": "15Min"
+#         },
+#         "params": {
+#         "n_bars": 1,
+#         "lower_thres": 10,
+#         "upper_thres": 999,
+#         "use_as_lookback_cond": False,
+#         "lookback_cond_nbar": 5
+#         }
+#     }]
+# hash(str(ls))
 # required_data, updated_params = CombiConds.load_and_process_stock_data(conditions_params)
 # # # # Generate signals
 # signals = CombiConds.combine_conditions(required_data, updated_params)
