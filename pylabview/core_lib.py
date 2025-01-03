@@ -644,6 +644,7 @@ class Adapters:
         
         # NetIncome, Revenue
         df_ni = Adapters.load_quarter_netincome_from_db_VCI(stocks)
+        df_ni = df_ni.drop_duplicates()
         dfres = pd.merge(df_stocks, df_ni, how='left', on=['stock', 'mapYQ'])
         dfres = dfres.fillna(0)
         dfres = dfres.drop(['year', 'quarter'], axis=1)
@@ -660,6 +661,7 @@ class Adapters:
         
         # balance sheet:
         dfbs1, dfbs2 = Adapters.load_balance_sheet_data(stocks)
+        dfbs2 = dfbs2.drop_duplicates()
         dfbs1 = dfbs1.drop('mapYQ', axis=1)
         dfres = pd.merge(dfres, dfbs1, how='left', on=['stock', 'day'])
         dfres[['marketCap','inventory','CAPEX','inventoryDay']] = dfres.groupby('stock')[['marketCap','inventory','CAPEX','inventoryDay']].ffill()
@@ -672,7 +674,7 @@ class Adapters:
         stocks_i2s = {i: s for i , s in enumerate(dfres['stock'].unique())}
         stocks_s2i = {s: i for i, s in stocks_i2s.items()}
         columns = dfres.columns.tolist()
-        
+        dfres = dfres.drop_duplicates()
         r.set("pylabview_stocks_i2s", pickle.dumps(stocks_i2s))
         r.set("pylabview_stocks_data_columns", pickle.dumps(columns))
         
