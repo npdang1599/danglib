@@ -61,6 +61,74 @@ class TaskName:
     COMPUTE_SIGNAL = 'compute_signal'
     COMPUTE_STATS_YEARLY = 'compute_stats_yearly'
 
+    COMPUTE_SIGNAL2 = 'compute_signal2'
+    COMPUTE_MULTI_STRATEGIES_CFM = 'compute_multi_strategies_cfm'
+
+
+@app.task(name=TaskName.COMPUTE_SIGNAL2)
+def compute_signal2(idx, params: dict):
+
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+    df: pd.DataFrame = pload("df_stocks")
+    print(df.shape)
+
+    try:
+
+        signals: pd.DataFrame = Conds.compute_any_conds2(df, functions_params_dic= params)
+        signals = signals[signals.index >= '2018_01_01']
+        signals.iloc[-16:] = False
+    except Exception as e:
+        print(f"{idx} error: {e}")
+        signals = None
+    
+    disconnect()
+    return signals
+
+@app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_CFM)
+def compute_multi_strategies_cfm(i, folder):
+
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+    array2 = pload("sig_array2")
+    array_cfm = pload("sig_array_cfm")
+
+    re_2d = pload("return_array")
+
+
+    df1 = array2[i]
+
+    nt_ls=[]
+    re_ls=[]
+    wt_ls=[]
+    for j in range(len(array_cfm)):
+        df2 = array_cfm[j]
+
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
+
+        cond = df1 * df2
+        num_trade = np.sum(cond, axis=0)
+        re = np.nan_to_num(re_2d * cond, 0.0)
+        total_re = np.sum(re, axis=0)
+        num_win = np.sum(re > 0, axis=0)
+
+        nt_ls.append(num_trade)
+        re_ls.append(total_re)
+        wt_ls.append(num_win)
+
+    disconnect()
+
+    nt_arr = np.vstack(nt_ls)
+    re_arr = np.vstack(re_ls)
+    wt_arr = np.vstack(wt_ls)
+
+    with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
+        pickle.dump((nt_arr, re_arr, wt_arr), f)
+
+
+
+
 @app.task(name=TaskName.COMPUTE_SIGNAL)
 def compute_signal(idx, params: dict):
 

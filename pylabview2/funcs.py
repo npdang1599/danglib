@@ -40,6 +40,7 @@ class Globs:
             "consecutive_conditional_bars": Conds.PriceAction.consecutive_conditional_bars,
             "vol_comp_ma": Conds.vol_comp_ma,
             "vol_percentile": Conds.vol_percentile,
+            "relative_range" : Conds.relative_range,
             "consecutive_squeezes": Conds.consecutive_squeezes,
             "bbwp": Conds.bbwp,
             "bbpctb": Conds.bbpctb,
@@ -49,6 +50,7 @@ class Globs:
             "index_cond2": Conds.index_cond2,
             "lookback_cond": Conds.lookback_cond,
             "lookback_cond2": Conds.lookback_cond2,
+            "lookback_cond3": Conds.lookback_cond3,
 
             "s_price_change": Series_Conds.price_change,
             "s_price_change_vs_hl": Series_Conds.price_change_vs_hl,
@@ -922,8 +924,20 @@ class Conds:
             )
             
         return res
-
-
+    @staticmethod
+    def relative_range(
+        df: pd.DataFrame,
+        smooth_len: int = 1,
+        lower_thres: float = 0,
+        upper_thres: float = 1,
+        use_flag : bool = False
+    ):        
+        res = None
+        if use_flag:
+            relative_range = np.abs((df['close'] - df['open']) / (df['high'] - df['low'] + 0.001))
+            smoothed_relative_range = relative_range.rolling(smooth_len).mean()
+            res = Utils.in_range(smoothed_relative_range, lower_thres = lower_thres, upper_thres = upper_thres, equal=True)
+        return res
     @staticmethod
     def index_cond(df: pd.DataFrame, function2, *args, **kwargs):
         """Compute index condition"""
@@ -981,6 +995,34 @@ class Conds:
         return lookback_cond.rolling(5, closed = 'left').max().fillna(False).astype(bool)
 
 
+    @staticmethod
+    def lookback_cond3(df: pd.DataFrame, *args, **lookback_params: dict):
+        n_bars = lookback_params.get('n_bars', 5)
+
+        conds = []
+        for func_name, func_params in lookback_params.items():
+            try:
+                if func_name == 'stock_scanner':
+                    continue
+                if(func_name not in glob_obj.function_map): 
+                    continue
+              
+         
+                func = glob_obj.function_map[func_name]
+                cond: pd.DataFrame = func(df, **func_params)
+           
+            except Exception as fe:
+                cond = None
+                logging.error(f"lookback function `{func_name}` error: {fe}")
+                    
+            if cond is not None:
+                cond = cond.rolling(n_bars, closed = 'left').max().fillna(False).astype(bool)
+                conds.append(cond)
+
+        if len(conds) > 0:
+            return Utils.combine_conditions(conds)
+
+        return None
     @staticmethod
     def compute_any_conds(df, function, *args, **kwargs):
         func = glob_obj.function_map[function]
@@ -2041,6 +2083,97 @@ class Vectorized:
     
     class MultiProcess:
         @staticmethod
+        def compute_signals2(recompute = True):
+            from danglib.pylabview2.celery_worker import compute_signal2, clean_redis
+
+            params_dic = pd.read_pickle('/home/ubuntu/Tai/classify/dic_original_params.pickle')
+            n_strats = len(params_dic)
+
+            if recompute:
+                _, client_disconnect, psave, pload = gen_plasma_functions(db=5)
+                df_tmp = df['close']
+                df_tmp = df_tmp[df_tmp.index >= '2018_01_01']
+                n_rows, n_cols = df_tmp.shape
+
+                # Khởi tạo một mảng NumPy 3 chiều với kích thước (2000, 2000, 200)
+                array_3d = np.empty((n_strats, n_rows, n_cols))
+
+                task_dic = {}
+                print("Computing signals:")
+                for idx, params in tqdm(enumerate(params_dic.values()), total=n_strats):    
+                    task_dic[idx] = compute_signal2.delay(idx, params)
+
+                while any(t.status!='SUCCESS' for t in task_dic.values()):
+                    pass
+                
+                for idx, v in task_dic.items():
+                    res: pd.DataFrame = v.result
+                    if res is not None:
+                        array_3d[idx, :, :] = res
+
+                    else:
+                        print(f"{idx} error")
+                array_3d = array_3d.astype(bool)
+                psave("sig_array2",array_3d)
+
+                clean_redis()
+                client_disconnect()
+
+            return n_strats
+        
+        @staticmethod
+        def compute_signals_cfm(recompute = True):
+            from danglib.pylabview2.celery_worker import compute_signal2, clean_redis
+
+            params_dic = pd.read_pickle('/home/ubuntu/Tai/classify/dic_cfm_params.pickle')
+            n_strats = len(params_dic)
+
+            if recompute:
+                _, client_disconnect, psave, pload = gen_plasma_functions(db=5)
+                df_tmp = df['close']
+                df_tmp = df_tmp[df_tmp.index >= '2018_01_01']
+                n_rows, n_cols = df_tmp.shape
+
+                # Khởi tạo một mảng NumPy 3 chiều với kích thước (2000, 2000, 200)
+                array_3d = np.empty((n_strats, n_rows, n_cols))
+
+                task_dic = {}
+                print("Computing signals:")
+                for idx, params in tqdm(enumerate(params_dic.values()), total=n_strats):    
+                    task_dic[idx] = compute_signal2.delay(idx, params)
+
+                while any(t.status!='SUCCESS' for t in task_dic.values()):
+                    pass
+                
+                for idx, v in task_dic.items():
+                    res: pd.DataFrame = v.result
+                    if res is not None:
+                        array_3d[idx, :, :] = res
+
+                    else:
+                        print(f"{idx} error")
+                array_3d = array_3d.astype(bool)
+                psave("sig_array_cfm",array_3d)
+
+                clean_redis()
+                client_disconnect()
+
+            return n_strats
+        @staticmethod
+        def compute_wr_re_nt_for_all_strats_cfm(n_solo_strats, folder):
+            from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_cfm
+            clean_redis()
+            task_dic = {}
+            print("Computing stats")
+            for i in tqdm(range(0, n_solo_strats)):
+                task_dic[i] = compute_multi_strategies_cfm.delay(i, folder)
+
+            while any(t.status!='SUCCESS' for t in task_dic.values()):
+                pass
+
+            clean_redis()
+
+        @staticmethod
         def compute_signals(recompute = True):
             from danglib.pylabview2.celery_worker import compute_signal, clean_redis
 
@@ -2172,6 +2305,47 @@ class Vectorized:
 
 
     class JoinResults:
+        @staticmethod
+        def join_wr_re_nt_data_cfm(stocks_map, src_folder, des_folder):
+            fns = walk_through_files(src_folder)
+
+            def join_one_stats(name):
+
+                # df_res: pd.DataFrame = None
+                res = []
+                print(f"Join {name} stats: ")
+                for f in tqdm(fns):
+                    f: str
+                    i = int(f.split('/')[-1].split(".")[0].split("_")[1])
+                    if i < 2013:
+                        nt_raw, re_raw, wt_raw = pd.read_pickle(f)
+                        src = None
+                        if name == 'nt':
+                            src = nt_raw
+                        if name == 're':
+                            src = re_raw
+                        if name == 'wt':
+                            src = wt_raw
+
+                        tmp = pd.DataFrame(src)
+                        tmp[-1] = i 
+                        res.append(tmp)
+                    
+                res: pd.DataFrame = pd.concat(res)
+                res = res.reset_index(names=-2)
+                cols_map = stocks_map.copy()
+                cols_map[-1] = 'i'
+                cols_map[-2] = 'j'
+
+                res = res.rename(columns = cols_map)
+                res = res.set_index(['i', 'j'])
+                dir = f"{des_folder}/df_{name}.pkl"
+                write_pickle(dir, res)
+                print(dir)
+
+            join_one_stats('nt')
+            join_one_stats('wt')
+            join_one_stats('re')
 
         @staticmethod
         def join_wr_re_nt_data(n, stocks_map, src_folder, des_folder):
@@ -2454,6 +2628,32 @@ class Vectorized:
 
 
     class Runs:
+        @staticmethod
+        def compute_nt_re_wr_cfm():
+            ## PARAMS-------------------------------------------------------------------
+            name = 'nt_re_wr_3'
+
+            store_folder = f"/data/Tai/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/data/Tai/pickles/{name}"
+            maybe_create_dir(result_folder)
+
+            recompute_signals = True
+            ## CALC  -------------------------------------------------------------------
+            
+            stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+                                                push_return_numpy=True, 
+                                                push_stocks_numpy=True
+                                            )
+            
+            n_strats = Vectorized.MultiProcess.compute_signals2(recompute_signals)
+            n_strats_cfm = Vectorized.MultiProcess.compute_signals_cfm(recompute_signals)
+
+
+            Vectorized.MultiProcess.compute_wr_re_nt_for_all_strats_cfm(n_strats, folder=store_folder)
+            Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=store_folder, des_folder=result_folder)
+
         @staticmethod
         def compute_nt_re_wr():
             ## PARAMS-------------------------------------------------------------------

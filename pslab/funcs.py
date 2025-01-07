@@ -8,7 +8,7 @@ from danglib.pslab.utils import Utils
 from typing import Union
 from dataclasses import dataclass
 
-USE_SAMPLE_DATA = True
+USE_SAMPLE_DATA = False
 PandasObject = Union[pd.Series, pd.DataFrame]
 
 def append_to_file(filename: str, content: str) -> None:
@@ -48,6 +48,7 @@ def function_mapping():
         'absolute_change_in_range': {   
             'function': Conds.absolute_change_in_range,
             'title': 'Absolute Change in Range',
+            'description': "sự thay đổi giá trị tuyệt đối trong một khoảng thời gian",
             'inputs': ['src'],
             'params': {
                 'n_bars': {'type': 'int', 'default': 1},
@@ -60,6 +61,7 @@ def function_mapping():
         'consecutive_above_below': {
             'function': Conds.consecutive_above_below,
             'title': 'Consecutive Above/Below',
+            'description': "một đường nằm trên/dưới đường khác liên tiếp",
             'inputs': ['line1', 'line2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'above', 'values': ['above', 'below']},
@@ -71,6 +73,7 @@ def function_mapping():
         'cross_no_reverse': {
             'function': Conds.cross_no_reverse,
             'title': 'Cross Without Reversal',
+            'description': "Xác định giao cắt mà không đảo chiều sau đó",
             'inputs': ['line1', 'line2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder']},
@@ -82,6 +85,7 @@ def function_mapping():
         'gap_percentile': {
             'function': Conds.gap_percentile,
             'title': 'Gap Percentile',
+            'description': "Kiểm tra khoảng cách giữa hai đường thuộc nhóm phần trăm cao nhất",
             'inputs': ['line1', 'line2'],
             'params': {
                 'lookback_period': {'type': 'int', 'default': 20},
@@ -93,11 +97,12 @@ def function_mapping():
         'gap_trend': {
             'function': Conds.gap_trend,
             'title': 'Gap Trend Analysis',
+            'description': "Phân tích xu hướng tăng/giảm của gap giữa hai đường",
             'inputs': ['line1', 'line2'],
             'params': {
                 'sign': {'type': 'str', 'default': 'positive', 'values': ['positive', 'negative']},
                 'trend_direction': {'type': 'str', 'default': 'increase', 'values': ['increase', 'decrease']},
-                'trend_bars': {'type': 'int', 'default': 5},
+                'trend_bars': {'type': 'int', 'default': 5, 'des':"Số thanh nến để xác định xu hướng"},
                 "use_as_lookback_cond" : {'type': 'bool', 'default': False},
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
@@ -105,6 +110,7 @@ def function_mapping():
         'is_in_top_bot_percentile': {
             'function': Conds.is_in_top_bot_percentile,
             'title': 'Top/Bottom Percentile',
+            'description': "Xác định giá trị thuộc nhóm cao nhất hoặc thấp nhất",
             'inputs': ['src'],
             'params': {
                 'lookback_period': {'type': 'int', 'default': 20},
@@ -117,11 +123,12 @@ def function_mapping():
         'min_inc_dec_bars': {
             'function': Conds.min_inc_dec_bars,
             'title': 'Minimum Increasing/Decreasing Bars',
+            'description': "Đếm số thanh nến tăng/giảm tối thiểu",
             'inputs': ['src'],
             'params': {
                 'n_bars': {'type': 'int', 'default': 10},
-                'n_bars_inc': {'type': 'int', 'default': None},
-                'n_bars_dec': {'type': 'int', 'default': None},
+                'n_bars_inc': {'type': 'int', 'default': None, 'des': 'Số thanh nến tăng'},
+                'n_bars_dec': {'type': 'int', 'default': None, 'des': 'Số thanh nến giảm'},
                 "use_as_lookback_cond" : {'type': 'bool', 'default': False},
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
@@ -129,6 +136,7 @@ def function_mapping():
         'percent_change_in_range': {
             'function': Conds.percent_change_in_range,
             'title': 'Percent Change in Range',
+            'description': "Phân tích phần trăm thay đổi giá trị trong khoảng thời gian",
             'inputs': ['src'],
             'params': {
                 'n_bars': {'type': 'int', 'default': 1},
@@ -141,6 +149,7 @@ def function_mapping():
         'range_nbars': {
             'function': Conds.range_nbars,
             'title': 'Total value over n bars in Range',
+            'description': " Kiểm tra tổng giá trị của n bars có nằm trong một khoảng xác định",
             'inputs': ['line'],
             'params': {
                 'lower_thres': {'type': 'float', 'default': None},
@@ -153,6 +162,7 @@ def function_mapping():
         'range_cond': {
             'function': Conds.range_cond,
             'title': 'Value in Range',
+            'description': "Kiểm tra giá trị có nằm trong một khoảng xác định",
             'inputs': ['line'],
             'params': {
                 'lower_thres': {'type': 'float', 'default': None},
@@ -164,12 +174,28 @@ def function_mapping():
         'two_line_pos': {
             'function': Conds.two_line_pos,
             'title': 'Two Line Position',
+            'description': "Kiểm tra vị trí giữa hai đường",
             'inputs': ['line1', 'line2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
                 'equal': {'type': 'bool', 'default': False},
                 "use_as_lookback_cond" : {'type': 'bool', 'default': False},
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
+            }
+        },
+        'consecutive_squeeze': {
+            'function': Conds.Indicators.consecutive_squeezes,
+            'title': 'Consecutive Squeezes',
+            'description': "Kiểm tra số lượng squeeze liên tiếp",
+            'inputs': ['src', 'high', 'low', 'close'],
+            'params': {
+                'bb_length': {'type': 'int', 'default': 20},
+                'length_kc': {'type': 'int', 'default': 20},
+                'mult_kc': {'type': 'float', 'default': 1.5},
+                'num_bars_sqz': {'type': 'int', 'default': 5, 'description': 'Số thanh nến squeeze'},
+                'use_no_sqz': {'type': 'bool', 'default': False, 'description': "Kiểm tra không có squeeze"},
+                'use_as_lookback_cond': {'type': 'bool', 'default': False},
+                'lookback_cond_nbar': {'type': 'int', 'default': 5},
             }
         }
     }
@@ -369,7 +395,7 @@ class Ta:
         Returns:
             Rolling standard deviation values
         """
-        return src.rolling(window=window).std()
+        return src.rolling(window=window).std(ddof=0)
 
     @staticmethod
     def z_score(src: PandasObject, window):
@@ -386,6 +412,88 @@ class Ta:
         rolling_std = src.rolling(window=window).std()
         return (src - rolling_mean) / rolling_std
     
+    @staticmethod
+    def max_obj(df_ls: list[PandasObject]) -> PandasObject:
+        """Calculate maximum value between multiple pandas objects (Series or DataFrames)
+        
+        Args:
+            df_ls (List[PandasObject]): List of Series or DataFrames to compare
+            
+        Returns:
+            PandasObject: Maximum values in same format as input
+        """
+        # Check if inputs are Series
+        if all(isinstance(x, pd.Series) for x in df_ls):
+            return pd.Series(np.maximum.reduce([x.values for x in df_ls]), 
+                           index=df_ls[0].index)
+        
+        # If DataFrames
+        return pd.DataFrame(
+            np.maximum.reduce([df.to_numpy() for df in df_ls]),
+            columns=df_ls[0].columns, 
+            index=df_ls[0].index
+        )
+    
+class Indicators:
+    @staticmethod
+    def squeeze(
+        src: PandasObject,
+        high: PandasObject,
+        low: PandasObject,
+        close: PandasObject,
+        bb_length: int = 20,
+        length_kc: int = 20,
+        mult_kc: float = 1.5,
+        use_true_range: bool = True,
+    ):
+        """Calculate squeeze indicator for both regular and multi-index DataFrames
+        
+        Args:
+            df (pd.DataFrame): OHLCV DataFrame (regular or multi-index columns)
+            src_name (str): Column name for source values
+            bb_length (int): Bollinger Bands length
+            length_kc (int): Keltner Channel length
+            mult_kc (float): Keltner Channel multiplier
+            use_true_range (bool): Use true range for KC calculation
+            
+        Returns:
+            tuple: (sqz_on, sqz_off, no_sqz) Series or DataFrames depending on input
+        """
+        
+        # For regular DataFrame, get Series
+        p_h = high
+        p_l = low
+        p_c = close
+
+        # Calculate BB
+        basic = Ta.sma(src, bb_length)
+        dev = mult_kc * Ta.std_dev(src, bb_length)
+        upper_bb = basic + dev
+        lower_bb = basic - dev
+
+        # Calculate KC
+        sqz_ma = Ta.sma(src, length_kc)
+        
+        # Calculate range
+        if use_true_range:
+            sqz_range = Ta.max_obj([
+                p_h - p_l,
+                (p_h - p_c.shift(1)).abs(),
+                (p_l - p_c.shift(1)).abs()
+            ])
+        else:
+            sqz_range = p_h - p_l
+
+        rangema = Ta.sma(sqz_range, length_kc)
+        upper_kc = sqz_ma + rangema * mult_kc
+        lower_kc = sqz_ma - rangema * mult_kc
+
+        # Calculate squeeze conditions
+        sqz_on = (lower_bb > lower_kc) & (upper_bb < upper_kc)
+        sqz_off = (lower_bb < lower_kc) & (upper_bb > upper_kc)
+        no_sqz = ~(sqz_on | sqz_off)
+
+        return sqz_on, sqz_off, no_sqz
 
 class Conds:
     """Market condition analysis functions with vectorized operations"""
@@ -761,6 +869,38 @@ class Conds:
             result = Ta.make_lookback(result, lookback_cond_nbar)
         return result
 
+    class Indicators:
+        @staticmethod
+        def consecutive_squeezes(
+            src: PandasObject,
+            high: PandasObject,
+            low: PandasObject,
+            close: PandasObject,
+            bb_length: int = 20,
+            length_kc: int = 20,
+            mult_kc: float = 1.5,
+            num_bars_sqz: int = 5,
+            use_no_sqz: bool = False,
+            use_as_lookback_cond: bool = False,
+            lookback_cond_nbar = 5,
+        ):
+            bb_length = int(bb_length)
+            length_kc = int(length_kc)
+            num_bars_sqz = int(num_bars_sqz)
+
+            sqz_on, sqz_off, no_sqz  = Indicators.squeeze(
+                src, high, low, close, bb_length, length_kc, mult_kc
+            )
+
+            if use_no_sqz:
+                result = sqz_off
+            else:
+                cons_sqz_num = Ta.streak_count(sqz_on)
+                result = cons_sqz_num >= num_bars_sqz
+
+            if use_as_lookback_cond:
+                result = Ta.make_lookback(result, lookback_cond_nbar)
+            return result
 
 class CombiConds:
     @staticmethod
@@ -1082,7 +1222,7 @@ class ReturnStats:
         # Ensure index alignment
         df = df_ohlc.copy()
         df['matched'] = signals
-        df['matched_nan'] = np.where(df['matched'], 1, np.NaN)
+        df['matched_nan'] = np.where(df['matched'].notna(), 1, np.NaN)
         
         # Calculate entry price (next bar's open)
         df['enter_price'] = df['open'].shift(-1)
@@ -1090,19 +1230,19 @@ class ReturnStats:
         # Calculate returns
         df['c_o'] = ReturnStats._compute_return(
             df['open'].shift(-(config.lookback_periods+1)),
-            df['open'].shift(-1),
+            df['enter_price'],
             config.use_pct
         )
         
         df['h_o'] = ReturnStats._compute_return(
             df['high'].rolling(config.lookback_periods, closed='right').max().shift(-config.lookback_periods),
-            df['open'].shift(-1),
+            df['enter_price'],
             config.use_pct
         )
         
         df['l_o'] = ReturnStats._compute_return(
             df['low'].rolling(config.lookback_periods, closed='right').min().shift(-config.lookback_periods),
-            df['open'].shift(-1),
+            df['enter_price'],
             config.use_pct
         )
         
@@ -1112,11 +1252,11 @@ class ReturnStats:
         df['matched_l_o'] = df['matched_nan'] * df['l_o']
         
         # Calculate win/loss metrics
-        df['wintrade'] = np.where(df['matched'] & (df['c_o'] > 0), 1, 0)
-        df['losstrade'] = np.where(df['matched'] & (df['c_o'] <= 0), 1, 0)
+        df['wintrade'] = np.where(df['matched_c_o'] > 0, 1, 0)
+        df['losstrade'] = np.where(df['matched_c_o'] <= 0, 1, 0)
         df['return_fill'] = df['matched_nan'] * df['c_o']
         
-        return df[df['c_o'].notna()]
+        return df[df['matched'] == True]
 
     @staticmethod
     def _compute_return(a: Union[float, pd.Series], b: Union[float, pd.Series], use_pct: bool = False) -> Union[float, pd.Series]:
@@ -1149,7 +1289,7 @@ class ReturnStats:
     @staticmethod
     def _calculate_yearly_stats(df: pd.DataFrame) -> pd.DataFrame:
         """Calculate yearly trading statistics"""
-        stats = df.groupby('year')['matched_nan'].count().to_frame('numtrade')
+        stats = df.groupby('year')['matched'].count().to_frame('numtrade')
         
         # Calculate average returns
         for col in ['c_o', 'h_o', 'l_o']:
@@ -1211,7 +1351,7 @@ class ReturnStats:
         Returns:
             Dictionary containing key performance metrics
         """
-        signal_rows = df[df['matched']]
+        signal_rows = df[df['matched'] == True]
         non_nan_returns = signal_rows['c_o'].dropna()
         
         if len(non_nan_returns) > 0:
