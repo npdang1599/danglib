@@ -63,6 +63,7 @@ class TaskName:
 
     COMPUTE_SIGNAL2 = 'compute_signal2'
     COMPUTE_MULTI_STRATEGIES_CFM = 'compute_multi_strategies_cfm'
+    COMPUTE_MULTI_STRATEGIES_NUM_DAYS = 'compute_multi_strategies_num_days'
 
 
 @app.task(name=TaskName.COMPUTE_SIGNAL2)
@@ -126,7 +127,42 @@ def compute_multi_strategies_cfm(i, folder):
     with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
         pickle.dump((nt_arr, re_arr, wt_arr), f)
 
+@app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_NUM_DAYS)
+def compute_multi_strategies_num_days(i, folder):
 
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+    array2 = pload("sig_array2")
+    array_cfm = pload("sig_array_cfm")
+
+    re_2d = pload("return_array")
+
+
+    df1 = array2[i]
+
+    nd_ls=[]
+
+    for j in range(len(array_cfm)):
+        df2 = array_cfm[j]
+
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
+
+        cond = df1 * df2
+        num_trade = np.sum(cond, axis=1)
+        num_days = np.sum(num_trade > 0)
+
+
+        nd_ls.append(num_days)
+
+
+    disconnect()
+
+    nd_arr = np.vstack(nd_ls)
+
+
+    with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
+        pickle.dump((nd_arr), f)
 
 
 @app.task(name=TaskName.COMPUTE_SIGNAL)
