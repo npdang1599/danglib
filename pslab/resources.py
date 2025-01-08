@@ -30,10 +30,7 @@ class Globs:
     SAMPLE_DATA_FROM_TIMESTAMP = day_to_timestamp('2024_12_05')
     BASE_TIMEFRAME = '30S'
 
-    MAKETSTATS_SRC = ['buyImpact', 'sellImpact', 'Arbit', 'Unwind', 'premiumDiscount',
-       'f1Bid', 'f1Ask', 'F1Open', 'Vn30Open', 'VnindexOpen', 'F1High',
-       'Vn30High', 'VnindexHigh', 'F1Low', 'Vn30Low', 'VnindexLow', 'F1Close',
-       'Vn30Close', 'VnindexClose', 'F1Value', 'Vn30Value', 'VnindexValue']
+    MAKETSTATS_SRC = ['buyImpact', 'sellImpact', 'Arbit', 'Unwind', 'premiumDiscount', 'f1Bid', 'f1Ask']
     
     STOCKSTATS_SRC = ['open', 'high', 'low', 'close', 'matchingValue', 'bu', 'sd', 'bu2',
        'sd2', 'bid', 'ask', 'refPrice', 'fBuyVol', 'fSellVol', 'return']
@@ -63,6 +60,7 @@ class Globs:
     }
 
     ROLLING_TIMEFRAME = ['30s', '1Min', '5Min', '15Min', '30Min', '1H', '4H', '1D']
+
 
 class Resources:
     CACHED_FOLDER = "/data/dang"

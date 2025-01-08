@@ -8,7 +8,14 @@ from danglib.pslab.utils import Utils
 from typing import Union
 from dataclasses import dataclass
 
-USE_SAMPLE_DATA = False
+class NoRedisDataError(Exception):
+    """Raised when required Redis data is not found"""
+    pass
+
+class InputSourceEmptyError(Exception):
+    """Raise when Input sources are empty"""
+    pass
+
 PandasObject = Union[pd.Series, pd.DataFrame]
 
 def append_to_file(filename: str, content: str) -> None:
@@ -199,7 +206,6 @@ def function_mapping():
             }
         }
     }
-
 
 class Ta:
     """Technical analysis with vectorized operations for both Series and DataFrame"""
@@ -904,7 +910,7 @@ class Conds:
 
 class CombiConds:
     @staticmethod
-    def load_and_process_group_data(conditions_params: list[dict]):
+    def load_and_process_group_data(conditions_params: list[dict], use_sample_data = False):
 
         def test():
             conditions_params = [
@@ -963,6 +969,8 @@ class CombiConds:
             
             for param_name, col_name in condition['inputs'].items():
                 if param_name not in ['rolling_timeframe', 'stocks']:
+                    if col_name == "":
+                        raise InputSourceEmptyError(f"Input {param_name} is empty!")
                     if rolling_tf:
                         rolling_tf_val = Utils.convert_timeframe_to_rolling(rolling_tf)
                         rolling_cols.add((col_name, rolling_tf_val, stocks_key))
@@ -999,7 +1007,7 @@ class CombiConds:
                     break
 
             # Load and process data
-            data: pd.DataFrame = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks, USE_SAMPLE_DATA)
+            data: pd.DataFrame = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks, use_sample_data)
             data = data.groupby(level=0, axis=1).sum()
 
             # append_to_file("/home/ubuntu/Dang/project_ps/logs/test_load_plasma_data.txt", f"{log_str}\n")
@@ -1020,7 +1028,7 @@ class CombiConds:
         return required_data, updated_conditions
 
     @staticmethod
-    def load_and_process_one_series_data(conditions_params: list[dict], data_src: str = 'market_stats'):
+    def load_and_process_one_series_data(conditions_params: list[dict], data_src: str = 'market_stats', use_sample_data=False):
 
         def test():
             conditions_params = [
@@ -1055,6 +1063,9 @@ class CombiConds:
             
             for param_name, col_name in condition['inputs'].items():
                 if param_name not in ['rolling_timeframe', 'stocks']:
+                    if col_name == "":
+                        raise InputSourceEmptyError(f"Input {param_name} is empty!")
+                    
                     if rolling_tf:
                         rolling_tf_val = Utils.convert_timeframe_to_rolling(rolling_tf)
                         rolling_cols.add((col_name, rolling_tf_val))
@@ -1072,9 +1083,9 @@ class CombiConds:
         all_cols = {col for col in original_cols} | {col for col, _ in rolling_cols}
 
         if data_src == 'market_stats':
-            data = Adapters.load_market_stats_from_plasma(list(all_cols), USE_SAMPLE_DATA)
+            data = Adapters.load_market_stats_from_plasma(list(all_cols), use_sample_data)
         else:
-            data = Adapters.load_index_daily_ohlcv_from_plasma(list(all_cols), USE_SAMPLE_DATA)
+            data = Adapters.load_index_daily_ohlcv_from_plasma(list(all_cols), use_sample_data)
         
         # Add original columns
         for col in original_cols:
@@ -1089,7 +1100,7 @@ class CombiConds:
         return required_data, updated_conditions
 
     @staticmethod
-    def load_and_process_stock_data(conditions_params: list[dict]):
+    def load_and_process_stock_data(conditions_params: list[dict], use_sample_data=False):
         def test():
             conditions_params = [
                 {
@@ -1122,6 +1133,9 @@ class CombiConds:
             
             for param_name, col_name in condition['inputs'].items():
                 if param_name not in ['rolling_timeframe', 'stocks']:
+                    if col_name == "":
+                        raise InputSourceEmptyError(f"Input {param_name} is empty!")
+
                     if rolling_tf:
                         rolling_tf_val = Utils.convert_timeframe_to_rolling(rolling_tf)
                         rolling_cols.add((col_name, rolling_tf_val))
@@ -1138,7 +1152,7 @@ class CombiConds:
         # Load all required data efficiently
         all_cols = {col for col in original_cols} | {col for col, _ in rolling_cols}
 
-        data = Adapters.load_stock_data_from_plasma(list(all_cols), load_sample=USE_SAMPLE_DATA)
+        data = Adapters.load_stock_data_from_plasma(list(all_cols), load_sample=use_sample_data)
 
         # print(len(data))
         
