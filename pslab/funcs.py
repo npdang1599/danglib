@@ -207,7 +207,7 @@ def function_mapping():
         },
         'two_MA': {
             'function': Conds.Indicators.two_MA_pos,
-            'title': 'Two Moving Averages Position',
+            'title': 'Two MA Line Position',
             'description': "Kiểm tra vị trí giữa hai moving averages",
             'inputs': ['src'],
             'params': {
@@ -215,7 +215,7 @@ def function_mapping():
                 'ma2': {'type': 'int', 'default': 15},
                 'ma_type': {'type': 'str', 'default': 'SMA', 'values': ['SMA', 'EMA']},
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
-                'equal': {'type': 'bool', 'default': False, description: 'Có xem xét giá trị bằng nhau không, ví dụ option line1 crossover line2, mà equal = True thì khi line1 = line2 cũng được xem là crossover, tương tự với crossunder, above, below'},
+                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option line1 crossover line2, mà equal = True thì khi line1 = line2 cũng được xem là crossover, tương tự với crossunder, above, below'},
                 "use_as_lookback_cond" : {'type': 'bool', 'default': False},
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
