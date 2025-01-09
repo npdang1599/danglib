@@ -59,7 +59,7 @@ class Globs:
         "All": STOCKS,
     }
 
-    ROLLING_TIMEFRAME = ['30s', '1Min', '5Min', '15Min', '30Min', '1H', '4H', '1D']
+    ROLLING_TIMEFRAME = ['30S', '1Min', '5Min', '15Min', '30Min', '1H', '4H', '1D']
 
 
 class Resources:

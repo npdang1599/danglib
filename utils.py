@@ -9,6 +9,7 @@ from datetime import date, timedelta
 import pickle
 import pyarrow.parquet as pq
 from pathlib import Path
+import json
 
 # Disable
 def blockPrint():
@@ -186,6 +187,18 @@ class FileHandler:
         if isinstance(substrs, str):
             substrs = [substrs]
         return [col for col in all_columns if any(substr in col for substr in substrs)]
+    
+    @staticmethod
+    def load_json(file_path):
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+        return data
+    
+    @staticmethod
+    def save_json(file_path, data):
+        with open(file_path, 'w') as f:
+            json.dump(data, f, indent=4)    
+        return file_path
 
 
 def get_stock_daily(symbol='HPG', start_day=None, end_day=None, resolution='1D'):

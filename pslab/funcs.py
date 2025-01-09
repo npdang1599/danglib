@@ -185,7 +185,7 @@ def function_mapping():
             'inputs': ['line1', 'line2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
-                'equal': {'type': 'bool', 'default': False},
+                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option line1 crossover line2, mà equal = True thì khi line1 = line2 cũng được xem là crossover, tương tự với crossunder, above, below'},
                 "use_as_lookback_cond" : {'type': 'bool', 'default': False},
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
@@ -204,7 +204,22 @@ def function_mapping():
                 'use_as_lookback_cond': {'type': 'bool', 'default': False},
                 'lookback_cond_nbar': {'type': 'int', 'default': 5},
             }
-        }
+        },
+        'two_MA': {
+            'function': Conds.Indicators.two_MA_pos,
+            'title': 'Two Moving Averages Position',
+            'description': "Kiểm tra vị trí giữa hai moving averages",
+            'inputs': ['src'],
+            'params': {
+                'ma1': {'type': 'int', 'default': 5},
+                'ma2': {'type': 'int', 'default': 15},
+                'ma_type': {'type': 'str', 'default': 'SMA', 'values': ['SMA', 'EMA']},
+                'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
+                'equal': {'type': 'bool', 'default': False, description: 'Có xem xét giá trị bằng nhau không, ví dụ option line1 crossover line2, mà equal = True thì khi line1 = line2 cũng được xem là crossover, tương tự với crossunder, above, below'},
+                "use_as_lookback_cond" : {'type': 'bool', 'default': False},
+                'lookback_cond_nbar' : {'type': 'int', 'default': 5}
+            }
+        },
     }
 
 class Ta:
@@ -339,6 +354,38 @@ class Ta:
         return src.rolling(window=window).mean()
 
     @staticmethod
+    def ema(src: PandasObject, window):
+        """Exponential moving average
+        
+        Args:
+            src: pd.Series or pd.DataFrame
+            window: int, moving average period
+            
+        Returns:
+            Exponential moving average values
+        """
+        return src.ewm(span=window, adjust=False).mean()
+    
+    @staticmethod
+    def MA(src, window, ma_type='SMA'):
+        """Moving average calculation
+        
+        Args:
+            src: pd.Series or pd.DataFrame
+            window: int, moving average period
+            ma_type: str, 'SMA' or 'EMA'
+            
+        Returns:
+            Moving average values
+        """
+        if ma_type == 'SMA':
+            return Ta.sma(src, window)
+        elif ma_type == 'EMA':
+            return Ta.ema(src, window)
+        else:
+            raise ValueError("Invalid moving average type. Choose 'SMA' or 'EMA'")
+
+    @staticmethod
     def roc(src: PandasObject, window):
         """Rate of change in percentage
         
@@ -441,6 +488,21 @@ class Ta:
         )
     
 class Indicators:
+    """Technical indicators with vectorized operations for both Series and DataFrame"""
+    @staticmethod
+    def two_MA(src: PandasObject, ma1: int, ma2: int, ma_type: str = 'SMA'):
+        """Calculate two moving averages
+        
+        Args:
+            src: pd.Series or pd.DataFrame
+            ma1: int, period for first moving average
+            ma2: int, period for second moving average
+            
+        Returns:
+            tuple: (ma1, ma2) Series or DataFrames depending on input
+        """
+        return Ta.MA(src, ma1, ma_type), Ta.MA(src, ma2, ma_type)
+
     @staticmethod
     def squeeze(
         src: PandasObject,
@@ -500,6 +562,110 @@ class Indicators:
         no_sqz = ~(sqz_on | sqz_off)
 
         return sqz_on, sqz_off, no_sqz
+    
+    @staticmethod
+    def ursi(
+        src: PandasObject,
+        length: int = 14,
+        smo_type1: str = "RMA",
+        smooth: int = 14,
+        smo_type2: str = "EMA",
+    ):
+        """Ultimate RSI
+
+        Args:
+            src (pd.Series or pd.DataFrame): Input source of the indicator (open, high, low, close)
+
+            length (int, optional): Calculation period of the indicator. Defaults to 14.
+
+            smo_type1 (str, optional): Smoothing method used for the calculation of the indicator.
+            Defaults to 'RMA'.
+
+            smooth (int, optional): Degree of smoothness of the signal line. Defaults to 14.
+
+            smo_type2 (str, optional): Smoothing method used to calculation the signal line.
+            Defaults to 'EMA'.
+
+        Returns:
+            arsi (pd.Series or pd.DataFrame): ursi line
+            signal (pd.Series or pd.DataFrame): ursi's signal line
+        """
+        def test():
+            src = Adapters.load_index_daily_ohlcv_from_plasma()['F1Close']
+            length: int = 14
+            smo_type1: str = "SMA"
+            smooth: int = 14
+            smo_type2: str = "EMA"
+
+        upper = Ta.highest(src, length)
+        lower = Ta.lowest(src, length)
+        r = upper - lower
+        d = src.diff()
+
+        diff = np.where(upper > upper.shift(1), r, np.where(lower < lower.shift(1), -r, d))
+        diff = pd.DataFrame(diff, index=src.index)
+
+        num = Ta.MA(diff, length, smo_type1)
+        den = Ta.MA(diff.abs(), length, smo_type1)
+        arsi = (num / den) * 50 + 50
+
+        if isinstance(arsi, pd.Series):
+            arsi = arsi[0]
+
+        signal = Ta.MA(arsi, smooth, smo_type2)
+
+        return arsi, signal
+
+    @staticmethod
+    def bbwp(
+        src: PandasObject,
+        basic_type: str = "SMA",
+        bbwp_len: int = 13,
+        bbwp_lkbk: int = 128,
+    ):
+        def test():
+            src = Adapters.load_stock_data_from_plasma()['close']
+            basic_type: str = "SMA"
+            bbwp_len: int = 13
+            bbwp_lkbk: int = 128
+
+        """bbwp"""
+        _price = src
+
+        _basic = Ta.MA(_price, bbwp_len, basic_type)
+        _dev = Ta.std_dev(_price, bbwp_len)
+        _bbw = (_basic + _dev - (_basic - _dev)) / _basic
+
+        index = src.reset_index(drop=True).index
+        bbwp_denominator = pd.Series(np.where(index < bbwp_lkbk, index, bbwp_lkbk), index=src.index)
+        _bbw_sum = (_bbw.rolling(bbwp_lkbk + 1, min_periods= bbwp_len).rank() - 1).div(bbwp_denominator, axis=0)
+
+        return _bbw_sum * 100
+    
+    @staticmethod
+    def bbpctb(
+        src: PandasObject, 
+        length: int = 20, 
+        mult: float = 2, 
+        return_upper_lower = False
+    ):
+        """bbpctb"""
+
+        def test():
+            src = Adapters.load_stock_data_from_plasma()['close']
+            length: int = 20, 
+            mult: float = 2, 
+            return_upper_lower = False
+
+        basic = Ta.sma(src, length)
+        dev = mult * Ta.std_dev(src, length)
+        upper = basic + dev
+        lower = basic - dev
+        bbpctb = (src - lower) / (upper - lower) * 100
+        if not return_upper_lower:
+            return bbpctb
+        else:
+            return bbpctb, upper, lower
 
 class Conds:
     """Market condition analysis functions with vectorized operations"""
@@ -907,6 +1073,74 @@ class Conds:
             if use_as_lookback_cond:
                 result = Ta.make_lookback(result, lookback_cond_nbar)
             return result
+
+        @staticmethod
+        def ursi(
+            src: PandasObject,
+            length: int = 14,
+            smo_type1: str = "RMA",
+            smooth: int = 14,
+            smo_type2: str = "EMA",
+            direction: str = 'crossover',
+            equal: bool = False,
+            range_lower: float = 30,
+            range_upper: float = 70,
+            use_as_lookback_cond: bool = False,
+            lookback_cond_nbar = 5,
+        ):
+            arsi, signal = Indicators.ursi(src, length, smo_type1, smooth, smo_type2)
+
+            pos_cond = Conds.two_line_pos(arsi, signal, direction, equal)
+            range_cond = Conds.range_cond(arsi, range_lower, range_upper)
+
+            result = pos_cond & range_cond
+
+            if use_as_lookback_cond:
+                result = Ta.make_lookback(result, lookback_cond_nbar)
+
+            return result
+
+        @staticmethod
+        def bbwp(
+            src: PandasObject,
+            basic_type: str = "SMA",
+            bbwp_len: int = 13,
+            bbwp_lkbk: int = 128,
+            use_low_thres: bool = False,
+            low_thres: float = 20,
+            use_high_thres: bool = False,
+            high_thres: float = 80,
+            use_as_lookback_cond: bool = False,
+            lookback_cond_nbar = 5,
+        ):
+            bbwp = Indicators.bbwp(src, basic_type, bbwp_len, bbwp_lkbk)
+
+            if use_low_thres:
+                result = bbwp <= low_thres
+
+            if use_high_thres:
+                result = bbwp >= high_thres
+
+            if use_as_lookback_cond:
+                result = Ta.make_lookback(result, lookback_cond_nbar)
+
+            return result
+
+        @staticmethod
+        def two_MA_pos(
+            src: PandasObject,
+            ma1: int,
+            ma2: int,
+            ma_type: str = 'SMA',
+            direction: str = 'crossover',
+            equal: bool = False,
+            use_as_lookback_cond: bool = False,
+            lookback_cond_nbar = 5,
+        ):
+            ma1_line, ma2_line = Indicators.two_MA(src, ma1, ma2, ma_type)
+            return Conds.two_line_pos(ma1_line, ma2_line, direction, equal, use_as_lookback_cond, lookback_cond_nbar)
+        
+
 
 class CombiConds:
     @staticmethod
@@ -1317,14 +1551,16 @@ class ReturnStats:
             df.groupby('year')['wintrade'].sum() / stats['numtrade'] * 100
         )
         
+        numtrade = df['matched_c_o'].count()
+
         # Add total statistics
         total_stats = pd.Series({
-            'numtrade': df['matched_nan'].count(),
+            'numtrade': numtrade,
             'avg_c_o': df['matched_c_o'].mean(),
             'avg_h_o': df['matched_h_o'].mean(),
             'avg_l_o': df['matched_l_o'].mean(),
-            'winrate': (df['wintrade'].sum() / df['matched_nan'].count() * 100)
-            if df['matched_nan'].count() > 0 else 0
+            'winrate': (df['wintrade'].sum() / numtrade * 100)
+            if numtrade > 0 else 0
         }, name='Total')
         
         return pd.concat([stats, total_stats.to_frame().T])
@@ -1332,7 +1568,7 @@ class ReturnStats:
     @staticmethod
     def _calculate_monthly_stats(df: pd.DataFrame) -> pd.DataFrame:
         """Calculate monthly trading statistics"""
-        stats = df.groupby('yearmonth')['matched_nan'].count().to_frame('numtrade')
+        stats = df.groupby('yearmonth')['matched_c_o'].count().to_frame('numtrade')
         
         # Calculate average returns
         for col in ['c_o', 'h_o', 'l_o']:

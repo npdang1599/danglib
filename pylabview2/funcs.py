@@ -2383,7 +2383,7 @@ class Vectorized:
                     
                 res: pd.DataFrame = pd.concat(res)
                 res = res.reset_index(names=-2)
-                cols_map = stocks_map.copy()
+                cols_map = {0:'num_days'}
                 cols_map[-1] = 'i'
                 cols_map[-2] = 'j'
 
@@ -2729,7 +2729,7 @@ class Vectorized:
 
 
             Vectorized.MultiProcess.compute_num_days_for_all_strats_cfm(n_strats, folder=store_folder)
-            Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=store_folder, des_folder=result_folder)
+            Vectorized.JoinResults.join_num_days_data_cfm(stocks_map, src_folder=store_folder, des_folder=result_folder)
 
 
 
