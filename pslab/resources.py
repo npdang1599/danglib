@@ -495,7 +495,6 @@ class Adapters:
 
             disconnect()
 
-
         @staticmethod
         def run_save_all():
             CREATE_SAMPLE = True
@@ -505,8 +504,6 @@ class Adapters:
             Adapters.SaveDataToPlasma.save_market_data_to_plasma(CREATE_SAMPLE)
             Adapters.SaveDataToPlasma.save_stock_data_to_plasma(CREATE_SAMPLE)
             Adapters.SaveDataToPlasma.save_index_daily_ohlcv_to_plasma(CREATE_SAMPLE)
-
-
 
     @staticmethod 
     def load_groups_and_stocks_data_from_plasma(required_stats: list = None, groups_and_stocks: list = None, load_sample = False) -> pd.DataFrame:
@@ -659,7 +656,11 @@ class Adapters:
             df = df[required_stats]
 
         return df
-
+    
+    @staticmethod
+    def get_stocks_classify_data():
+        from danglib.pylabview2.funcs import glob_obj
+        return glob_obj.stocks_classified_df
 
 
 
