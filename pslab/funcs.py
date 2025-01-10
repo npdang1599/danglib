@@ -205,7 +205,7 @@ def function_mapping():
                 'lookback_cond_nbar': {'type': 'int', 'default': 5},
             }
         },
-        'two_MA': {
+        'two_MA_pos': {
             'function': Conds.Indicators.two_MA_pos,
             'title': 'Two MA Line Position',
             'description': "Kiểm tra vị trí giữa hai moving averages",
