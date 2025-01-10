@@ -39,6 +39,20 @@ class Utils:
     def new_1val_series(value, series_to_copy_index: pd.Series):
         """Create an one-value series replicated another series' index"""
         return pd.Series(value, index=series_to_copy_index.index)
+    
+    @staticmethod
+    def new_1val_df(value, df_sample: pd.DataFrame):
+        """Create an one-value dataframe"""
+        return pd.DataFrame(value, columns=df_sample.columns, index=df_sample.index)
+    
+    @staticmethod
+    def new_1val_pdObj(value, pdObj_sample):
+        if isinstance(pdObj_sample, pd.Series):
+            return Utils.new_1val_series(value, pdObj_sample)
+        elif isinstance(pdObj_sample, pd.DataFrame):
+            return Utils.new_1val_df(value, pdObj_sample)
+        else:
+            raise ValueError("pdObj_sample must be either pd.Series or pd.DataFrame")
 
 class FileHandler:
     @staticmethod

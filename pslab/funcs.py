@@ -220,6 +220,71 @@ def function_mapping():
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
         },
+        'ursi': {
+            'function': Conds.Indicators.ursi,
+            'title': 'Ultimate RSI',
+            'description': "Ultimate RSI",
+            'inputs': ['src'],
+            'params': {
+                'length': {'type': 'int', 'default': 14},
+                'smo_type1': {'type': 'str', 'default': 'RMA', 'values': ['SMA', 'EMA', 'RMA']},
+                'smooth': {'type': 'int', 'default': 14},
+                'smo_type2': {'type': 'str', 'default': 'EMA', 'values': ['SMA', 'EMA', 'RMA']},
+                'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
+                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option line1 crossover line2, mà equal = True thì khi line1 = line2 cũng được xem là crossover, tương tự với crossunder, above, below'},
+                'range_lower': {'type': 'float', 'default': 30},
+                'range_upper': {'type': 'float', 'default': 70},
+                'use_as_lookback_cond': {'type': 'bool', 'default': False},
+                'lookback_cond_nbar': {'type': 'int', 'default': 5},
+            }
+        },
+        'macd': {
+            'function': Conds.Indicators.macd,
+            'title': 'MACD',
+            'description': "MACD",
+            'inputs': ['src'],
+            'params': {
+                'r2_period': {'type': 'int', 'default': 20},
+                'fast': {'type': 'int', 'default': 10},
+                'slow': {'type': 'int', 'default': 20},
+                'signal_length': {'type': 'int', 'default': 9},
+                'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
+                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option line1 crossover line2, mà equal = True thì khi line1 = line2 cũng được xem là crossover, tương tự với crossunder, above, below'},
+                'range_lower': {'type': 'float', 'default': 30},
+                'range_upper': {'type': 'float', 'default': 70},
+                'use_as_lookback_cond': {'type': 'bool', 'default': False},
+                'lookback_cond_nbar': {'type': 'int', 'default': 5},
+            }
+        },
+        'bbwp': {
+            'function': Conds.Indicators.bbwp,
+            'title': 'BBWP',
+            'description': "Boillinger Band Width Percentile",
+            'inputs': ['src'],
+            'params': {
+                'basic_type': {'type': 'str', 'default': 'SMA', 'values': ['SMA', 'EMA']},
+                'bbwp_len': {'type': 'int', 'default': 13},
+                'bbwp_lkbk': {'type': 'int', 'default': 128},
+                'range_lower': {'type': 'float', 'default': 30},
+                'range_upper': {'type': 'float', 'default': 70},
+                'use_as_lookback_cond': {'type': 'bool', 'default': False},
+                'lookback_cond_nbar': {'type': 'int', 'default': 5},
+            }
+        },
+        'bbpctb': {
+            'function': Conds.Indicators.bbpctb,
+            'title': 'Boillinger Band %B',
+            'description': "Boillinger Band %B",
+            'inputs': ['src'],
+            'params': {
+                'length': {'type': 'int', 'default': 20},
+                'mult': {'type': 'float', 'default': 2},
+                'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
+                'cross_line': {'type': 'str', 'default': "Upper band", 'values': ["Upper band", "Lower band"]},
+                'use_as_lookback_cond': {'type': 'bool', 'default': False},
+                'lookback_cond_nbar': {'type': 'int', 'default': 5},
+            }
+        }
     }
 
 class Ta:
@@ -617,6 +682,60 @@ class Indicators:
         return arsi, signal
 
     @staticmethod
+    def macd(
+        src: PandasObject,
+        r2_period: int = 20,
+        fast: int = 10,
+        slow: int = 20,
+        signal_length: int = 9,
+    ):
+        """Calculate MACD"""
+
+        def test():
+            src = Adapters.load_stock_data_from_plasma()['close']
+            r2_period: int = 20
+            fast: int = 10
+            slow: int = 20
+            signal_length: int = 9
+
+        origin_index = src.index
+
+        src = src.reset_index(drop=True).copy()
+        bar_index = range(len(src))
+
+        a1 = 2 / (fast + 1)
+        a2 = 2 / (slow + 1)
+
+        correlation = src.rolling(r2_period).corr(pd.Series(bar_index))
+        r2 = 0.5 * correlation**2 + 0.5
+        K = r2 * ((1 - a1) * (1 - a2)) + (1 - r2) * ((1 - a1) / (1 - a2))
+
+        var1 = src.diff().fillna(0) * (a1 - a2)
+        var1 = var1.to_numpy()
+        K = K.to_numpy()
+
+        i = 2
+        np_macd =  np.zeros_like(src) * np.nan
+        prev = np.nan_to_num(np_macd[i - 1])
+        prev_prev = np.nan_to_num(np_macd[i - 2])
+        for i in range(2, len(src)):
+            current = np_macd[i] = (
+                var1[i]
+                + (-a2 - a1 + 2) * np.nan_to_num(prev)
+                - K[i] * np.nan_to_num(prev_prev)
+            )
+            prev_prev = prev
+            prev = current
+        
+        if isinstance(src, pd.Series):
+            macd = pd.Series(np_macd, index=origin_index)
+        else:
+            macd = pd.DataFrame(np_macd, index=origin_index, columns=src.columns)
+        signal = Ta.ema(macd, signal_length)
+
+        return macd, signal
+
+    @staticmethod
     def bbwp(
         src: PandasObject,
         basic_type: str = "SMA",
@@ -653,8 +772,8 @@ class Indicators:
 
         def test():
             src = Adapters.load_stock_data_from_plasma()['close']
-            length: int = 20, 
-            mult: float = 2, 
+            length: int = 20
+            mult: float = 2 
             return_upper_lower = False
 
         basic = Ta.sma(src, length)
@@ -1099,6 +1218,32 @@ class Conds:
                 result = Ta.make_lookback(result, lookback_cond_nbar)
 
             return result
+        
+        @staticmethod
+        def macd(
+            src: PandasObject,
+            r2_period: int = 20,
+            fast: int = 10,
+            slow: int = 20,
+            signal_length: int = 9,
+            direction: str = 'crossover',
+            equal: bool = False,
+            range_lower: float = 30,
+            range_upper: float = 70,
+            use_as_lookback_cond: bool = False,
+            lookback_cond_nbar = 5,
+        ):
+            macd, signal = Indicators.macd(src, r2_period, fast, slow, signal_length)
+
+            pos_cond = Conds.two_line_pos(macd, signal, direction, equal)
+            range_cond = Conds.range_cond(macd, range_lower, range_upper)
+
+            result = pos_cond & range_cond
+
+            if use_as_lookback_cond:
+                result = Ta.make_lookback(result, lookback_cond_nbar)
+
+            return result
 
         @staticmethod
         def bbwp(
@@ -1127,6 +1272,43 @@ class Conds:
             return result
 
         @staticmethod
+        def bbpctb(
+            src: PandasObject,
+            length: int = 20,
+            mult: float = 2,
+            direction: str = "crossover",
+            cross_line: str = "Upper band",
+            use_as_lookback_cond: bool = False,
+            lookback_cond_nbar = 5,
+        ):
+            """bbpctb based conditions"""
+
+            def test():
+                src = Adapters.load_index_daily_ohlcv_from_plasma()['F1Close']
+                length: int = 20
+                mult: float = 2 
+                return_upper_lower = False
+                direction: str = "crossover"
+                cross_line: str = "Upper band"
+
+            length = int(length)
+
+            bbpctb = Indicators.bbpctb(src, length, mult)
+
+            cross_l = Utils.new_1val_pdObj(100 if cross_line == "Upper band" else 0, src)
+
+            res = Conds.two_line_pos(
+                line1=bbpctb,
+                line2=cross_l,
+                direction=direction
+            )
+
+            if use_as_lookback_cond:
+                res = Ta.make_lookback(res, lookback_cond_nbar)
+
+            return res
+    
+        @staticmethod
         def two_MA_pos(
             src: PandasObject,
             ma1: int,
@@ -1139,7 +1321,6 @@ class Conds:
         ):
             ma1_line, ma2_line = Indicators.two_MA(src, ma1, ma2, ma_type)
             return Conds.two_line_pos(ma1_line, ma2_line, direction, equal, use_as_lookback_cond, lookback_cond_nbar)
-        
 
 
 class CombiConds:
@@ -1402,7 +1583,6 @@ class CombiConds:
 
         return required_data, updated_conditions
     
-
 
     @staticmethod
     def combine_conditions(required_data: dict[str, pd.DataFrame], conditions_params: list[dict]):
