@@ -390,7 +390,6 @@ class Adapters:
         df1 = df1.sort_values('day')
         return df1
     
-
     class SaveDataToPlasma:
         @staticmethod
         def save_stock_data_to_plasma(create_sample=False):
@@ -529,7 +528,6 @@ class Adapters:
 
         return df
 
-
     @staticmethod
     def load_group_data_from_plasma(required_stats: list = None, groups: list=None, load_sample:bool = False):
         key = "pslab_group_stats_data"
@@ -575,7 +573,6 @@ class Adapters:
         df['day'] = day
 
         return df
-
 
     @staticmethod
     def load_stock_data_from_plasma(required_stats: list = None, stocks: list = None, load_sample:bool = False):
@@ -658,10 +655,124 @@ class Adapters:
         return df
     
     @staticmethod
-    def get_stocks_classify_data():
-        from danglib.pylabview2.funcs import glob_obj
-        return glob_obj.stocks_classified_df
+    def load_sectors_stocks_from_db(stocks: list = None):
+        import ast
+        
+        def_stocks = Globs.STOCKS if stocks is None else stocks
+        
+        db = MongoClient("localhost", 27022)["pylabview_db"]
+        col = db['watchlist']
+        df_raw = pd.DataFrame(col.find({},{'_id':0}))
+        df_raw = df_raw[df_raw.index < 20]
+        sectors = dict(zip(df_raw['watchlist_name'], df_raw['watchlist_params'].map(ast.literal_eval)))
 
+        data_list = []
+        for sector, stocks in sectors.items():
+            for stock in stocks:
+                if stock in def_stocks:
+                    data_list.append({'stock': stock, 'sector': sector})
+
+        df = pd.DataFrame(data_list)
+
+        for stock in def_stocks:
+            if stock not in df['stock'].tolist():
+                data_list.append({'stock':stock, 'sector':'other'})
+
+        df = pd.DataFrame(data_list)
+        
+        return df
+    
+    @staticmethod
+    def get_marketcap_stocks(symbol):
+
+        import requests
+        IBOARD_API = 'https://iboard-query.ssi.com.vn/v2'
+        # path = '/stock/group/VNSML'
+        headers = {
+            "user-agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36",
+            "Host":"iboard-query.ssi.com.vn",
+            "Origin": "https://iboard.ssi.com.vn",
+        }
+
+        resp = requests.get(IBOARD_API + f'/stock/group/{symbol}', headers=headers)
+        data = resp.json()
+        stocks = []
+        
+        if data['code'] == 'SUCCESS':
+            for item in data['data']:
+                if 'ss' in item:
+                    stocks.append(item['ss'])
+        return stocks
+
+    @staticmethod
+    def classify_stocks_and_save_to_plasma(create_sample: bool = False):
+
+        def _classify_by_sector():
+            sector_dic = {k: v for k, v in Globs.SECTOR_DIC.items() if k not in ['Super High Beta', 'High Beta', 'Medium', 'Low']}
+            group_dic = {}
+            for k, v in sector_dic.items():
+                for s in v:
+                    if s not in group_dic:
+                        group_dic[s] = [k]
+                    else:
+                        ls: list = group_dic[s]
+                        ls.append(k)
+                        group_dic[s] = ls
+
+            res = {k: ','.join(v) for k, v in group_dic.items()}
+
+            df = pd.DataFrame.from_dict(res, orient='index', columns=['sector'])
+            df.index.name = 'stock'
+            df = df[df.index.isin(Globs.STOCKS)]
+            df = df.reset_index()
+            return df
+        
+        def _classify_by_beta():
+            sector_dic = {k: v for k, v in Globs.SECTOR_DIC.items() if k in ['Super High Beta', 'High Beta', 'Medium', 'Low']}
+            group_dic = {}
+            for k, v in sector_dic.items():
+                for s in v:
+                    if s not in group_dic:
+                        group_dic[s] = [k]
+                    else:
+                        ls: list = group_dic[s]
+                        ls.append(k)
+                        group_dic[s] = ls
+
+            res = {k: ','.join(v) for k, v in group_dic.items()}
+
+            df = pd.DataFrame.from_dict(res, orient='index', columns=['beta'])
+            df.index.name = 'stock'
+            df = df[df.index.isin(Globs.STOCKS)]
+            df = df.reset_index()
+            return df
+
+        def _classify_by_marketcap():
+
+            classify_types = ['VNSML', 'VNMID', 'VN30']
+
+            df = pd.DataFrame(Globs.STOCKS, columns=['stock'])
+
+            dic = {}
+            for t in classify_types:
+                for i in Adapters.get_marketcap_stocks(t):
+                    dic[i] = t
+
+            df["marketCapIndex"] = df['stock'].map(dic)
+            df['marketCapIndex'] = df['marketCapIndex'].fillna('other')
+
+            return df[['stock', 'marketCapIndex']]
+
+        dfs = [
+            _classify_by_sector(),
+            _classify_by_beta(),
+            _classify_by_marketcap()
+        ]
+        df = reduce(lambda left, right: pd.merge(left, right, on='stock'), dfs)
+        
+
+        return df
+    
 
 
 
