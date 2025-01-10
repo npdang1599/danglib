@@ -503,6 +503,7 @@ class Adapters:
             Adapters.SaveDataToPlasma.save_market_data_to_plasma(CREATE_SAMPLE)
             Adapters.SaveDataToPlasma.save_stock_data_to_plasma(CREATE_SAMPLE)
             Adapters.SaveDataToPlasma.save_index_daily_ohlcv_to_plasma(CREATE_SAMPLE)
+            Adapters.classify_stocks_and_save_to_plasma(CREATE_SAMPLE)
 
     @staticmethod 
     def load_groups_and_stocks_data_from_plasma(required_stats: list = None, groups_and_stocks: list = None, load_sample = False) -> pd.DataFrame:
@@ -769,12 +770,34 @@ class Adapters:
             _classify_by_marketcap()
         ]
         df = reduce(lambda left, right: pd.merge(left, right, on='stock'), dfs)
-        
 
+        from danglib.lazy_core import gen_plasma_functions
+        _, disconnect, psave, pload = gen_plasma_functions(db=10)
+
+        psave("pslab_stock_classification", df)
+
+        disconnect()
+
+        if create_sample:
+            FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/pslab_stock_classification.parquet", df)
+    
         return df
     
+    @staticmethod
+    def load_stock_classification_from_plasma(load_sample: bool = False):
+        key = "pslab_stock_classification"
 
+        if not load_sample:
+            from danglib.lazy_core import gen_plasma_functions
+            _, disconnect, psave, pload = gen_plasma_functions(db=10)
 
+            df = pload(key)
+
+            disconnect()
+        else:
+            df: pd.DataFrame = FileHandler.read_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet")
+
+        return df
 
 
 

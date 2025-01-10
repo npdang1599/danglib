@@ -5,7 +5,7 @@ import numpy as np
 from danglib.pslab.resources import Adapters, Globs
 from danglib.pslab.utils import Utils
 
-from typing import Union
+from typing import Union, List, Dict
 from dataclasses import dataclass
 
 class NoRedisDataError(Exception):
@@ -1334,7 +1334,7 @@ class CombiConds:
         return required_data, updated_conditions
 
     @staticmethod
-    def load_and_process_stock_data(conditions_params: list[dict], use_sample_data=False):
+    def load_and_process_stock_data(conditions_params: list[dict], stocks: list = None, use_sample_data=False):
         def test():
             conditions_params = [
                 {
@@ -1386,7 +1386,7 @@ class CombiConds:
         # Load all required data efficiently
         all_cols = {col for col in original_cols} | {col for col, _ in rolling_cols}
 
-        data = Adapters.load_stock_data_from_plasma(list(all_cols), load_sample=use_sample_data)
+        data = Adapters.load_stock_data_from_plasma(list(all_cols), stocks=stocks, load_sample=use_sample_data)
 
         # print(len(data))
         
@@ -1635,6 +1635,13 @@ class ReturnStats:
                 'Average Loss': 0
             }
 
+
+
+# {
+#     'sector': ['VN30', 'SOBank'],
+#     'beta': ['Low', 'Medium'],
+#     'marketCapIndex': ['VN30', 'VNSML']
+# }
 
 # # 'gap_trend(line1=bid,line2=ask,stocks=VN30,rolling_timeframe=30Min,sign=negative,trend_direction=increase,trend_bars=10,use_as_lookback_cond=True,lookback_cond_nbar=5) | 
 # # range_nbars(line=Unwind,lower_thres=20,upper_thres=80,sum_nbars=1,use_as_lookback_cond=True,lookback_cond_nbar=10)'
