@@ -122,8 +122,12 @@ class FileHandler:
         return [col for col in all_columns if any(substr in col for substr in substrs)]
 
 
-def day_to_timestamp(day: str):
-    return int(pd.to_datetime(day, format='%Y_%m_%d').timestamp()) * 1000000000
+def day_to_timestamp(day: str, is_end_day = False):
+    stamp = int(pd.to_datetime(day, format='%Y_%m_%d').timestamp())
+    if is_end_day:
+        stamp += 86400
+
+    return stamp * 1000000000
 
 
 def unflatten_columns(df: pd.DataFrame, separator='_', level_names=None):

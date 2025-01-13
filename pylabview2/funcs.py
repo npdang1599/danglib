@@ -2092,7 +2092,7 @@ class Vectorized:
             if recompute:
                 _, client_disconnect, psave, pload = gen_plasma_functions(db=5)
                 df_tmp = df['close']
-                df_tmp = df_tmp[df_tmp.index >= '2018_01_01']
+                df_tmp = df_tmp[(df_tmp.index >= '2018_01_01') & (df_tmp.index <= '2025_01_03')]
                 n_rows, n_cols = df_tmp.shape
 
                 # Khởi tạo một mảng NumPy 3 chiều với kích thước (2000, 2000, 200)
@@ -2131,7 +2131,7 @@ class Vectorized:
             if recompute:
                 _, client_disconnect, psave, pload = gen_plasma_functions(db=5)
                 df_tmp = df['close']
-                df_tmp = df_tmp[df_tmp.index >= '2018_01_01']
+                df_tmp = df_tmp[(df_tmp.index >= '2018_01_01') & (df_tmp.index <= '2025_01_03')]
                 n_rows, n_cols = df_tmp.shape
 
                 # Khởi tạo một mảng NumPy 3 chiều với kích thước (2000, 2000, 200)
@@ -2185,6 +2185,21 @@ class Vectorized:
                 pass
 
             clean_redis()
+
+        @staticmethod
+        def compute_ursi_for_all_strats_cfm(n_solo_strats, folder):
+            from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_ursi_cfm
+            clean_redis()
+            task_dic = {}
+            print("Computing stats")
+            for i in tqdm(range(0, n_solo_strats)):
+                task_dic[i] = compute_multi_strategies_ursi_cfm.delay(i, folder)
+
+            while any(t.status!='SUCCESS' for t in task_dic.values()):
+                pass
+
+            clean_redis()
+
 
 
         @staticmethod
@@ -2395,7 +2410,23 @@ class Vectorized:
 
             join_one_stats('nt')
 
+        @staticmethod
+        def join_ursi_data_cfm(src_folder, des_folder):
+            fns2 = walk_through_files(src_folder)
+            print(f"Join ursi: ")
+            # df_res: pd.DataFrame = None
+            res2 = []
 
+            for f in tqdm(fns2):
+                f: str
+                i = int(f.split('/')[-1].split(".")[0].split("_")[1])
+
+                src = pd.read_pickle(f)
+                src['i'] = i 
+                res2.append(src)
+            res2: pd.DataFrame = pd.concat(res2)
+            res2 = res2.set_index(['i', 'j'])
+            write_pickle(f"{des_folder}/strats_stocks_ursi.pkl", res2)
 
 
         @staticmethod
@@ -2731,6 +2762,32 @@ class Vectorized:
             Vectorized.MultiProcess.compute_num_days_for_all_strats_cfm(n_strats, folder=store_folder)
             Vectorized.JoinResults.join_num_days_data_cfm(stocks_map, src_folder=store_folder, des_folder=result_folder)
 
+        @staticmethod
+        def compute_ursi_cfm():
+            ## PARAMS-------------------------------------------------------------------
+            name = 'compute_ursi_cfm'
+
+            store_folder = f"/data/Tai/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/data/Tai/pickles/{name}"
+            maybe_create_dir(result_folder)
+
+            recompute_signals = True
+            ## CALC  -------------------------------------------------------------------
+            
+            stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+                                                push_return_numpy=True, 
+                                                push_ursi_numpy=True,
+                                                push_stocks_numpy=True
+                                            )
+            
+            n_strats = Vectorized.MultiProcess.compute_signals2(recompute_signals)
+            n_strats_cfm = Vectorized.MultiProcess.compute_signals_cfm(recompute_signals)
+
+
+            Vectorized.MultiProcess.compute_ursi_for_all_strats_cfm(n_strats, folder=store_folder)
+            Vectorized.JoinResults.join_ursi_data_cfm(src_folder=store_folder, des_folder=result_folder)
 
 
         @staticmethod

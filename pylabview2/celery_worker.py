@@ -64,6 +64,7 @@ class TaskName:
     COMPUTE_SIGNAL2 = 'compute_signal2'
     COMPUTE_MULTI_STRATEGIES_CFM = 'compute_multi_strategies_cfm'
     COMPUTE_MULTI_STRATEGIES_NUM_DAYS = 'compute_multi_strategies_num_days'
+    COMPUTE_MULTI_STRATEGIES_URSI_CFM = 'compute_multi_strategies_ursi_cfm'
 
 
 @app.task(name=TaskName.COMPUTE_SIGNAL2)
@@ -77,7 +78,7 @@ def compute_signal2(idx, params: dict):
     try:
 
         signals: pd.DataFrame = Conds.compute_any_conds2(df, functions_params_dic= params)
-        signals = signals[signals.index >= '2018_01_01']
+        signals = signals[(signals.index >= '2018_01_01') & (signals.index <= '2025_01_03')]
         signals.iloc[-16:] = False
     except Exception as e:
         print(f"{idx} error: {e}")
@@ -135,9 +136,6 @@ def compute_multi_strategies_num_days(i, folder):
     array2 = pload("sig_array2")
     array_cfm = pload("sig_array_cfm")
 
-    re_2d = pload("return_array")
-
-
     df1 = array2[i]
 
     nd_ls=[]
@@ -163,6 +161,43 @@ def compute_multi_strategies_num_days(i, folder):
 
     with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
         pickle.dump((nd_arr), f)
+
+@app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_URSI_CFM)
+def compute_multi_strategies_ursi_cfm(i, folder):
+
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+    array2 = pload("sig_array2")
+    array_cfm = pload("sig_array_cfm")
+
+    ursi_2d = pload("ursi_vectorized")
+
+
+    df1 = array2[i]
+    ursi_2d = ursi_2d[:len(df1)]
+    ursi_ls=[]
+
+    for j in range(len(array_cfm)):
+        df2 = array_cfm[j]
+
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
+
+        cond = df1 * df2
+        s_ursi = np.sum(np.nan_to_num(ursi_2d * cond, 0))
+        s2_ursi = np.sum(np.nan_to_num((ursi_2d ** 2) * cond, 0))
+
+        ursi_ls.append({'j': j, 'sum': s_ursi, 'sumSquare': s2_ursi})
+
+
+
+    disconnect()
+    with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
+        pickle.dump(pd.DataFrame(ursi_ls), f)
+ 
+
+
+
 
 
 @app.task(name=TaskName.COMPUTE_SIGNAL)
