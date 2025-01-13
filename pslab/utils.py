@@ -3,6 +3,77 @@ import pickle
 import pyarrow.parquet as pq
 from pathlib import Path
 import os
+from redis import StrictRedis
+from datetime import timedelta
+
+class RedisHandler:
+    def __init__(self, host='localhost', port=6379, db=0):
+        self.redis_client = StrictRedis(
+            host=host,
+            port=port,
+            db=db,
+            decode_responses=False  # Tự động decode response từ bytes sang string
+        )
+
+    def check_exist(self, key):
+        return self.redis_client.exists(key)
+    
+    def set_key_with_ttl(self, key: str, value: str, pickle_data = False, force = False) -> bool:
+        """
+        Set key với giá trị và TTL 1 ngày nếu key chưa tồn tại
+        Return: True nếu set thành công, False nếu key đã tồn tại
+        """
+        # Kiểm tra key đã tồn tại chưa
+        if self.check_exist(key) and not force:
+            return False
+
+        if pickle_data:
+            value = pickle.dumps(value)
+        
+        # Set key với TTL 1 ngày (86400 giây)
+        self.redis_client.set(
+            name=key,
+            value=value,
+            ex=timedelta(days=1)  # Tự động xoá sau 1 ngày
+        )
+        return True
+    
+    def get_key(self, key: str, pickle_data = False) -> str:
+        """
+        Lấy giá trị của key
+        Return: Giá trị của key hoặc None nếu key không tồn tại
+        """
+        data = self.redis_client.get(key)
+        if pickle_data:
+            return pickle.loads(data)
+
+        return data
+    
+    def list_keys_with_pattern(self, pattern: str) -> list:
+        # Sử dụng scan_iter để lấy tất cả các key khớp với pattern
+        matching_keys = list(self.redis_client.scan_iter(match=pattern))
+        return matching_keys
+
+
+    def delete_keys_by_pattern(self, pattern: str) -> int:
+        """
+        Xóa tất cả các key khớp với pattern cho trước
+        
+        Args:
+            pattern (str): Pattern để tìm key, ví dụ: "user:*" sẽ khớp với tất cả key bắt đầu bằng "user:"
+        
+        Returns:
+            int: Số lượng key đã xóa
+        """
+
+        matching_keys = self.list_keys_with_pattern(pattern)
+        
+        if not matching_keys:
+            return 0
+            
+        # Xóa tất cả các key tìm được
+        deleted_count = self.redis_client.delete(*matching_keys)
+        return deleted_count
 
 class Utils:
     @staticmethod

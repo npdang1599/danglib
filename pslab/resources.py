@@ -13,7 +13,7 @@ from datetime import datetime
 
 from danglib.Adapters.pickle_adapter_ssi_ws import PICKLED_WS_ADAPTERS
 from danglib.Adapters.adapters import MongoDBs
-from danglib.pslab.utils import day_to_timestamp, FileHandler, unflatten_columns
+from danglib.pslab.utils import day_to_timestamp, FileHandler, unflatten_columns, RedisHandler
 
 r = StrictRedis()
 
@@ -518,6 +518,8 @@ class Adapters:
             Adapters.SaveDataToPlasma.save_stock_data_to_plasma(CREATE_SAMPLE)
             Adapters.SaveDataToPlasma.save_index_daily_ohlcv_to_plasma(CREATE_SAMPLE)
             Adapters.classify_stocks_and_save_to_plasma(CREATE_SAMPLE)
+            redis_handler = RedisHandler()
+            redis_handler.delete_keys_by_pattern("pslab/stockcount/*")
 
     @staticmethod 
     def load_groups_and_stocks_data_from_plasma(required_stats: list = None, groups_and_stocks: list = None, load_sample = False) -> pd.DataFrame:
