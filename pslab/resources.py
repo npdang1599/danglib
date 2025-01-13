@@ -413,8 +413,9 @@ class Adapters:
 
             df_market_stats = Adapters.load_market_stats_from_parquet()
             df_market_stats['F1Volume'] = df_market_stats['F1Value'].copy()
-            df_market_stats['F1Value'] = df_market_stats['F1Value'] * df_market_stats['F1Close']    
-            
+            df_market_stats['F1Value'] = df_market_stats['F1Value'] * df_market_stats['F1Close']  
+            df_market_stats['Vn30Volume'] = df_market_stats['Vn30Value'].copy()
+            df_market_stats['VnindexVolume'] = df_market_stats['VnindexValue'].copy()
 
             if create_sample:
                 dfs = df_market_stats[df_market_stats.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
@@ -496,6 +497,9 @@ class Adapters:
 
             dfr = dfr.rename(columns={'VnindexVolume': 'VnindexValue', 'Vn30Volume': 'Vn30Value'})
             dfr['F1Value'] = dfr['F1Volume'] * dfr['F1Close']
+            dfr['F1Volume'] = dfr['F1Value'].copy()
+            dfr['Vn30Volume'] = dfr['Vn30Value'].copy()
+            dfr['VnindexVolume'] = dfr['VnindexValue'].copy()
 
             if create_sample:
                 FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet", dfr)
