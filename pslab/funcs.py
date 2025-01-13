@@ -265,8 +265,10 @@ def function_mapping():
                 'basic_type': {'type': 'str', 'default': 'SMA', 'values': ['SMA', 'EMA']},
                 'bbwp_len': {'type': 'int', 'default': 13},
                 'bbwp_lkbk': {'type': 'int', 'default': 128},
-                'range_lower': {'type': 'float', 'default': 30},
-                'range_upper': {'type': 'float', 'default': 70},
+                'use_low_thres': {'type': 'bool', 'default': False},
+                'low_thres': {'type': 'float', 'default': 20},
+                'use_high_thres': {'type': 'bool', 'default': False},
+                'high_thres': {'type': 'float', 'default': 80},
                 'use_as_lookback_cond': {'type': 'bool', 'default': False},
                 'lookback_cond_nbar': {'type': 'int', 'default': 5},
             }
@@ -1298,13 +1300,15 @@ class Conds:
         ):
             bbwp = Indicators.bbwp(src, basic_type, bbwp_len, bbwp_lkbk)
 
+            result = None
+
             if use_low_thres:
                 result = bbwp <= low_thres
 
             if use_high_thres:
                 result = bbwp >= high_thres
 
-            if use_as_lookback_cond:
+            if use_as_lookback_cond and result is not None:
                 result = Ta.make_lookback(result, lookback_cond_nbar)
 
             return result
