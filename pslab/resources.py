@@ -30,16 +30,15 @@ class Globs:
     SAMPLE_DATA_FROM_TIMESTAMP = day_to_timestamp('2024_12_05')
     BASE_TIMEFRAME = '30S'
 
-    MAKETSTATS_SRC = ['buyImpact', 'sellImpact', 'Arbit', 'Unwind', 'premiumDiscount', 'f1Bid', 'f1Ask']
+    MAKETSTATS_SRC = ['buyImpact', 'sellImpact', 'Arbit', 'Unwind', 'premiumDiscount', 'f1Bid', 'f1Ask', 'Vn30Value', 'F1Value', 'F1Volume', 'VnindexValue']
     
-    STOCKSTATS_SRC = ['open', 'high', 'low', 'close', 'matchingValue', 'bu', 'sd', 'bu2',
-       'sd2', 'bid', 'ask', 'refPrice', 'fBuyVol', 'fSellVol', 'return']
+    STOCKSTATS_SRC = ['open', 'high', 'low', 'close', 'matchingValue', 'bu', 'sd', 'bu2', 'sd2', 'bid', 'ask', 'refPrice', 'fBuyVal', 'fSellVal', 'return']
     
-    DAILYINDEX_SRC = ['F1Open', 'Vn30Open', 'VnindexOpen', 'F1High', 'Vn30High', 'VnindexHigh', 'F1Low', 'Vn30Low', 'VnindexLow', 'F1Close', 'Vn30Close', 'VnindexClose', 'F1Volume', 'Vn30Volume', 'VnindexVolume']
+    DAILYINDEX_SRC = ['F1Open', 'Vn30Open', 'VnindexOpen', 'F1High', 'Vn30High', 'VnindexHigh', 'F1Low', 'Vn30Low', 'VnindexLow', 'F1Close', 'Vn30Close', 'VnindexClose', 'F1Value', 'Vn30Value', 'VnindexValue']
     
-    STOCKS_SRC = ['bu', 'sd', 'bu2', 'sd2', 'bid', 'ask', 'fBuyVol', 'fSellVol']
+    STOCKS_SRC = ['bu', 'sd', 'bu2', 'sd2', 'bid', 'ask', 'fBuyVal', 'fSellVal']
 
-    GROUP_SRC = ['ask', 'bid', 'bu', 'bu2', 'fBuyVol', 'fSellVol','sd', 'sd2']
+    GROUP_SRC = ['ask', 'bid', 'bu', 'bu2', 'fBuyVal', 'fSellVal','sd', 'sd2']
 
     SECTOR_DIC = {
         'Super High Beta': ['SHS', 'VGS', 'MBS', 'VIX', 'CTS', 'ORS', 'CEO', 'FTS', 'DTD', 'AGR', 'GEX', 'BSI', 'HUT', 'VCI', 'DIG', 'VND', 'VDS', 'L14', 'DXG', 'DGW', 'PDR', 'HCM', 'CII', 'HTN', 'GVR', 'NKG', 'BVS', 'HSG', 'TCI', 'NVL', 'SSI', 'GIL', 'PXL', 'KSB', 'PLC', 'NLG', 'KBC', 'DDV', 'FCN', 'LCG', 'DPG', 'DBC', 'TCH', 'VOS', 'VPG', 'HDC', 'IDJ', 'ANV', 'VCG', 'PET', 'VGC', 'PC1', 'HAH', 'ASM'], 
@@ -413,6 +412,9 @@ class Adapters:
             _, disconnect, psave, pload = gen_plasma_functions(db=10)
 
             df_market_stats = Adapters.load_market_stats_from_parquet()
+            df_market_stats['F1Volume'] = df_market_stats['F1Value'].copy()
+            df_market_stats['F1Value'] = df_market_stats['F1Value'] * df_market_stats['F1Close']    
+            
 
             if create_sample:
                 dfs = df_market_stats[df_market_stats.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
@@ -429,6 +431,10 @@ class Adapters:
             _, disconnect, psave, pload = gen_plasma_functions(db=10)
 
             df = Adapters.load_index_ohlc_from_pickle()
+            df['F1_volume'] = df['F1_value'].copy()
+            df['F1_value'] = df['F1_value'] * df['F1_close']
+            df['VN30_volume'] = df['VN30_value'].copy()
+            df['VNINDEX_volume'] = df['VNINDEX_value'].copy()
 
             if create_sample:
                 dfs = df[df.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
@@ -455,6 +461,7 @@ class Adapters:
 
             df = unflatten_columns(df)
             df = df.sort_index(axis=1)
+            df = df.rename(columns={'fBuyVol': 'fBuyVal', 'fSellVol': 'fSellVal'})
 
             if create_sample:
                 dfs = df[df.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
@@ -486,6 +493,9 @@ class Adapters:
 
             dfr = flatten_columns(df_pivot)
             dfr = dfr.rename(columns= {k: underscore_to_camel(k) for k in dfr.columns})
+
+            dfr = dfr.rename(columns={'VnindexVolume': 'VnindexValue', 'Vn30Volume': 'Vn30Value'})
+            dfr['F1Value'] = dfr['F1Volume'] * dfr['F1Close']
 
             if create_sample:
                 FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet", dfr)
