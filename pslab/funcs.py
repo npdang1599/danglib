@@ -273,7 +273,7 @@ def function_mapping():
         },
         'bbpctb': {
             'function': Conds.Indicators.bbpctb,
-            'title': 'Boillinger Band %B',
+            'title': 'BB%B',
             'description': "Boillinger Band %B",
             'inputs': ['src'],
             'params': {
@@ -283,6 +283,17 @@ def function_mapping():
                 'cross_line': {'type': 'str', 'default': "Upper band", 'values': ["Upper band", "Lower band"]},
                 'use_as_lookback_cond': {'type': 'bool', 'default': False},
                 'lookback_cond_nbar': {'type': 'int', 'default': 5},
+            }
+        },
+        'compare_two_sources': {
+            'function': Conds.compare_two_sources,
+            'title': 'Compare Two Sources',
+            'description': "So sánh giữa hai nguồn dữ liệu có nằm trong một khoảng xác định hay không",
+            'inputs': ['src1', 'src2'],
+            'params': {
+                'lower_thres': {'type': 'float', 'default': -999},
+                'upper_thres': {'type': 'float', 'default': 999},
+                'use_pct_change': {'type': 'bool', 'default': False, 'description': 'Có so sánh theo phần trăm thay đổi hay không (mặc định là giá trị tuyệt đối)'},
             }
         }
     }
@@ -406,7 +417,7 @@ class Ta:
         return src.rolling(window=window).min()
 
     @staticmethod 
-    def sma(src: PandasObject, window):
+    def sma(src: PandasObject, window: int):
         """Simple moving average
         
         Args:
@@ -419,7 +430,7 @@ class Ta:
         return src.rolling(window=window).mean()
 
     @staticmethod
-    def ema(src: PandasObject, window):
+    def ema(src: PandasObject, window: int):
         """Exponential moving average
         
         Args:
@@ -430,6 +441,20 @@ class Ta:
             Exponential moving average values
         """
         return src.ewm(span=window, adjust=False).mean()
+    
+    @staticmethod
+    def rma(src: PandasObject, length: int):
+        """Moving average used in RSI.
+        It is the exponentially weighted moving average with alpha = 1 / length.
+
+        Args:
+            src (PandasObject): Series of values to process.
+            length (_type_): Number of bars (length).
+
+        Returns:
+            Exponential moving average of source with alpha = 1 / length.
+        """
+        return src.ewm(alpha=1 / length, adjust=False).mean()
     
     @staticmethod
     def MA(src, window, ma_type='SMA'):
@@ -447,8 +472,10 @@ class Ta:
             return Ta.sma(src, window)
         elif ma_type == 'EMA':
             return Ta.ema(src, window)
+        elif ma_type == 'RMA':
+            return Ta.rma(src, window)
         else:
-            raise ValueError("Invalid moving average type. Choose 'SMA' or 'EMA'")
+            raise ValueError("Invalid moving average type. Choose one in ['RMA', 'SMA', 'EMA']")
 
     @staticmethod
     def roc(src: PandasObject, window):
@@ -1160,6 +1187,17 @@ class Conds:
             result = Ta.make_lookback(result, lookback_cond_nbar)
         return result
 
+    @staticmethod
+    def compare_two_sources(src1: PandasObject, src2: PandasObject, lower_thres: float, upper_thres: float, use_pct_change: bool = False):
+        """Compare two sources with threshold"""
+        if use_pct_change:
+            change = src1 / src2 * 100
+        else:
+            change = src1 - src2
+
+        result = (change >= lower_thres) & (change <= upper_thres)
+        return result
+        
     class Indicators:
         @staticmethod
         def consecutive_squeezes(
@@ -1321,7 +1359,6 @@ class Conds:
         ):
             ma1_line, ma2_line = Indicators.two_MA(src, ma1, ma2, ma_type)
             return Conds.two_line_pos(ma1_line, ma2_line, direction, equal, use_as_lookback_cond, lookback_cond_nbar)
-
 
 class CombiConds:
     @staticmethod
@@ -1619,13 +1656,11 @@ class CombiConds:
         
         return result
 
-
 @dataclass
 class ReturnStatsConfig:
     """Configuration for return statistics calculations"""
     lookback_periods: int = 5
     use_pct: bool = False  # If True, calculate percentage returns
-
 
 class ReturnStats:
     """Class for calculating trading returns and statistics from signals"""
@@ -1814,7 +1849,6 @@ class ReturnStats:
                 'Average Win': 0,
                 'Average Loss': 0
             }
-
 
 
 # {
