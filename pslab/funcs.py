@@ -290,12 +290,11 @@ def function_mapping():
         'compare_two_sources': {
             'function': Conds.compare_two_sources,
             'title': 'Compare Two Sources',
-            'description': "So sánh giữa hai nguồn dữ liệu có nằm trong một khoảng xác định hay không",
+            'description': "So sánh tỉ số (%) giữa nguồn dữ liệu src1 với src2 có nằm trong một khoảng xác định hay không",
             'inputs': ['src1', 'src2'],
             'params': {
                 'lower_thres': {'type': 'float', 'default': -999},
                 'upper_thres': {'type': 'float', 'default': 999},
-                'use_pct_change': {'type': 'bool', 'default': False, 'description': 'Có so sánh theo phần trăm thay đổi hay không (mặc định là giá trị tuyệt đối)'},
             }
         }
     }
@@ -1190,15 +1189,13 @@ class Conds:
         return result
 
     @staticmethod
-    def compare_two_sources(src1: PandasObject, src2: PandasObject, lower_thres: float, upper_thres: float, use_pct_change: bool = False):
+    def compare_two_sources(src1: PandasObject, src2: PandasObject, lower_thres: float, upper_thres: float):
         """Compare two sources with threshold"""
         def test():
             src1 = Adapters.load_index_daily_ohlcv_from_plasma()['F1Open']
             src2 = Adapters.load_index_daily_ohlcv_from_plasma()['F1High']
-        if use_pct_change:
-            change = (src1 - src2) / src2 * 100
-        else:
-            change = src1 - src2
+
+        change = src1  / src2 * 100
 
         result = (change >= lower_thres) & (change <= upper_thres)
         return result
