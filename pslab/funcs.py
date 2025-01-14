@@ -134,8 +134,8 @@ def function_mapping():
             'inputs': ['src'],
             'params': {
                 'n_bars': {'type': 'int', 'default': 10},
-                'n_bars_inc': {'type': 'int', 'default': None, 'des': 'Số thanh nến tăng'},
-                'n_bars_dec': {'type': 'int', 'default': None, 'des': 'Số thanh nến giảm'},
+                'n_bars_inc': {'type': 'int', 'default': 10, 'des': 'Số thanh nến tăng'},
+                'n_bars_dec': {'type': 'int', 'default': 0, 'des': 'Số thanh nến giảm'},
                 "use_as_lookback_cond" : {'type': 'bool', 'default': False},
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
@@ -159,8 +159,8 @@ def function_mapping():
             'description': " Kiểm tra tổng giá trị của n bars có nằm trong một khoảng xác định",
             'inputs': ['line'],
             'params': {
-                'lower_thres': {'type': 'float', 'default': None},
-                'upper_thres': {'type': 'float', 'default': None},
+                'lower_thres': {'type': 'float', 'default': -999},
+                'upper_thres': {'type': 'float', 'default': 999},
                 'sum_nbars' : {'type': 'int', 'default': 1},
                 "use_as_lookback_cond" : {'type': 'bool', 'default': False},
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
@@ -172,8 +172,8 @@ def function_mapping():
             'description': "Kiểm tra giá trị có nằm trong một khoảng xác định",
             'inputs': ['line'],
             'params': {
-                'lower_thres': {'type': 'float', 'default': None},
-                'upper_thres': {'type': 'float', 'default': None},
+                'lower_thres': {'type': 'float', 'default': -999},
+                'upper_thres': {'type': 'float', 'default': 999},
                 "use_as_lookback_cond" : {'type': 'bool', 'default': False},
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }

@@ -413,7 +413,7 @@ class Adapters:
 
             df_market_stats = Adapters.load_market_stats_from_parquet()
             df_market_stats['F1Volume'] = df_market_stats['F1Value'].copy()
-            df_market_stats['F1Value'] = df_market_stats['F1Value'] * df_market_stats['F1Close']  
+            df_market_stats['F1Value'] = df_market_stats['F1Value'] * df_market_stats['F1Close'] * 100000
             df_market_stats['Vn30Volume'] = df_market_stats['Vn30Value'].copy()
             df_market_stats['VnindexVolume'] = df_market_stats['VnindexValue'].copy()
 
