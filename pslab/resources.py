@@ -30,7 +30,7 @@ class Globs:
     SAMPLE_DATA_FROM_TIMESTAMP = day_to_timestamp('2024_12_05')
     BASE_TIMEFRAME = '30S'
 
-    MAKETSTATS_SRC = ['buyImpact', 'sellImpact', 'Arbit', 'Unwind', 'premiumDiscount', 'f1Bid', 'f1Ask', 'Vn30Value', 'F1Value', 'F1Volume', 'VnindexValue']
+    MAKETSTATS_SRC = ['buyImpact', 'sellImpact', 'Arbit', 'Unwind', 'premiumDiscount', 'f1Bid', 'f1Ask', 'Vn30Value', 'F1Value', 'F1Volume', 'VnindexValue', 'f1BuyVol', 'f1SellVol']
     
     STOCKSTATS_SRC = ['open', 'high', 'low', 'close', 'matchingValue', 'bu', 'sd', 'bu2', 'sd2', 'bid', 'ask', 'refPrice', 'fBuyVal', 'fSellVal', 'return']
     
@@ -60,6 +60,9 @@ class Globs:
 
     ROLLING_TIMEFRAME = ['30S', '1Min', '5Min', '15Min', '30Min', '1H', '4H', '1D']
 
+    USE_SAMPLE_DATA = False
+
+    PLASMA_DB = 10
 
 class Resources:
     CACHED_FOLDER = "/data/dang"
@@ -106,6 +109,14 @@ class Resources:
     @staticmethod
     def get_f1_bidask_fn(timeframe, extension='.pickle'):
         return f"{Resources.CACHED_FOLDER}/f1_bidask_{timeframe}{extension}"
+    
+    class PlasmaKeys:
+        STOCK_DATA = "pslab_stock_data"
+        MARKET_DATA = "pslab_market_data"
+        INDEX_OHLC = "pslab_ohlcv_index_data"
+        GROUP_STATS = "pslab_group_stats_data"
+        INDEX_DAILY_OHLC = "pslab_daily_index_ohlcv"
+        STOCK_CLASSIFICATION = "pslab_stock_classification"
     
 
 
@@ -394,22 +405,25 @@ class Adapters:
         def save_stock_data_to_plasma(create_sample=False):
         
             from danglib.lazy_core import gen_plasma_functions
-            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+            _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
+
+            key = Resources.PlasmaKeys.STOCK_DATA
 
             df = Adapters.load_stock_data_from_parquet()
 
             if create_sample:
                 dfs = df[df.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
-                FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/pslab_stock_data.parquet", dfs)
+                FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet", dfs)
 
-            psave("pslab_stock_data", df)
+            psave(key, df)
 
             disconnect()
 
         @staticmethod
         def save_market_data_to_plasma(create_sample=False):
             from danglib.lazy_core import gen_plasma_functions
-            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+            _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
+            key = Resources.PlasmaKeys.MARKET_DATA
 
             df_market_stats = Adapters.load_market_stats_from_parquet()
             df_market_stats['F1Volume'] = df_market_stats['F1Value'].copy()
@@ -419,9 +433,9 @@ class Adapters:
 
             if create_sample:
                 dfs = df_market_stats[df_market_stats.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
-                FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/pslab_market_data.parquet", dfs)
+                FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet", dfs)
 
-            psave("pslab_market_data", df_market_stats)
+            psave(key, df_market_stats)
 
             disconnect()
 
@@ -429,7 +443,9 @@ class Adapters:
         def save_index_ohlcv_to_plasma(create_sample=False):
 
             from danglib.lazy_core import gen_plasma_functions
-            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+            _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
+
+            key = Resources.PlasmaKeys.INDEX_OHLC
 
             df = Adapters.load_index_ohlc_from_pickle()
             df['F1_volume'] = df['F1_value'].copy()
@@ -439,16 +455,18 @@ class Adapters:
 
             if create_sample:
                 dfs = df[df.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
-                FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/pslab_ohlcv_index_data.parquet", dfs)
+                FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet", dfs)
 
-            psave("pslab_ohlcv_index_data", df)
+            psave(f"{key}", df)
 
             disconnect()
         
         @staticmethod
         def save_group_data_to_plasma(create_sample=False):
             from danglib.lazy_core import gen_plasma_functions
-            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+            _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
+
+            key = Resources.PlasmaKeys.GROUP_STATS
 
             ls = []
             for g in Globs.SECTOR_DIC.keys():
@@ -466,10 +484,9 @@ class Adapters:
 
             if create_sample:
                 dfs = df[df.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
-                FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/pslab_group_stats_data.parquet", dfs)
+                FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet", dfs)
 
-            
-            psave("pslab_group_stats_data", df)
+            psave(f"{key}", df)
 
             disconnect()
 
@@ -477,9 +494,9 @@ class Adapters:
         def save_index_daily_ohlcv_to_plasma(create_sample: bool = False):
 
             from danglib.lazy_core import gen_plasma_functions
-            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+            _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
 
-            key = "pslab_daily_index_ohlcv"
+            key = Resources.PlasmaKeys.INDEX_DAILY_OHLC
 
             from danglib.utils import flatten_columns, underscore_to_camel
 
@@ -509,7 +526,7 @@ class Adapters:
             disconnect()
 
         @staticmethod
-        def run_save_all():
+        def run_save_all(save_sample_data_to_plasma: bool = False):
             CREATE_SAMPLE = True
 
             Adapters.SaveDataToPlasma.save_group_data_to_plasma(CREATE_SAMPLE)
@@ -520,6 +537,27 @@ class Adapters:
             Adapters.classify_stocks_and_save_to_plasma(CREATE_SAMPLE)
             redis_handler = RedisHandler()
             redis_handler.delete_keys_by_pattern("pslab/stockcount/*")
+
+            if save_sample_data_to_plasma:
+                group_data = Adapters.load_group_data_from_plasma(load_sample=True)
+                stock_data = Adapters.load_stock_data_from_plasma(load_sample=True)
+                market_data = Adapters.load_market_stats_from_plasma(load_sample=True)
+                index_data = Adapters.load_index_ohlcv_from_plasma(load_sample=True)
+                index_daily_data = Adapters.load_index_daily_ohlcv_from_plasma(load_sample=True)
+                stocks_classified = Adapters.load_stock_classification_from_plasma(load_sample=True)
+
+                from danglib.lazy_core import gen_plasma_functions
+                _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
+
+                psave(Resources.PlasmaKeys.GROUP_STATS, group_data)
+                psave(Resources.PlasmaKeys.STOCK_DATA, stock_data)
+                psave(Resources.PlasmaKeys.MARKET_DATA, market_data)
+                psave(Resources.PlasmaKeys.INDEX_OHLC, index_data)
+                psave(Resources.PlasmaKeys.INDEX_DAILY_OHLC, index_daily_data)
+                psave(Resources.PlasmaKeys.STOCK_CLASSIFICATION, stocks_classified)
+                
+                disconnect()
+
 
     @staticmethod 
     def load_groups_and_stocks_data_from_plasma(required_stats: list = None, groups_and_stocks: list = None, load_sample = False) -> pd.DataFrame:
@@ -547,11 +585,11 @@ class Adapters:
 
     @staticmethod
     def load_group_data_from_plasma(required_stats: list = None, groups: list=None, load_sample:bool = False):
-        key = "pslab_group_stats_data"
+        key = Resources.PlasmaKeys.GROUP_STATS
 
         if not load_sample:
             from danglib.lazy_core import gen_plasma_functions
-            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+            _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
 
             df: pd.DataFrame = pload(key)
 
@@ -569,11 +607,11 @@ class Adapters:
 
     @staticmethod
     def load_index_ohlcv_from_plasma(name: str, load_sample:bool = False):
-        key = "pslab_ohlcv_index_data"
+        key = Resources.PlasmaKeys.INDEX_OHLC
 
         if not load_sample:
             from danglib.lazy_core import gen_plasma_functions
-            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+            _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
 
             df: pd.DataFrame = pload(key)
 
@@ -594,10 +632,11 @@ class Adapters:
     @staticmethod
     def load_stock_data_from_plasma(required_stats: list = None, stocks: list = None, load_sample:bool = False):
         
-        key = "pslab_stock_data"
+        key = Resources.PlasmaKeys.STOCK_DATA
+
         if not load_sample:
             from danglib.lazy_core import gen_plasma_functions
-            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+            _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
 
             df: pd.DataFrame = pload(key)
 
@@ -615,12 +654,12 @@ class Adapters:
 
     @staticmethod
     def load_market_stats_from_plasma(required_stats: list = None, load_sample:bool = False):
-        key = "pslab_market_data"
+        key = Resources.PlasmaKeys.MARKET_DATA
 
         if not load_sample:
 
             from danglib.lazy_core import gen_plasma_functions
-            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+            _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
 
             df: pd.DataFrame = pload(key)
 
@@ -654,11 +693,11 @@ class Adapters:
     
     @staticmethod
     def load_index_daily_ohlcv_from_plasma(required_stats: list = None, load_sample: bool = False):
-        key = "pslab_daily_index_ohlcv"
+        key = Resources.PlasmaKeys.INDEX_DAILY_OHLC
 
         if not load_sample:
             from danglib.lazy_core import gen_plasma_functions
-            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+            _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
 
             df = pload(key)
 
@@ -788,24 +827,26 @@ class Adapters:
         df = reduce(lambda left, right: pd.merge(left, right, on='stock'), dfs)
 
         from danglib.lazy_core import gen_plasma_functions
-        _, disconnect, psave, pload = gen_plasma_functions(db=10)
+        _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
 
-        psave("pslab_stock_classification", df)
+        key = Resources.PlasmaKeys.STOCK_CLASSIFICATION
+
+        psave(key, df)
 
         disconnect()
 
         if create_sample:
-            FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/pslab_stock_classification.parquet", df)
+            FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet", df)
     
         return df
     
     @staticmethod
     def load_stock_classification_from_plasma(load_sample: bool = False):
-        key = "pslab_stock_classification"
+        key = Resources.PlasmaKeys.STOCK_CLASSIFICATION
 
         if not load_sample:
             from danglib.lazy_core import gen_plasma_functions
-            _, disconnect, psave, pload = gen_plasma_functions(db=10)
+            _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
 
             df = pload(key)
 

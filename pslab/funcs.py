@@ -114,6 +114,18 @@ def function_mapping():
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
         },
+        'gap_range':{
+            'function': Conds.gap_range,
+            'title': 'Gap Range',
+            'description': "Kiểm tra khoảng cách giữa hai đường nằm trong một khoảng xác định",
+            'inputs': ['line1', 'line2'],
+            'params': {
+                'lower_thres': {'type': 'float', 'default': -999},
+                'upper_thres': {'type': 'float', 'default': 999},
+                "use_as_lookback_cond" : {'type': 'bool', 'default': False},
+                'lookback_cond_nbar' : {'type': 'int', 'default': 5}
+            }
+        },
         'is_in_top_bot_percentile': {
             'function': Conds.is_in_top_bot_percentile,
             'title': 'Top/Bottom Percentile',
@@ -1189,11 +1201,36 @@ class Conds:
         return result
 
     @staticmethod
+    def gap_range(
+        line1: PandasObject,
+        line2: PandasObject,
+        lower_thres: float = -999,
+        upper_thres: float = 999,
+        use_as_lookback_cond: bool = False,
+        lookback_cond_nbar = 5,
+    ):
+        """Check if gap between lines is within specified range
+        
+        Args:
+            line1: pd.Series or pd.DataFrame
+            line2: pd.Series or pd.DataFrame
+            lower_thres: Lower bound for gap
+            upper_thres: Upper bound for gap
+        """
+        gap = line1 - line2
+        result = (gap >= lower_thres) & (gap <= upper_thres)
+        if use_as_lookback_cond:
+            result = Ta.make_lookback(result, lookback_cond_nbar)
+        return result
+
+    @staticmethod
     def compare_two_sources(src1: PandasObject, src2: PandasObject, lower_thres: float, upper_thres: float):
         """Compare two sources with threshold"""
         def test():
-            src1 = Adapters.load_index_daily_ohlcv_from_plasma()['F1Open']
-            src2 = Adapters.load_index_daily_ohlcv_from_plasma()['F1High']
+            src1 = Adapters.load_group_data_from_plasma(['fBuyVal'], groups=['All'])['fBuyVal']
+            src2 = Adapters.load_group_data_from_plasma(['fSellVal'], groups=['All'])['fSellVal']
+            lower_thres = 700
+            upper_thres = 1000
 
         change = src1  / src2 * 100
 
