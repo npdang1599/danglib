@@ -456,8 +456,6 @@ class Conds:
             rs_arr[(~np.isnan(fwmark_arr) & isw_arr)] = True
             rs = pd.DataFrame(rs_arr, index = close.index, columns = close.columns)
             return rs
-            
-
 
         return None
     

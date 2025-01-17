@@ -92,6 +92,19 @@ def function_mapping():
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
         },
+        'percentile_in_range': {
+            'function': Conds.percentile_in_range,
+            'title': 'Percentile in Range',
+            'description': "Kiểm tra percentile của source trong khi lookback n bars có nằm trong range giá trị",
+            'inputs': ['src'],
+            'params': {
+                'lookback_period': {'type': 'int', 'default': 20},
+                'lower_thres': {'type': 'float', 'default': -999},
+                'upper_thres': {'type': 'float', 'default': 999},
+                "use_as_lookback_cond" : {'type': 'bool', 'default': False},
+                'lookback_cond_nbar' : {'type': 'int', 'default': 5}
+            },
+        },
         'gap_percentile': {
             'function': Conds.gap_percentile,
             'title': 'Gap Percentile',
@@ -1291,6 +1304,22 @@ class Conds:
         """
         gap = line1 - line2
         result = (gap >= lower_thres) & (gap <= upper_thres)
+        if use_as_lookback_cond:
+            result = Ta.make_lookback(result, lookback_cond_nbar)
+        return result
+
+    @staticmethod
+    def percentile_in_range(
+        src: PandasObject,
+        lookback_period: int = 20,
+        lower_thres: float = 10,
+        upper_thres: float = 90,
+        use_as_lookback_cond: bool = False,
+        lookback_cond_nbar = 5,
+        ):
+        """Check if values are within specified percentile range"""
+        rank = Ta.rolling_rank(src, lookback_period)
+        result = (rank >= lower_thres) & (rank <= upper_thres)
         if use_as_lookback_cond:
             result = Ta.make_lookback(result, lookback_cond_nbar)
         return result
