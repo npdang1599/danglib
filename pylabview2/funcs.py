@@ -43,6 +43,7 @@ class Globs:
             "relative_range" : Conds.relative_range,
             "consecutive_squeezes": Conds.consecutive_squeezes,
             "bbwp": Conds.bbwp,
+            "bbwp2": Conds.bbwp2,
             "bbpctb": Conds.bbpctb,
             "ursi": Conds.ursi,
             "macd": Conds.macd,
@@ -726,6 +727,26 @@ class Conds:
 
         return res
     
+    @staticmethod
+    def bbwp2(
+        df: pd.DataFrame,
+        src_name: str = "close",
+        basic_type: str = "SMA",
+        bbwp_len: int = 13,
+        bbwp_lkbk: int = 128,
+        low_thres: float = 20,
+        high_thres: float = 80,
+        use_flag: bool = False, 
+        *args, **kwargs
+    ):
+        """bbwp based conditions"""
+
+        res = None
+        if use_flag:
+            bbwp = Ta.bbwp(df, src_name, basic_type, bbwp_len, bbwp_lkbk)
+            res = Utils.in_range(bbwp, low_thres, high_thres)
+        return res
+
 
     @staticmethod
     def bbpctb(
@@ -2086,7 +2107,8 @@ class Vectorized:
         def compute_signals2(recompute = True):
             from danglib.pylabview2.celery_worker import compute_signal2, clean_redis
 
-            params_dic = pd.read_pickle('/home/ubuntu/Tai/classify/dic_original_params.pickle')
+            # params_dic = pd.read_pickle('/home/ubuntu/Tai/classify/dic_original_params.pickle')
+            params_dic = pd.read_pickle('/home/ubuntu/Tai/classify/environment/dic_indexed_params.pickle')
             n_strats = len(params_dic)
 
             if recompute:
@@ -2125,7 +2147,8 @@ class Vectorized:
         def compute_signals_cfm(recompute = True):
             from danglib.pylabview2.celery_worker import compute_signal2, clean_redis
 
-            params_dic = pd.read_pickle('/home/ubuntu/Tai/classify/dic_cfm_params.pickle')
+            # params_dic = pd.read_pickle('/home/ubuntu/Tai/classify/dic_cfm_params.pickle')
+            params_dic = pd.read_pickle('/home/ubuntu/Tai/classify/environment/dic_cfm_params.pickle')
             n_strats = len(params_dic)
 
             if recompute:
@@ -2713,8 +2736,8 @@ class Vectorized:
         @staticmethod
         def compute_nt_re_wr_cfm():
             ## PARAMS-------------------------------------------------------------------
-            name = 'nt_re_wr_3'
-
+            # name = 'nt_re_wr_3'
+            name = 'environment_3'
             store_folder = f"/data/Tai/{name}_tmp"
             maybe_create_dir(store_folder)
 
@@ -2739,7 +2762,8 @@ class Vectorized:
         @staticmethod
         def compute_nt_re_wr_num_days():
             ## PARAMS-------------------------------------------------------------------
-            name = 'nt_re_wr_3_num_days'
+            # name = 'nt_re_wr_3_num_days'
+            name = 'environment_num_days'
 
             store_folder = f"/data/Tai/{name}_tmp"
             maybe_create_dir(store_folder)
@@ -2765,7 +2789,9 @@ class Vectorized:
         @staticmethod
         def compute_ursi_cfm():
             ## PARAMS-------------------------------------------------------------------
-            name = 'compute_ursi_cfm'
+            # name = 'compute_ursi_cfm'
+            name = 'environment_ursi_cfm'
+
 
             store_folder = f"/data/Tai/{name}_tmp"
             maybe_create_dir(store_folder)

@@ -49,6 +49,7 @@ class Globs:
             "ursi": Conds.ursi,
             "macd": Conds.macd,
             "bbwp": Conds.bbwp,
+            "bbwp2": Conds.bbwp2,
             "bbpctb": Conds.bbpctb,
             "net_income": Conds.Fa.net_income,
             "revenue": Conds.Fa.revenue,
@@ -1035,6 +1036,29 @@ class Conds:
                 res = bbwp >= high_thres
 
         return res
+
+    @staticmethod
+    def bbwp2(
+        df: pd.DataFrame,
+        src_name: str = "close",
+        basic_type: str = "SMA",
+        bbwp_len: int = 13,
+        bbwp_lkbk: int = 128,
+        low_thres: float = 20,
+        high_thres: float = 80,
+        use_flag: bool = False, 
+        *args, **kwargs
+    ):
+        """bbwp based conditions"""
+
+        res = None
+        if use_flag:
+            bbwp = Ta.bbwp(df, src_name, basic_type, bbwp_len, bbwp_lkbk)
+            res = Utils.in_range(bbwp, low_thres, high_thres)
+        return res
+
+
+
 
     @staticmethod
     def bbpctb(
