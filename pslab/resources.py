@@ -30,7 +30,7 @@ class Globs:
     SAMPLE_DATA_FROM_TIMESTAMP = day_to_timestamp('2024_12_05')
     BASE_TIMEFRAME = '30S'
 
-    MAKETSTATS_SRC = ['buyImpact', 'sellImpact', 'Arbit', 'Unwind', 'premiumDiscount', 'f1Bid', 'f1Ask', 'Vn30Value', 'F1Value', 'F1Volume', 'VnindexValue', 'f1BuyVol', 'f1SellVol']
+    MAKETSTATS_SRC = ['buyImpact', 'sellImpact', 'Arbit', 'Unwind', 'premiumDiscount', 'f1Bid', 'f1Ask', 'Vn30Value', 'F1Value', 'F1Volume', 'VnindexValue', 'f1BuyVol', 'f1SellVol', 'outstandingFPos']
     
     STOCKSTATS_SRC = ['open', 'high', 'low', 'close', 'matchingValue', 'bu', 'sd', 'bu2', 'sd2', 'bid', 'ask', 'refPrice', 'fBuyVal', 'fSellVal', 'return']
     
@@ -527,17 +527,6 @@ class Adapters:
 
         @staticmethod
         def run_save_all(save_sample_data_to_plasma: bool = False):
-            CREATE_SAMPLE = True
-
-            Adapters.SaveDataToPlasma.save_group_data_to_plasma(CREATE_SAMPLE)
-            Adapters.SaveDataToPlasma.save_index_ohlcv_to_plasma(CREATE_SAMPLE)
-            Adapters.SaveDataToPlasma.save_market_data_to_plasma(CREATE_SAMPLE)
-            Adapters.SaveDataToPlasma.save_stock_data_to_plasma(CREATE_SAMPLE)
-            Adapters.SaveDataToPlasma.save_index_daily_ohlcv_to_plasma(CREATE_SAMPLE)
-            Adapters.classify_stocks_and_save_to_plasma(CREATE_SAMPLE)
-            redis_handler = RedisHandler()
-            redis_handler.delete_keys_by_pattern("pslab/stockcount/*")
-
             if save_sample_data_to_plasma:
                 group_data = Adapters.load_group_data_from_plasma(load_sample=True)
                 stock_data = Adapters.load_stock_data_from_plasma(load_sample=True)
@@ -557,6 +546,18 @@ class Adapters:
                 psave(Resources.PlasmaKeys.STOCK_CLASSIFICATION, stocks_classified)
                 
                 disconnect()
+            else:
+                CREATE_SAMPLE = True
+
+                Adapters.SaveDataToPlasma.save_group_data_to_plasma(CREATE_SAMPLE)
+                Adapters.SaveDataToPlasma.save_index_ohlcv_to_plasma(CREATE_SAMPLE)
+                Adapters.SaveDataToPlasma.save_market_data_to_plasma(CREATE_SAMPLE)
+                Adapters.SaveDataToPlasma.save_stock_data_to_plasma(CREATE_SAMPLE)
+                Adapters.SaveDataToPlasma.save_index_daily_ohlcv_to_plasma(CREATE_SAMPLE)
+                Adapters.classify_stocks_and_save_to_plasma(CREATE_SAMPLE)
+
+            redis_handler = RedisHandler()
+            redis_handler.delete_keys_by_pattern("pslab/stockcount/*")
 
 
     @staticmethod 
@@ -606,7 +607,7 @@ class Adapters:
         return df
 
     @staticmethod
-    def load_index_ohlcv_from_plasma(name: str, load_sample:bool = False):
+    def load_index_ohlcv_from_plasma(name: str = None, load_sample:bool = False):
         key = Resources.PlasmaKeys.INDEX_OHLC
 
         if not load_sample:

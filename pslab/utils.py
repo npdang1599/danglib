@@ -5,6 +5,8 @@ from pathlib import Path
 import os
 from redis import StrictRedis
 from datetime import timedelta
+import hashlib
+import random
 
 class RedisHandler:
     def __init__(self, host='localhost', port=6379, db=0):
@@ -74,6 +76,18 @@ class RedisHandler:
         # Xóa tất cả các key tìm được
         deleted_count = self.redis_client.delete(*matching_keys)
         return deleted_count
+    
+    @staticmethod
+    def create_hash_key(original_string: str, prefix: str = None):
+
+        if prefix is not None:
+            prefix = f"{prefix}/"
+        else:
+            prefix = ""
+
+        hashed_count_conditions = f"{prefix}{hash_sha256(original_string)}"
+        return hashed_count_conditions
+
 
 class Utils:
     @staticmethod
@@ -87,6 +101,14 @@ class Utils:
                 else:
                     res = res & cond 
         return res
+    
+    def day_to_timestamp(day: str, is_end_day = False):
+        stamp = int(pd.to_datetime(day, format='%Y_%m_%d').timestamp())
+        if is_end_day:
+            stamp += 86400
+
+        return stamp * 1000000000
+
     
     @staticmethod
     def convert_timeframe_to_rolling(timeframe: str) -> int:
@@ -124,6 +146,13 @@ class Utils:
             return Utils.new_1val_df(value, pdObj_sample)
         else:
             raise ValueError("pdObj_sample must be either pd.Series or pd.DataFrame")
+        
+
+    @staticmethod
+    def random_color():
+        """Trả về một màu ngẫu nhiên dưới dạng mã hex"""
+        return '#{:06x}'.format(random.randint(0, 0xFFFFFF))
+
 
 class FileHandler:
     @staticmethod
@@ -248,3 +277,11 @@ def unflatten_columns(df: pd.DataFrame, separator='_', level_names=None):
     )
     
     return df_multi
+
+
+def hash_sha256(value):
+    # Chuyển thành bytes nếu đầu vào là chuỗi
+    value_bytes = value.encode('utf-8') if isinstance(value, str) else value
+    # Tính hash bằng SHA-256
+    hash_object = hashlib.sha256(value_bytes)
+    return hash_object.hexdigest()  # Trả về dạng chuỗi hex

@@ -326,7 +326,7 @@ def input_source_functions():
                 'ma_type': {'type': 'str', 'default': 'SMA', 'values': ['SMA', 'EMA', 'RMA']},
             },
             'outputs': {
-                'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA', 'color': Utils.random_color()}
+                'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA'}
             }
         },
         'ursi': {
@@ -341,8 +341,8 @@ def input_source_functions():
                 'smo_type2': {'type': 'str', 'default': 'EMA', 'values': ['SMA', 'EMA', 'RMA']},
             },
             'outputs': {
-                'output1':{'type': 'line', 'mapping': 'arsi', 'value': 'ursi', 'color': Utils.random_color()},
-                'output2':{'type': 'line', 'mapping': 'arsi_signal', 'value': 'ursi_signal', 'color': Utils.random_color()},
+                'output1':{'type': 'line', 'mapping': 'arsi', 'value': 'ursi'},
+                'output2':{'type': 'line', 'mapping': 'arsi_signal', 'value': 'ursi_signal'},
             }
         }, 
         'squeeze': {
@@ -357,8 +357,8 @@ def input_source_functions():
                 'use_true_range': {'type': 'bool', 'default': False},
             },
             'outputs': {
-                'output1':{'type': 'bool', 'mapping':'sqz_on', 'value': 'sqz_on', 'color': Utils.random_color()},
-                'output2':{'type': 'bool', 'mapping':'sqz_off', 'value': 'sqz_off', 'color': Utils.random_color()},
+                'output1':{'type': 'bool', 'mapping':'sqz_on', 'value': 'sqz_on'},
+                'output2':{'type': 'bool', 'mapping':'sqz_off', 'value': 'sqz_off'},
             }
         }
     }
@@ -1472,273 +1472,182 @@ class Conds:
         ):
             ma1_line, ma2_line = Indicators.two_MA(src, ma1, ma2, ma_type)
             return Conds.two_line_pos(ma1_line, ma2_line, direction, equal, use_as_lookback_cond, lookback_cond_nbar)
+class DataLoader:
+    """Interface for different data loading strategies"""
+    @staticmethod
+    def load(columns: list, **kwargs) -> pd.DataFrame:
+        raise NotImplementedError
+        
+class StockDataLoader(DataLoader):
+    @staticmethod
+    def load(columns: list, stocks: list = None) -> pd.DataFrame:
+        return Adapters.load_stock_data_from_plasma(columns, stocks=stocks)
+
+class GroupDataLoader(DataLoader):
+    @staticmethod 
+    def load(columns: list, stocks: list) -> pd.DataFrame:
+        data = Adapters.load_groups_and_stocks_data_from_plasma(columns, stocks)
+        return data.groupby(level=0, axis=1).sum()
+
+class SeriesDataLoader(DataLoader):
+    @staticmethod
+    def load(columns: list, data_src: str = 'market_stats') -> pd.DataFrame:
+        loaders = {
+            'market_stats': Adapters.load_market_stats_from_plasma,
+            'daily_index': Adapters.load_index_daily_ohlcv_from_plasma
+        }
+        return loaders[data_src](columns)
+
+class DataProcessor:
+    """Handles data processing logic"""
+    @staticmethod
+    def process_conditions(conditions: list[dict]) -> tuple[set, dict, list[dict], dict]:
+        columns = set()
+        rolling_info = {}  # {(col, timeframe): stock_key}
+        updated_conditions = []
+        stocks_info = {}  # {stock_key: stock_list}
+
+        for condition in conditions:
+            new_condition = deepcopy(condition)
+            new_condition['inputs'] = {}
+            
+            stocks = condition['inputs'].get('stocks')
+            rolling_tf = condition['inputs'].get('rolling_timeframe')
+            
+            # Handle stock key for group data
+            stock_key = None
+            if stocks:
+                stock_key = hash('_'.join(sorted(stocks)))
+                stocks_info[stock_key] = stocks
+                new_condition['stock_key'] = stock_key  # Store stock_key in condition for group processing
+
+            for param_name, col_name in condition['inputs'].items():
+                if param_name not in ['rolling_timeframe', 'stocks']:
+                    if not col_name:
+                        raise InputSourceEmptyError(f"Input {param_name} is empty!")
+
+                    columns.add(col_name)
+                    if rolling_tf:
+                        tf_val = Utils.convert_timeframe_to_rolling(rolling_tf)
+                        rolling_info[(col_name, tf_val)] = stock_key
+                    new_condition['inputs'][param_name] = DataProcessor._make_key(
+                        col_name, rolling_tf, stock_key
+                    )
+                else:
+                    new_condition['inputs'][param_name] = condition['inputs'][param_name]
+            
+            updated_conditions.append(new_condition)
+
+        return columns, rolling_info, updated_conditions, stocks_info
+
+    @staticmethod
+    def _make_key(col: str, timeframe=None, stock_key=None) -> str:
+        key = f"{col}_{timeframe if timeframe else 'None'}"
+        return f"{key}_{stock_key}" if stock_key else key
+
+    @staticmethod
+    def prepare_data(data: pd.DataFrame, columns: set, rolling_info: dict) -> dict:
+        result = {}
+        
+        for col in columns:
+            key = DataProcessor._make_key(col)
+            result[key] = data[col]
+
+        for (col, tf), stock_key in rolling_info.items():
+            key = DataProcessor._make_key(col, tf, stock_key)
+            result[key] = data[col].rolling(tf).sum()
+
+        return result
 
 class CombiConds:
-    @staticmethod
-    def load_and_process_group_data(conditions_params: list[dict], use_sample_data = False):
+    _loaders = {
+        'stock': StockDataLoader,
+        'group': GroupDataLoader,
+        'series': SeriesDataLoader
+    }
 
-        def test():
-            conditions_params = [
-                {
-                    'function': "is_in_top_bot_percentile",
-                    'inputs': {
-                        'src': 'bu2',
-                        'stocks': ['VN30', 'Super High Beta'],
-                        'rolling_timeframe': '15Min'
-                    },
-                    'params': {
-                        'lookback_period': 1000,
-                        'direction': 'top',
-                        'threshold': 90,
-                        'use_as_lookback_cond': False,
-                        'lookback_cond_nbar': 5
-                    }
-                },
-                {
-                    'function': 'gap_trend',
-                    'inputs': {
-                        'line1': 'bid',
-                        'line2': 'ask',
-                        'stocks': ['HPG', 'SSI', 'NVL']
-                    },
-                    'params': {
-                        'direction': 'above'
-                    }
-                },
-                {
-                    'function': 'two_line_pos',
-                    'inputs': {
-                        'line1': 'bu',
-                        'line2': 'sd',
-                        'stocks': ['SSI', 'NVL', "VN30"],
-                    },
-                    'params': {
-                        'direction': 'crossover'
-                    }
-                },
-            ]
-
-        required_data = {}  # Will store all needed data series/frames
-        original_cols = set()  # Track original columns needed
-        rolling_cols = set()  # Track (col, timeframe, stocks) combinations needed
+    @classmethod
+    def load_and_process_data(cls, conditions: list[dict], data_type: str, **kwargs) -> tuple[dict, list]:
+        if data_type not in cls._loaders:
+            raise ValueError(f"Invalid data_type. Must be one of {list(cls._loaders.keys())}")
         
-        # First pass: Analyze data requirements and update conditions_params
-        updated_conditions = []
-        for condition in conditions_params:
-            rolling_tf = condition['inputs'].get('rolling_timeframe')
-            stocks = condition['inputs'].get('stocks', Globs.STOCKS)
-            stocks_key = hash('_'.join(sorted(stocks)))
+
+        columns, rolling_info, updated_conditions, stocks_info = DataProcessor.process_conditions(conditions)
+        loader = cls._loaders[data_type]
+        required_data = {}
+
+        if data_type == 'group':
+            # Group conditions by stock_key
+            conditions_by_stock = {}
+            for condition in updated_conditions:
+                stock_key = condition.pop('stock_key', None)  # Remove stock_key from condition
+                if stock_key not in conditions_by_stock:
+                    conditions_by_stock[stock_key] = []
+                conditions_by_stock[stock_key].append(condition)
             
-            # Create new condition with updated column names
-            new_condition = deepcopy(condition)
-            new_condition['inputs'] = {}
+            # Process each stock group separately
+            for stock_key, stock_conditions in conditions_by_stock.items():
+                data = loader.load(list(columns), stocks=stocks_info[stock_key])
+                group_data = DataProcessor.prepare_data(data, columns, rolling_info)
+                required_data.update(group_data)
             
-            for param_name, col_name in condition['inputs'].items():
-                if param_name not in ['rolling_timeframe', 'stocks']:
-                    if col_name == "":
-                        raise InputSourceEmptyError(f"Input {param_name} is empty!")
-                    if rolling_tf:
-                        rolling_tf_val = Utils.convert_timeframe_to_rolling(rolling_tf)
-                        rolling_cols.add((col_name, rolling_tf_val, stocks_key))
-                        new_key = f"{col_name}_{rolling_tf_val}_{stocks_key}"
-                    else:
-                        original_cols.add((col_name, stocks_key))
-                        new_key = f"{col_name}_None_{stocks_key}"
-                    new_condition['inputs'][param_name] = new_key
-                else:
-                    new_condition['inputs'][param_name] = condition['inputs'][param_name]
-            
-            updated_conditions.append(new_condition)
-        
-        # Group all required columns by unique stocks combinations
-        all_cols_by_stocks = {}
-        for col, stocks_key in original_cols:
-            if stocks_key not in all_cols_by_stocks:
-                all_cols_by_stocks[stocks_key] = set()
-            all_cols_by_stocks[stocks_key].add(col)
-            
-        for col, tf, stocks_key in rolling_cols:
-            if stocks_key not in all_cols_by_stocks:
-                all_cols_by_stocks[stocks_key] = set()
-            all_cols_by_stocks[stocks_key].add(col)
-
-        # Load data for each unique stocks combination
-        for stocks_key, cols in all_cols_by_stocks.items():
-            # Find the original stocks list from conditions_params
-            filtered_stocks = Globs.STOCKS  # Default
-            for condition in conditions_params:
-                stocks = condition['inputs'].get('stocks', Globs.STOCKS)
-                if hash('_'.join(sorted(stocks))) == stocks_key:
-                    filtered_stocks = stocks
-                    break
-
-            # Load and process data
-            data: pd.DataFrame = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks, use_sample_data)
-            data = data.groupby(level=0, axis=1).sum()
-
-            # append_to_file("/home/ubuntu/Dang/project_ps/logs/test_load_plasma_data.txt", f"{log_str}\n")
-            # print(len(data))
-            
-            # Add original columns
-            for col, sk in original_cols:
-                if sk == stocks_key:
-                    key = f"{col}_None_{stocks_key}"
-                    required_data[key] = data[col]
-            
-            # Add rolled data
-            for col, tf, sk in rolling_cols:
-                if sk == stocks_key:
-                    key = f"{col}_{tf}_{stocks_key}"
-                    required_data[key] = data[col].rolling(tf).sum()
-
-        return required_data, updated_conditions
-
-    @staticmethod
-    def load_and_process_one_series_data(conditions_params: list[dict], data_src: str = 'market_stats', use_sample_data=False):
-
-        def test():
-            conditions_params = [
-                {
-                    "function": "absolute_change_in_range",
-                    "inputs": {
-                    "src": "VnindexClose",
-                    },
-                    "params": {
-                    "n_bars": 5,
-                    "lower_thres": 1,
-                    "upper_thres": 999,
-                    "use_as_lookback_cond": False,
-                    "lookback_cond_nbar": 5
-                    }
-                }
-            ]
-
-        assert data_src in ['market_stats', 'daily_index'], "`data_src` must be one in `['market_stats', 'daily_index']"
-
-        required_data = {}  # Will store all needed data series/frames
-        original_cols = set()  # Track original columns needed
-        rolling_cols = set()  # Track (col, timeframe) combinations needed
-        
-        # First pass: Analyze data requirements and update conditions_params
-        updated_conditions = []
-        for condition in conditions_params:
-            rolling_tf = condition['inputs'].get('rolling_timeframe')
-            
-            # Create new condition with updated column names
-            new_condition = deepcopy(condition)
-            new_condition['inputs'] = {}
-
-            for param_name, col_name in condition['inputs'].items():
-                if param_name not in ['rolling_timeframe', 'stocks']:
-                    if col_name == "":
-                        raise InputSourceEmptyError(f"Input {param_name} is empty!")
-                    
-                    if rolling_tf:
-                        rolling_tf_val = Utils.convert_timeframe_to_rolling(rolling_tf)
-                        rolling_cols.add((col_name, rolling_tf_val))
-                        new_key = f"{col_name}_{rolling_tf_val}"
-                    else:
-                        original_cols.add(col_name)
-                        new_key = f"{col_name}_None"
-                    new_condition['inputs'][param_name] = new_key
-                else:
-                    new_condition['inputs'][param_name] = condition['inputs'][param_name]
-            
-            updated_conditions.append(new_condition)
-        
-        # Load all required data efficiently
-        all_cols = {col for col in original_cols} | {col for col, _ in rolling_cols}
-
-        if data_src == 'market_stats':
-            data = Adapters.load_market_stats_from_plasma(list(all_cols), use_sample_data)
+            # Update conditions to include only relevant ones
+            updated_conditions = [cond for conds in conditions_by_stock.values() for cond in conds]
         else:
-            data = Adapters.load_index_daily_ohlcv_from_plasma(list(all_cols), use_sample_data)
-        
-        # Add original columns
-        for col in original_cols:
-            key = f"{col}_None"
-            required_data[key] = data[col]
-        
-        # Add rolled data
-        for col, tf in rolling_cols:
-            key = f"{col}_{tf}"
-            required_data[key] = data[col].rolling(tf).sum()
-
-        return required_data, updated_conditions
-
-    @staticmethod
-    def load_and_process_stock_data(conditions_params: list[dict], stocks: list = None, use_sample_data=False):
-        def test():
-            conditions_params = [
-                {
-                    "function": "absolute_change_in_range",
-                    "inputs": {
-                    "src": "bu",
-                    "rolling_timeframe": "15Min"
-                    },
-                    "params": {
-                    "n_bars": 1,
-                    "lower_thres": 10,
-                    "upper_thres": 999,
-                    "use_as_lookback_cond": False,
-                    "lookback_cond_nbar": 5
-                    }
-                }
-            ]
-
-        required_data = {}  # Will store all needed data series/frames
-        original_cols = set()  # Track original columns needed
-        rolling_cols = set()  # Track (col, timeframe) combinations needed
-        
-        # First pass: Analyze data requirements and update conditions_params
-        updated_conditions = []
-        for condition in conditions_params:
-            rolling_tf = condition['inputs'].get('rolling_timeframe')
-            
-            # Create new condition with updated column names
-            new_condition = deepcopy(condition)
-            new_condition['inputs'] = {}
-            
-            for param_name, col_name in condition['inputs'].items():
-                if param_name not in ['rolling_timeframe', 'stocks']:
-                    if col_name == "":
-                        raise InputSourceEmptyError(f"Input {param_name} is empty!")
-
-                    if rolling_tf:
-                        rolling_tf_val = Utils.convert_timeframe_to_rolling(rolling_tf)
-                        rolling_cols.add((col_name, rolling_tf_val))
-                        new_key = f"{col_name}_{rolling_tf_val}"
-                    else:
-                        original_cols.add(col_name)
-                        new_key = f"{col_name}_None"
-                    new_condition['inputs'][param_name] = new_key
-                else:
-                    new_condition['inputs'][param_name] = condition['inputs'][param_name]
-            
-            updated_conditions.append(new_condition)
-        
-        # Load all required data efficiently
-        all_cols = {col for col in original_cols} | {col for col, _ in rolling_cols}
-
-        data = Adapters.load_stock_data_from_plasma(list(all_cols), stocks=stocks, load_sample=use_sample_data)
-
-        # print(len(data))
-        
-        # Add original columns
-        for col in original_cols:
-            key = f"{col}_None"
-            required_data[key] = data[col]
-        
-        # Add rolled data
-        for col, tf in rolling_cols:
-            key = f"{col}_{tf}"
-            required_data[key] = data[col].rolling(tf).sum()
+            data = loader.load(list(columns), **kwargs)
+            required_data = DataProcessor.prepare_data(data, columns, rolling_info)
 
         return required_data, updated_conditions
     
     @staticmethod
     def combine_conditions(required_data: dict[str, pd.DataFrame], conditions_params: list[dict]):
         """Combine multiple conditions with optimized data loading and rolling operations"""
+
+        test_conditions = [
+            {
+                'function': "is_in_top_bot_percentile",
+                'inputs': {
+                    'src': 'bu2',
+                    'stocks': ['VN30', 'Super High Beta'],
+                    'rolling_timeframe': '15Min'
+                },
+                'params': {
+                    'lookback_period': 1000,
+                    'direction': 'top',
+                    'threshold': 90,
+                    'use_as_lookback_cond': False,
+                    'lookback_cond_nbar': 5
+                }
+            },
+            {
+                'function': 'gap_trend',
+                'inputs': {
+                    'line1': 'bid',
+                    'line2': 'ask',
+                    'stocks': ['HPG', 'SSI', 'NVL']
+                },
+                'params': {
+                    'direction': 'above'
+                }
+            },
+            {
+                'function': 'two_line_pos',
+                'inputs': {
+                    'line1': 'bu',
+                    'line2': 'sd',
+                    'stocks': ['SSI', 'NVL', "VN30"],
+                },
+                'params': {
+                    'direction': 'crossover'
+                }
+            },
+        ]
+
+        required_data, conditions_params = CombiConds.load_and_process_data(
+            test_conditions,
+            data_type='group'
+        )
+
         # Get function mapping
         func_map = function_mapping()
         
@@ -1783,7 +1692,7 @@ class QuerryData:
                         'ma_type': 'EMA'
                     },
                     'outputs': {
-                        'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA', 'color': Utils.random_color()}
+                        'MA': 'MA'
                     }
                 },
                 {
@@ -1796,7 +1705,7 @@ class QuerryData:
                         'ma_type': 'EMA'
                     },
                     'outputs': {
-                        'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA1', 'color': Utils.random_color()}
+                        'MA': 'MA1'
                     }
                 },
                 {
@@ -1811,30 +1720,14 @@ class QuerryData:
                         'smo_type2': 'EMA'
                     },
                     'outputs': {
-                        'output1':{'type': 'line', 'mapping': 'arsi', 'value': 'ursi', 'color': Utils.random_color()},
-                        'output2':{'type': 'line', 'mapping': 'arsi_signal', 'value': 'ursi_signal', 'color': Utils.random_color()},
-                    }
-                }
-            ]
-
-            dailyindex_params = [
-                {
-                    "function": "MA",
-                    "inputs": {
-                        "src": "F1Close",
-                    },
-                    "params": {
-                        'window': 10,
-                        'ma_type': 'EMA'
-                    },
-                    'outputs': {
-                        'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA3', 'color': Utils.random_color()}
+                        'arsi': 'ursi',
+                        'arsi_signal': 'ursi_signal'
                     }
                 }
             ]
 
             required_data, conditions_params  = CombiConds.load_and_process_one_series_data(
-                conditions_params=dailyindex_params, data_src='daily_index'
+                conditions_params=other_params
             )
 
         redis_handler = RedisHandler()
@@ -1844,8 +1737,10 @@ class QuerryData:
         
         # Process conditions and combine results
         result = None
-        data_info = []
         for condition in conditions_params:
+            # Skip if useflag is False
+            if not condition['params'].get('useflag', True):
+                continue
                 
             # Get condition function
             func = func_map[condition['function']]['function']
@@ -1857,195 +1752,31 @@ class QuerryData:
                 if param_name not in ['rolling_timeframe', 'stocks']
             }
 
-
+            func_outputs = condition['outputs']
 
             def _redis_cache(func_inputs, condition):
-                hash_condition = {k: v for k, v in condition.items() if k != 'outputs'}
-                key = redis_handler.create_hash_key(str(hash_condition), prefix='pslab/stockcount/test')
-
-                func_outputs = {
-                    k['mapping']: k['value'] for k in condition['outputs'].values()
-                }
-
-                style_mapping = {
-                    k['value'] : k['type'] for k in condition['outputs'].values()
-                }
-
-                color_mapping = {
-                    k['value'] : k['color'] for k in condition['outputs'].values()
-                }
-
-                col_mapping = {
-                    k['value'] : k['mapping'] for k in condition['outputs'].values()
-                }
-
+                key = redis_handler.create_hash_key(str(condition), prefix='pslab/stockcount/test')
                 if redis_handler.check_exist(key):
-                    df_data = redis_handler.get_key(key, pickle_data=True)
+                    data = redis_handler.get_key(key, pickle_data=True)
                 else:
                     data = func(**func_inputs, **condition['params'])
-                    if isinstance(data, pd.Series):
-                        df_data = pd.DataFrame(data)
-                    else:
-                        df_data = pd.concat(data, axis=1)
-                    redis_handler.set_key_with_ttl(key, df_data, pickle_data=True)
+                    redis_handler.set_key_with_ttl(key, data, pickle_data=True)
 
-                df_data: pd.DataFrame = df_data.rename(columns=func_outputs)
+                return data
 
-                info = [{'name': c, 'key': f"{key}-{col_mapping[c]}", 'type': style_mapping[c], 'color': color_mapping[c]} for c in df_data.columns]
+            # Apply condition function
+            data = _redis_cache(func_inputs, condition)
 
-                return df_data, info
-
-            df_data, info = _redis_cache(func_inputs, condition)
-
-            data_info.extend(info)
-
+            if isinstance(data, pd.Series):
+                df_data = pd.DataFrame(data)
+            else:
+                df_data = pd.concat(data, axis=1)
+            df_data = df_data.rename(columns=func_outputs)
+            
             if result is None:
                 result = df_data.copy()
             else:
                 result = pd.concat([result, df_data], axis=1)
-
-        return result, data_info
-
-    def load_all_data(group_params, other_params, dailyindex_params, start_day, end_day):
-        def test():
-            group_params = [
-                {
-                    "function": "MA",
-                    "inputs": {
-                        "src": "bu2",
-                        "stocks": ["All"]
-                    },
-                    "params": {
-                        'window': 10,
-                        'ma_type': 'EMA'
-                    },
-                    'outputs': {
-                        'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA', 'color': '#92c12e'}
-                    }
-                }
-            ]
-
-            other_params = [
-                {
-                    "function": "MA",
-                    "inputs": {
-                        "src": "Arbit",
-                    },
-                    "params": {
-                        'window': 30,
-                        'ma_type': 'EMA'
-                    },
-                    'outputs': {
-                        'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA2', 'color': '#0c8fbd'}
-                    }
-                }
-            ]
-
-            dailyindex_params = [
-                {
-                    "function": "MA",
-                    "inputs": {
-                        "src": "F1Close",
-                    },
-                    "params": {
-                        'window': 10,
-                        'ma_type': 'EMA'
-                    },
-                    'outputs': {
-                        'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA3', 'color': '#c027a1'}
-                    }
-                }
-            ]
-
-        start_timestamp = Utils.day_to_timestamp(start_day)
-        end_timestamp = Utils.day_to_timestamp(end_day, is_end_day=True)
-
-        def _process_group_data(group_params):
-            if not group_params:
-                return None, None
-            required_data, updated_params = CombiConds.load_and_process_group_data(group_params)
-            return QuerryData.load_data(required_data, updated_params)
-        
-        def _process_other_data(other_params):
-            if not other_params:
-                return None, None
-            required_data, updated_params = CombiConds.load_and_process_one_series_data(other_params)
-            return QuerryData.load_data(required_data, updated_params)
-        
-        def _process_indexdaily_data(dailyindex_params):
-            if not dailyindex_params:
-                return None, None
-            required_data, updated_params = CombiConds.load_and_process_one_series_data(dailyindex_params, data_src='daily_index')
-            return QuerryData.load_data(required_data, updated_params)
-        
-        result_df = None
-        result_info = []
-
-        group_data, group_info = _process_group_data(group_params)
-        if group_data is not None:
-            result_df = group_data
-            result_info.extend(group_info)
-
-
-        other_data, other_info = _process_other_data(other_params)
-        if other_data is not None:
-            result_df = pd.concat([result_df, other_data], axis=1) if result_df is not None else other_data
-            result_info.extend(other_info)
-
-
-        def _daily_to_timestamp(df: pd.DataFrame):
-            df['datetime'] = pd.to_datetime(df.index + ' ' + '09:15:00', format = '%Y_%m_%d %H:%M:%S')
-            df['candleTime'] = df['datetime'].astype(int)
-            df = df.set_index('candleTime')
-            df = df.drop('datetime', axis=1)
-            return df
-        
-        indexdaily_data, indexdaily_info = _process_indexdaily_data(dailyindex_params)
-        if indexdaily_data is not None:
-            if result_df is None:
-                df_ohlc = Adapters.load_index_ohlcv_from_plasma(name="VNINDEX")
-  
-                def _convert_daily_to_intraday(df: pd.DataFrame, intraday_index: pd.Series):
-                    def test():
-                        df = indexdaily_data
-                        intraday_index = df_ohlc.index
-
-                    df = _daily_to_timestamp(df)
-
-                    intraday_index = pd.DataFrame(intraday_index)
-
-                    intraday_index = intraday_index.set_index('candleTime')
-                    intraday_index = intraday_index.sort_values('candleTime')
-
-                    df = pd.concat([intraday_index, df], axis=1, join='outer')    
-                    df = df.fillna(method='ffill')
-                    
-                    return df
-
-                result_df = _convert_daily_to_intraday(indexdaily_data, df_ohlc.index)
-            else:
-                indexdaily_data = _daily_to_timestamp(indexdaily_data)
-
-            result_df = pd.concat([result_df, indexdaily_data], axis=1) if result_df is not None else indexdaily_data 
-            result_df = result_df.fillna(method='ffill')
-            result_df = result_df[(result_df.index >= start_timestamp) & (result_df.index <= end_timestamp)]
-
-            result_info.extend(indexdaily_info)
-
-
-        if result_df is None:
-            return {}, {}
-        
-        def remove_nan_keys(data):
-            """Xoá tất cả key có value bằng NaN trong từng object của list"""
-            return [{key: value for key, value in obj.items() if not np.isnan(value)} for obj in data]
-
-        res = result_df.reset_index().to_dict('records')
-        res = remove_nan_keys(res)
-
-        return res, result_info
-
-
 
 @dataclass
 class ReturnStatsConfig:
@@ -2118,7 +1849,7 @@ class ReturnStats:
         if use_pct:
             return (a / b - 1) * 100
         return a - b
-            
+
     @staticmethod
     def get_statistics(df: pd.DataFrame) -> Dict[str, Dict[str, pd.DataFrame]]:
         """

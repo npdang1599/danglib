@@ -1,106 +1,237 @@
+from abc import ABC, abstractmethod
+from typing import Dict, Tuple, Set, List, Union
+from dataclasses import dataclass
+from copy import deepcopy
 import pandas as pd
-import numpy as np
-from typing import Dict, Union, List
-from danglib.pslab.resources import Adapters
+from danglib.pslab.resources import Adapters, Globs
+from danglib.pslab.utils import Utils
+
+class InputSourceEmptyError(Exception):
+    """Raise when Input sources are empty"""
+    pass
 
 
+@dataclass
+class DataRequest:
+    """Data request configuration"""
+    original_cols: Set[str] = None
+    rolling_cols: Set[Union[Tuple[str, int], Tuple[str, int, int]]] = None
+    conditions: List[dict] = None
+    stocks: List[str] = None
 
-
-PandasObject = Union[pd.Series, pd.DataFrame]
-
-class Ta:
-    @staticmethod 
-    def sma(src: PandasObject, window: int):
-        return src.rolling(window=window).mean()
+class BaseDataLoader(ABC):
+    """Base class for data loading and processing"""
     
-    @staticmethod
-    def stdev(source: PandasObject, length: int):
-        return source.rolling(length).std(ddof=0)
-
-class Math:
-    @staticmethod
-    def max(df_ls: List[PandasObject]) -> PandasObject:
-        """Calculate maximum value between multiple pandas objects (Series or DataFrames)
+    def process_conditions(self, conditions_params: List[dict]) -> DataRequest:
+        """Process conditions to determine required data"""
+        request = DataRequest(set(), set(), [])
         
-        Args:
-            df_ls (List[PandasObject]): List of Series or DataFrames to compare
+        for condition in conditions_params:
+            rolling_tf = condition['inputs'].get('rolling_timeframe')
+            stocks = condition['inputs'].get('stocks', Globs.STOCKS)
+            stocks_key = hash('_'.join(sorted(stocks))) if stocks else None
             
-        Returns:
-            PandasObject: Maximum values in same format as input
-        """
-        # Check if inputs are Series
-        if all(isinstance(x, pd.Series) for x in df_ls):
-            return pd.Series(np.maximum.reduce([x.values for x in df_ls]), 
-                           index=df_ls[0].index)
+            new_condition = {
+                'function': condition['function'],
+                'inputs': {},
+                'params': condition['params']
+            }
+            
+            for param_name, col_name in condition['inputs'].items():
+                if param_name not in ['rolling_timeframe', 'stocks']:
+                    if not col_name:
+                        raise InputSourceEmptyError(f"Input {param_name} is empty!")
+                        
+                    if rolling_tf:
+                        rolling_tf_val = Utils.convert_timeframe_to_rolling(rolling_tf)
+                        key = self._get_rolling_key(col_name, rolling_tf_val, stocks_key)
+                        request.rolling_cols.add(self._get_rolling_tuple(col_name, rolling_tf_val, stocks_key))
+                    else:
+                        key = self._get_original_key(col_name, stocks_key)
+                        request.original_cols.add(self._get_original_tuple(col_name, stocks_key))
+                        
+                    new_condition['inputs'][param_name] = key
+                else:
+                    new_condition['inputs'][param_name] = condition['inputs'][param_name]
+                    
+            request.conditions.append(new_condition)
+            
+        return request
+
+    @abstractmethod
+    def _get_rolling_tuple(self, col_name: str, rolling_tf: int, stocks_key: int = None) -> tuple:
+        """Get tuple format for rolling columns"""
+        pass
+
+    @abstractmethod
+    def _get_original_tuple(self, col_name: str, stocks_key: int = None) -> tuple:
+        """Get tuple format for original columns"""
+        pass
+
+    @abstractmethod
+    def _get_rolling_key(self, col_name: str, rolling_tf: int, stocks_key: int = None) -> str:
+        """Get key for rolling data"""
+        pass
+
+    @abstractmethod
+    def _get_original_key(self, col_name: str, stocks_key: int = None) -> str:
+        """Get key for original data"""
+        pass
+
+    @abstractmethod
+    def _load_data(self, request: DataRequest) -> pd.DataFrame:
+        """Load required data"""
+        pass
+
+    def load_and_process(self, conditions_params: List[dict], **kwargs) -> Tuple[Dict[str, pd.DataFrame], List[dict]]:
+        """Main method to load and process data"""
+        request = self.process_conditions(conditions_params)
+        data = self._load_data(request, **kwargs)
         
-        # If DataFrames
-        return pd.DataFrame(
-            np.maximum.reduce([df.to_numpy() for df in df_ls]),
-            columns=df_ls[0].columns, 
-            index=df_ls[0].index
+        required_data = {}
+        
+        # Process original columns
+        for col_tuple in request.original_cols:
+            key = self._get_original_key(*col_tuple)
+            col = col_tuple[0] if len(col_tuple) == 1 else col_tuple[0]
+            required_data[key] = data[col]
+            
+        # Process rolling columns
+        for col_tuple in request.rolling_cols:
+            key = self._get_rolling_key(*col_tuple)
+            col = col_tuple[0]
+            tf = col_tuple[1]
+            required_data[key] = data[col].rolling(tf).sum()
+            
+        return required_data, request.conditions
+
+class GroupDataLoader(BaseDataLoader):
+    """Data loader for group data"""
+    
+    def _get_rolling_tuple(self, col_name: str, rolling_tf: int, stocks_key: int) -> tuple:
+        return (col_name, rolling_tf, stocks_key)
+        
+    def _get_original_tuple(self, col_name: str, stocks_key: int) -> tuple:
+        return (col_name, stocks_key)
+        
+    def _get_rolling_key(self, col_name: str, rolling_tf: int, stocks_key: int) -> str:
+        return f"{col_name}_{rolling_tf}_{stocks_key}"
+        
+    def _get_original_key(self, col_name: str, stocks_key: int) -> str:
+        return f"{col_name}_None_{stocks_key}"
+        
+    def _load_data(self, request: DataRequest, use_sample_data: bool = False) -> pd.DataFrame:
+        all_cols_by_stocks = {}
+        
+        # Group columns by stocks
+        for col, stocks_key in request.original_cols:
+            if stocks_key not in all_cols_by_stocks:
+                all_cols_by_stocks[stocks_key] = set()
+            all_cols_by_stocks[stocks_key].add(col)
+            
+        for col, _, stocks_key in request.rolling_cols:
+            if stocks_key not in all_cols_by_stocks:
+                all_cols_by_stocks[stocks_key] = set()
+            all_cols_by_stocks[stocks_key].add(col)
+
+        # Load data for each stocks combination
+        all_data = {}
+        for stocks_key, cols in all_cols_by_stocks.items():
+            filtered_stocks = self._get_stocks_for_key(stocks_key, request.conditions)
+            data = Adapters.load_groups_and_stocks_data_from_plasma(
+                list(cols), filtered_stocks, use_sample_data
+            )
+            all_data[stocks_key] = data.groupby(level=0, axis=1).sum()
+            
+        return all_data
+
+    def _get_stocks_for_key(self, stocks_key: int, conditions: List[dict]) -> List[str]:
+        """Get original stocks list for a given key"""
+        for condition in conditions:
+            stocks = condition['inputs'].get('stocks', Globs.STOCKS)
+            if hash('_'.join(sorted(stocks))) == stocks_key:
+                return stocks
+        return Globs.STOCKS
+
+class SingleSeriesDataLoader(BaseDataLoader):
+    """Data loader for single series data"""
+    
+    def _get_rolling_tuple(self, col_name: str, rolling_tf: int, stocks_key=None) -> tuple:
+        return (col_name, rolling_tf)
+        
+    def _get_original_tuple(self, col_name: str, stocks_key=None) -> tuple:
+        return (col_name,)
+        
+    def _get_rolling_key(self, col_name: str, rolling_tf: int, stocks_key=None) -> str:
+        return f"{col_name}_{rolling_tf}"
+        
+    def _get_original_key(self, col_name: str, stocks_key=None) -> str:
+        return f"{col_name}_None"
+        
+    def _load_data(self, request: DataRequest, data_src: str = 'market_stats', 
+                  use_sample_data: bool = False) -> pd.DataFrame:
+        all_cols = {col for col, in request.original_cols} | \
+                  {col for col, _ in request.rolling_cols}
+                  
+        if data_src == 'market_stats':
+            return Adapters.load_market_stats_from_plasma(list(all_cols), use_sample_data)
+        return Adapters.load_index_daily_ohlcv_from_plasma(list(all_cols), use_sample_data)
+
+class StockDataLoader(BaseDataLoader):
+    """Data loader for stock data"""
+    
+    def _get_rolling_tuple(self, col_name: str, rolling_tf: int, stocks_key=None) -> tuple:
+        return (col_name, rolling_tf)
+        
+    def _get_original_tuple(self, col_name: str, stocks_key=None) -> tuple:
+        return (col_name,)
+        
+    def _get_rolling_key(self, col_name: str, rolling_tf: int, stocks_key=None) -> str:
+        return f"{col_name}_{rolling_tf}"
+        
+    def _get_original_key(self, col_name: str, stocks_key=None) -> str:
+        return f"{col_name}_None"
+        
+    def _load_data(self, request: DataRequest, use_sample_data: bool = False) -> pd.DataFrame:
+        all_cols = {col for col, in request.original_cols} | \
+                  {col for col, _ in request.rolling_cols}
+        return Adapters.load_stock_data_from_plasma(
+            list(all_cols), stocks=request.stocks, load_sample=use_sample_data
         )
 
-def squeeze(
-    df: pd.DataFrame,
-    src_name: str = "close",
-    bb_length: int = 20,
-    length_kc: int = 20,
-    mult_kc: float = 1.5,
-    use_true_range: bool = True,
-):
-    """Calculate squeeze indicator for both regular and multi-index DataFrames
+class DataLoaderFactory:
+    """Factory for creating data loaders"""
     
-    Args:
-        df (pd.DataFrame): OHLCV DataFrame (regular or multi-index columns)
-        src_name (str): Column name for source values
-        bb_length (int): Bollinger Bands length
-        length_kc (int): Keltner Channel length
-        mult_kc (float): Keltner Channel multiplier
-        use_true_range (bool): Use true range for KC calculation
+    @staticmethod
+    def create_loader(loader_type: str) -> BaseDataLoader:
+        loaders = {
+            'group': GroupDataLoader,
+            'single_series': SingleSeriesDataLoader,
+            'stock': StockDataLoader
+        }
+        return loaders[loader_type]()
+
+# Update CombiConds class methods
+class CombiConds:
+    @staticmethod
+    def load_and_process_group_data(conditions_params: List[dict], use_sample_data=False):
+        loader = DataLoaderFactory.create_loader('group')
+        return loader.load_and_process(conditions_params, use_sample_data=use_sample_data)
         
-    Returns:
-        tuple: (sqz_on, sqz_off, no_sqz) Series or DataFrames depending on input
-    """
-    
-    # For regular DataFrame, get Series
-    p_h = df['high']
-    p_l = df['low']
-    p_c = df['close']
-    src = df[src_name]
-
-    # Calculate BB
-    basic = Ta.sma(src, bb_length)
-    dev = mult_kc * Ta.stdev(src, bb_length)
-    upper_bb = basic + dev
-    lower_bb = basic - dev
-
-    # Calculate KC
-    sqz_ma = Ta.sma(src, length_kc)
-    
-    # Calculate range
-    if use_true_range:
-        sqz_range = Math.max([
-            p_h - p_l,
-            (p_h - p_c.shift(1)).abs(),
-            (p_l - p_c.shift(1)).abs()
-        ])
-    else:
-        sqz_range = p_h - p_l
-
-    rangema = Ta.sma(sqz_range, length_kc)
-    upper_kc = sqz_ma + rangema * mult_kc
-    lower_kc = sqz_ma - rangema * mult_kc
-
-    # Calculate squeeze conditions
-    sqz_on = (lower_bb > lower_kc) & (upper_bb < upper_kc)
-    sqz_off = (lower_bb < lower_kc) & (upper_bb > upper_kc)
-    no_sqz = ~(sqz_on | sqz_off)
-
-    return sqz_on, sqz_off, no_sqz
-
-
-regular_df = Adapters.load_stock_data_from_plasma()
-
-sqz_on, sqz_off, no_sqz = squeeze(regular_df)
-
-
+    @staticmethod
+    def load_and_process_one_series_data(conditions_params: List[dict], 
+                                       data_src: str = 'market_stats',
+                                       use_sample_data=False):
+        loader = DataLoaderFactory.create_loader('single_series')
+        return loader.load_and_process(conditions_params, 
+                                     data_src=data_src,
+                                     use_sample_data=use_sample_data)
+        
+    @staticmethod
+    def load_and_process_stock_data(conditions_params: List[dict], 
+                                  stocks: List[str] = None,
+                                  use_sample_data=False):
+        loader = DataLoaderFactory.create_loader('stock')
+        return loader.load_and_process(conditions_params,
+                                     stocks=stocks, 
+                                     use_sample_data=use_sample_data)
