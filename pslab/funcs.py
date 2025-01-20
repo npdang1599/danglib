@@ -2252,14 +2252,18 @@ class ReturnStats:
             df: DataFrame with calculated returns
             
         Returns:
-            Dictionary containing key performance metrics
+            Dictionary containing key performance metrics including number of entry days
         """
         signal_rows = df[df['matched'] == True]
         non_nan_returns = signal_rows['c_o'].dropna()
         
         if len(non_nan_returns) > 0:
+            # Calculate number of unique trading days
+            num_entry_days = signal_rows['day'].nunique()
+            
             return {
                 'Number of Trades': len(non_nan_returns),
+                'Number Entry Days': num_entry_days,  # Added this metric
                 'Win Rate (%)': (non_nan_returns > 0).mean() * 100,
                 'Average Return': non_nan_returns.mean(),
                 'Average High Return': signal_rows['h_o'].dropna().mean(),
@@ -2267,7 +2271,7 @@ class ReturnStats:
                 'Max Return': non_nan_returns.max(),
                 'Min Return': non_nan_returns.min(),
                 'Profit Factor': abs(non_nan_returns[non_nan_returns > 0].sum() / 
-                                  non_nan_returns[non_nan_returns < 0].sum()) 
+                                non_nan_returns[non_nan_returns < 0].sum()) 
                 if len(non_nan_returns[non_nan_returns < 0]) > 0 else float('inf'),
                 'Average Win': non_nan_returns[non_nan_returns > 0].mean()
                 if len(non_nan_returns[non_nan_returns > 0]) > 0 else 0,
@@ -2277,6 +2281,7 @@ class ReturnStats:
         else:
             return {
                 'Number of Trades': 0,
+                'Number Entry Days': 0,  # Added this metric
                 'Win Rate (%)': 0,
                 'Average Return': 0,
                 'Average High Return': 0,
