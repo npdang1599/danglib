@@ -72,7 +72,7 @@ def function_mapping():
             'function': Conds.consecutive_above_below,
             'title': 'Consecutive Above/Below',
             'description': "một đường nằm trên/dưới đường khác liên tiếp",
-            'inputs': ['line1', 'line2'],
+            'inputs': ['src1', 'src2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'above', 'values': ['above', 'below']},
                 'num_bars': {'type': 'int', 'default': 5},
@@ -84,7 +84,7 @@ def function_mapping():
             'function': Conds.cross_no_reverse,
             'title': 'Cross Without Reversal',
             'description': "Xác định giao cắt mà không đảo chiều sau đó",
-            'inputs': ['line1', 'line2'],
+            'inputs': ['src1', 'src2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder']},
                 'bars_no_reverse': {'type': 'int', 'default': 5},
@@ -109,7 +109,7 @@ def function_mapping():
             'function': Conds.gap_percentile,
             'title': 'Gap Percentile',
             'description': "Kiểm tra khoảng cách giữa hai đường thuộc nhóm phần trăm cao nhất",
-            'inputs': ['line1', 'line2'],
+            'inputs': ['src1', 'src2'],
             'params': {
                 'lookback_period': {'type': 'int', 'default': 20},
                 'threshold': {'type': 'float', 'default': 90},
@@ -121,7 +121,7 @@ def function_mapping():
             'function': Conds.gap_trend,
             'title': 'Gap Trend Analysis',
             'description': "Phân tích xu hướng tăng/giảm của gap giữa hai đường",
-            'inputs': ['line1', 'line2'],
+            'inputs': ['src1', 'src2'],
             'params': {
                 'sign': {'type': 'str', 'default': 'positive', 'values': ['positive', 'negative']},
                 'trend_direction': {'type': 'str', 'default': 'increase', 'values': ['increase', 'decrease']},
@@ -134,7 +134,7 @@ def function_mapping():
             'function': Conds.gap_range,
             'title': 'Gap Range',
             'description': "Kiểm tra khoảng cách giữa hai đường nằm trong một khoảng xác định",
-            'inputs': ['line1', 'line2'],
+            'inputs': ['src1', 'src2'],
             'params': {
                 'lower_thres': {'type': 'float', 'default': -999},
                 'upper_thres': {'type': 'float', 'default': 999},
@@ -185,7 +185,7 @@ def function_mapping():
             'function': Conds.range_nbars,
             'title': 'Total value over n bars in Range',
             'description': " Kiểm tra tổng giá trị của n bars có nằm trong một khoảng xác định",
-            'inputs': ['line'],
+            'inputs': ['src'],
             'params': {
                 'lower_thres': {'type': 'float', 'default': -999},
                 'upper_thres': {'type': 'float', 'default': 999},
@@ -198,7 +198,7 @@ def function_mapping():
             'function': Conds.range_cond,
             'title': 'Value in Range',
             'description': "Kiểm tra giá trị có nằm trong một khoảng xác định",
-            'inputs': ['line'],
+            'inputs': ['src'],
             'params': {
                 'lower_thres': {'type': 'float', 'default': -999},
                 'upper_thres': {'type': 'float', 'default': 999},
@@ -210,10 +210,10 @@ def function_mapping():
             'function': Conds.two_line_pos,
             'title': 'Two Line Position',
             'description': "Kiểm tra vị trí giữa hai đường",
-            'inputs': ['line1', 'line2'],
+            'inputs': ['src1', 'src2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
-                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option line1 crossover line2, mà equal = True thì khi line1 = line2 cũng được xem là crossover, tương tự với crossunder, above, below'},
+                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option src1 crossover src2, mà equal = True thì khi src1 = src2 cũng được xem là crossover, tương tự với crossunder, above, below'},
                 "use_as_lookback_cond" : {'type': 'bool', 'default': False},
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
@@ -243,7 +243,7 @@ def function_mapping():
                 'ma2': {'type': 'int', 'default': 15},
                 'ma_type': {'type': 'str', 'default': 'SMA', 'values': ['SMA', 'EMA']},
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
-                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option line1 crossover line2, mà equal = True thì khi line1 = line2 cũng được xem là crossover, tương tự với crossunder, above, below'},
+                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option src1 crossover src2, mà equal = True thì khi src1 = src2 cũng được xem là crossover, tương tự với crossunder, above, below'},
                 "use_as_lookback_cond" : {'type': 'bool', 'default': False},
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
@@ -259,7 +259,7 @@ def function_mapping():
                 'smooth': {'type': 'int', 'default': 14},
                 'smo_type2': {'type': 'str', 'default': 'EMA', 'values': ['SMA', 'EMA', 'RMA']},
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
-                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option line1 crossover line2, mà equal = True thì khi line1 = line2 cũng được xem là crossover, tương tự với crossunder, above, below'},
+                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option src1 crossover src2, mà equal = True thì khi src1 = src2 cũng được xem là crossover, tương tự với crossunder, above, below'},
                 'range_lower': {'type': 'float', 'default': 30},
                 'range_upper': {'type': 'float', 'default': 70},
                 'use_as_lookback_cond': {'type': 'bool', 'default': False},
@@ -277,7 +277,7 @@ def function_mapping():
                 'slow': {'type': 'int', 'default': 20},
                 'signal_length': {'type': 'int', 'default': 9},
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
-                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option line1 crossover line2, mà equal = True thì khi line1 = line2 cũng được xem là crossover, tương tự với crossunder, above, below'},
+                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option src1 crossover src2, mà equal = True thì khi src1 = src2 cũng được xem là crossover, tương tự với crossunder, above, below'},
                 'range_lower': {'type': 'float', 'default': 30},
                 'range_upper': {'type': 'float', 'default': 70},
                 'use_as_lookback_cond': {'type': 'bool', 'default': False},
@@ -1000,8 +1000,8 @@ class Conds:
 
     @staticmethod
     def two_line_pos(
-        line1: PandasObject,
-        line2: PandasObject,
+        src1: PandasObject,
+        src2: PandasObject,
         direction: str = 'crossover',
         equal: bool = False,
         use_as_lookback_cond: bool = False,
@@ -1011,8 +1011,8 @@ class Conds:
         """Check relative position of two lines
         
         Args:
-            line1: pd.Series or pd.DataFrame 
-            line2: pd.Series or pd.DataFrame
+            src1: pd.Series or pd.DataFrame 
+            src2: pd.Series or pd.DataFrame
             direction: 'crossover', 'crossunder', 'above', or 'below'
             equal: Whether to include equal values in comparison
         """
@@ -1021,13 +1021,13 @@ class Conds:
             return None
             
         if direction == "crossover":
-            result = Ta.crossover(line1, line2)
+            result = Ta.crossover(src1, src2)
         elif direction == "crossunder":
-            result = Ta.crossunder(line1, line2)
+            result = Ta.crossunder(src1, src2)
         elif direction == "above":
-            result = line1 >= line2 if equal else line1 > line2
+            result = src1 >= src2 if equal else src1 > src2
         elif direction == "below":
-            result = line1 <= line2 if equal else line1 < line2
+            result = src1 <= src2 if equal else src1 < src2
         
         if use_as_lookback_cond:
             result = Ta.make_lookback(result, lookback_cond_nbar)
@@ -1036,8 +1036,8 @@ class Conds:
 
     @staticmethod
     def consecutive_above_below(
-        line1: PandasObject,
-        line2: PandasObject,
+        src1: PandasObject,
+        src2: PandasObject,
         direction: str = 'above',
         num_bars: int = 5,
         use_as_lookback_cond: bool = False,
@@ -1047,8 +1047,8 @@ class Conds:
         """Check for consecutive bars where one line is above/below another
         
         Args:
-            line1: pd.Series or pd.DataFrame
-            line2: pd.Series or pd.DataFrame
+            src1: pd.Series or pd.DataFrame
+            src2: pd.Series or pd.DataFrame
             direction: 'above' or 'below'
             num_bars: Required number of consecutive bars
         """
@@ -1056,7 +1056,7 @@ class Conds:
             return None
         
         # Create condition based on direction
-        condition = line1 > line2 if direction == "above" else line1 < line2
+        condition = src1 > src2 if direction == "above" else src1 < src2
         
         # Count consecutive occurrences
         streak = Ta.streak_count(condition)
@@ -1069,8 +1069,8 @@ class Conds:
 
     @staticmethod
     def cross_no_reverse(
-        line1: PandasObject,
-        line2: PandasObject,
+        src1: PandasObject,
+        src2: PandasObject,
         direction: str = "crossover",
         bars_no_reverse: int = 5,
         use_as_lookback_cond: bool = False,
@@ -1080,8 +1080,8 @@ class Conds:
         """Check for crosses without reversal within specified period
         
         Args:
-            line1: pd.Series or pd.DataFrame
-            line2: pd.Series or pd.DataFrame
+            src1: pd.Series or pd.DataFrame
+            src2: pd.Series or pd.DataFrame
             direction: 'crossover' or 'crossunder'
             bars_no_reverse: Number of bars to check for no reversal
         """
@@ -1089,8 +1089,8 @@ class Conds:
             return None
 
         # Get initial cross signals
-        cross_signals = Ta.crossover(line1, line2) if direction == "crossover" else Ta.crossunder(line1, line2)
-        reverse_signals = Ta.crossunder(line1, line2) if direction == "crossover" else Ta.crossover(line1, line2)
+        cross_signals = Ta.crossover(src1, src2) if direction == "crossover" else Ta.crossunder(src1, src2)
+        reverse_signals = Ta.crossunder(src1, src2) if direction == "crossover" else Ta.crossover(src1, src2)
 
         # Check for reverse signals in forward window
         reverse_windows = reverse_signals.rolling(window=bars_no_reverse, min_periods=1).sum()
@@ -1134,7 +1134,7 @@ class Conds:
 
     @staticmethod
     def range_nbars(
-        line: PandasObject,
+        src: PandasObject,
         lower_thres: float,
         upper_thres: float,
         sum_nbars: int = 1,
@@ -1152,7 +1152,7 @@ class Conds:
         if not useflag:
             return None
         
-        src = line.rolling(sum_nbars).sum()
+        src = src.rolling(sum_nbars).sum()
         
         result = (src >= lower_thres) & (src <= upper_thres)
     
@@ -1162,7 +1162,7 @@ class Conds:
 
     @staticmethod
     def range_cond(
-        line: PandasObject,
+        src: PandasObject,
         lower_thres: float,
         upper_thres: float,
         use_as_lookback_cond: bool = False,
@@ -1172,14 +1172,14 @@ class Conds:
         """Check if values are within specified range
         
         Args:
-            line: pd.Series or pd.DataFrame
+            src: pd.Series or pd.DataFrame
             lower_thres: Lower bound of range
             upper_thres: Upper bound of range
         """
         if not useflag:
             return None
         
-        result = (line >= lower_thres) & (line <= upper_thres)
+        result = (src >= lower_thres) & (src <= upper_thres)
     
         if use_as_lookback_cond:
             result = Ta.make_lookback(result, lookback_cond_nbar)
@@ -1245,8 +1245,8 @@ class Conds:
 
     @staticmethod
     def gap_trend(
-        line1: PandasObject,
-        line2: PandasObject,
+        src1: PandasObject,
+        src2: PandasObject,
         sign: str = "positive",
         trend_direction: str = "increase",
         trend_bars: int = 5,
@@ -1257,8 +1257,8 @@ class Conds:
         """Analyze trend in gap between two lines
         
         Args:
-            line1: pd.Series or pd.DataFrame
-            line2: pd.Series or pd.DataFrame
+            src1: pd.Series or pd.DataFrame
+            src2: pd.Series or pd.DataFrame
             sign: 'positive' or 'negative' gap
             trend_direction: 'increase' or 'decrease'
             trend_bars: Number of bars for trend confirmation
@@ -1267,7 +1267,7 @@ class Conds:
             return None
         
         # Calculate gap and its properties
-        gap = line1 - line2
+        gap = src1 - src2
         gap_sign_cond = gap > 0 if sign == "positive" else gap < 0
         gap_change = gap.diff()
         trend_cond = gap_change > 0 if trend_direction == "increase" else gap_change < 0
@@ -1281,8 +1281,8 @@ class Conds:
 
     @staticmethod
     def gap_percentile(
-        line1: PandasObject,
-        line2: PandasObject,
+        src1: PandasObject,
+        src2: PandasObject,
         lookback_period: int = 20,
         threshold: float = 90,
         use_as_lookback_cond: bool = False,
@@ -1292,15 +1292,15 @@ class Conds:
         """Check if gap between lines is in high percentile
         
         Args:
-            line1: pd.Series or pd.DataFrame
-            line2: pd.Series or pd.DataFrame
+            src1: pd.Series or pd.DataFrame
+            src2: pd.Series or pd.DataFrame
             lookback_period: Period for percentile calculation
             threshold: Percentile threshold
         """
         if not useflag:
             return None
         
-        gap = abs(line1 - line2)
+        gap = abs(src1 - src2)
         gap_rank = Ta.rolling_rank(gap, lookback_period)
         result = gap_rank >= threshold
     
@@ -1310,8 +1310,8 @@ class Conds:
 
     @staticmethod
     def gap_range(
-        line1: PandasObject,
-        line2: PandasObject,
+        src1: PandasObject,
+        src2: PandasObject,
         lower_thres: float = -999,
         upper_thres: float = 999,
         use_as_lookback_cond: bool = False,
@@ -1320,12 +1320,12 @@ class Conds:
         """Check if gap between lines is within specified range
         
         Args:
-            line1: pd.Series or pd.DataFrame
-            line2: pd.Series or pd.DataFrame
+            src1: pd.Series or pd.DataFrame
+            src2: pd.Series or pd.DataFrame
             lower_thres: Lower bound for gap
             upper_thres: Upper bound for gap
         """
-        gap = line1 - line2
+        gap = src1 - src2
         result = (gap >= lower_thres) & (gap <= upper_thres)
         if use_as_lookback_cond:
             result = Ta.make_lookback(result, lookback_cond_nbar)
@@ -1501,8 +1501,8 @@ class Conds:
             cross_l = Utils.new_1val_pdObj(100 if cross_line == "Upper band" else 0, src)
 
             res = Conds.two_line_pos(
-                line1=bbpctb,
-                line2=cross_l,
+                src1=bbpctb,
+                src2=cross_l,
                 direction=direction
             )
 
@@ -1549,8 +1549,8 @@ class CombiConds:
                 {
                     'function': 'gap_trend',
                     'inputs': {
-                        'line1': 'bid',
-                        'line2': 'ask',
+                        'src1': 'bid',
+                        'src2': 'ask',
                         'stocks': ['HPG', 'SSI', 'NVL']
                     },
                     'params': {
@@ -1560,8 +1560,8 @@ class CombiConds:
                 {
                     'function': 'two_line_pos',
                     'inputs': {
-                        'line1': 'bu',
-                        'line2': 'sd',
+                        'src1': 'bu',
+                        'src2': 'sd',
                         'stocks': ['SSI', 'NVL', "VN30"],
                     },
                     'params': {
@@ -2295,7 +2295,7 @@ class ReturnStats:
 #     'marketCapIndex': ['VN30', 'VNSML']
 # }
 
-# # 'gap_trend(line1=bid,line2=ask,stocks=VN30,rolling_timeframe=30Min,sign=negative,trend_direction=increase,trend_bars=10,use_as_lookback_cond=True,lookback_cond_nbar=5) | 
+# # 'gap_trend(src1=bid,src2=ask,stocks=VN30,rolling_timeframe=30Min,sign=negative,trend_direction=increase,trend_bars=10,use_as_lookback_cond=True,lookback_cond_nbar=5) | 
 # # range_nbars(line=Unwind,lower_thres=20,upper_thres=80,sum_nbars=1,use_as_lookback_cond=True,lookback_cond_nbar=10)'
 # conditions_params = [
 #   {
@@ -2349,10 +2349,10 @@ class ReturnStats:
 # # # # Generate signals
 # signals = CombiConds.combine_conditions(required_data, updated_params)
 
-# # 'two_line_pos(line1=bu2,line2=sd2,stocks=VN30,rolling_timeframe=30Min,direction=crossover,use_as_lookback_cond=True,lookback_cond_nbar=5)
+# # 'two_line_pos(src1=bu2,src2=sd2,stocks=VN30,rolling_timeframe=30Min,direction=crossover,use_as_lookback_cond=True,lookback_cond_nbar=5)
 # # range_nbars(line=Unwind,lower_thres=20,upper_thres=80,sum_nbars=5,use_as_lookback_cond=False,lookback_cond_nbar=5)'
 
-# # 'cross_no_reverse(line1=bu2,line2=sd2,stocks=Super High Beta,rolling_timeframe=15Min,direction=crossover,bars_no_reverse=10,use_as_lookback_cond=True,lookback_cond_nbar=5) 
+# # 'cross_no_reverse(src1=bu2,src2=sd2,stocks=Super High Beta,rolling_timeframe=15Min,direction=crossover,bars_no_reverse=10,use_as_lookback_cond=True,lookback_cond_nbar=5) 
 # # range_nbars(line=Unwind,lower_thres=30,upper_thres=70,sum_nbars=10,use_as_lookback_cond=True,lookback_cond_nbar=5)'
 
 # Conds.absolute_change_in_range(required_data['bu_30'], **conditions_params)
