@@ -354,7 +354,7 @@ def input_source_functions():
                 'smo_type2': {'type': 'str', 'default': 'EMA', 'values': ['SMA', 'EMA', 'RMA']},
             },
             'outputs': {
-                'output1':{'type': 'line', 'mapping': 'arsi', 'value': 'ursi', 'color': Utils.random_color()},
+                'output1':{'type': 'line', 'mapping': 'arsi',        'value': 'ursi',        'color': Utils.random_color()},
                 'output2':{'type': 'line', 'mapping': 'arsi_signal', 'value': 'ursi_signal', 'color': Utils.random_color()},
             }
         }, 
@@ -370,7 +370,7 @@ def input_source_functions():
                 'use_true_range': {'type': 'bool', 'default': False},
             },
             'outputs': {
-                'output1':{'type': 'bool', 'mapping':'sqz_on', 'value': 'sqz_on', 'color': Utils.random_color()},
+                'output1':{'type': 'bool', 'mapping':'sqz_on',  'value': 'sqz_on',  'color': Utils.random_color()},
                 'output2':{'type': 'bool', 'mapping':'sqz_off', 'value': 'sqz_off', 'color': Utils.random_color()},
             }
         }
@@ -661,6 +661,31 @@ class Ta:
             index=df_ls[0].index
         )
     
+    @staticmethod
+    def apply_rolling(data: PandasObject, window: int, method: str = 'sum'):
+        """Apply rolling operation based on specified method
+        
+        Args:
+            data: Input series/dataframe
+            window: Rolling window size
+            method: Rolling method - 'sum', 'median', 'mean', 'last', 'rank'
+            
+        Returns:
+            Rolled data with specified method
+        """
+        rolling = data.rolling(window)
+        
+        if method == 'sum':
+            return rolling.sum()
+        elif method == 'median':
+            return rolling.median() 
+        elif method == 'mean':
+            return rolling.mean()
+        elif method == 'rank':
+            return (rolling.rank() - 1) / (window - 1) * 100
+        else:
+            raise ValueError(f"Invalid rolling method: {method}. Must be one of: sum, median, mean, rank")
+
 class Indicators:
     """Technical indicators with vectorized operations for both Series and DataFrame"""
     @staticmethod
@@ -1213,8 +1238,6 @@ class Conds:
 
         change = src.diff(periods=n_bars)
         result = (change >= lower_thres) & (change <= upper_thres)
-
-
     
         if use_as_lookback_cond:
             result = Ta.make_lookback(result, lookback_cond_nbar)
@@ -1547,29 +1570,28 @@ class CombiConds:
                 },
             ]
 
-        required_data = {}  # Will store all needed data series/frames
-        original_cols = set()  # Track original columns needed
-        rolling_cols = set()  # Track (col, timeframe, stocks) combinations needed
+        required_data = {}
+        original_cols = set()
+        rolling_cols = set()
         
-        # First pass: Analyze data requirements and update conditions_params
         updated_conditions = []
         for condition in conditions_params:
             rolling_tf = condition['inputs'].get('rolling_timeframe')
+            rolling_method = condition['inputs'].get('rolling_method', 'sum')
             stocks = condition['inputs'].get('stocks', Globs.STOCKS)
             stocks_key = hash('_'.join(sorted(stocks)))
             
-            # Create new condition with updated column names
             new_condition = deepcopy(condition)
             new_condition['inputs'] = {}
             
             for param_name, col_name in condition['inputs'].items():
-                if param_name not in ['rolling_timeframe', 'stocks']:
+                if param_name not in ['rolling_timeframe', 'stocks', 'rolling_method']:
                     if col_name == "":
                         raise InputSourceEmptyError(f"Input {param_name} is empty!")
                     if rolling_tf:
                         rolling_tf_val = Utils.convert_timeframe_to_rolling(rolling_tf)
-                        rolling_cols.add((col_name, rolling_tf_val, stocks_key))
-                        new_key = f"{col_name}_{rolling_tf_val}_{stocks_key}"
+                        rolling_cols.add((col_name, rolling_tf_val, stocks_key, rolling_method))
+                        new_key = f"{col_name}_{rolling_tf_val}_{stocks_key}_{rolling_method}"
                     else:
                         original_cols.add((col_name, stocks_key))
                         new_key = f"{col_name}_None_{stocks_key}"
@@ -1578,7 +1600,7 @@ class CombiConds:
                     new_condition['inputs'][param_name] = condition['inputs'][param_name]
             
             updated_conditions.append(new_condition)
-        
+
         # Group all required columns by unique stocks combinations
         all_cols_by_stocks = {}
         for col, stocks_key in original_cols:
@@ -1586,27 +1608,22 @@ class CombiConds:
                 all_cols_by_stocks[stocks_key] = set()
             all_cols_by_stocks[stocks_key].add(col)
             
-        for col, tf, stocks_key in rolling_cols:
+        for col, tf, stocks_key, _ in rolling_cols:
             if stocks_key not in all_cols_by_stocks:
                 all_cols_by_stocks[stocks_key] = set()
             all_cols_by_stocks[stocks_key].add(col)
 
-        # Load data for each unique stocks combination
+        # Load data for each unique stocks combination  
         for stocks_key, cols in all_cols_by_stocks.items():
-            # Find the original stocks list from conditions_params
-            filtered_stocks = Globs.STOCKS  # Default
+            filtered_stocks = Globs.STOCKS
             for condition in conditions_params:
                 stocks = condition['inputs'].get('stocks', Globs.STOCKS)
                 if hash('_'.join(sorted(stocks))) == stocks_key:
                     filtered_stocks = stocks
                     break
 
-            # Load and process data
-            data: pd.DataFrame = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks, use_sample_data)
+            data = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks, use_sample_data)
             data = data.groupby(level=0, axis=1).sum()
-
-            # append_to_file("/home/ubuntu/Dang/project_ps/logs/test_load_plasma_data.txt", f"{log_str}\n")
-            # print(len(data))
             
             # Add original columns
             for col, sk in original_cols:
@@ -1614,11 +1631,11 @@ class CombiConds:
                     key = f"{col}_None_{stocks_key}"
                     required_data[key] = data[col]
             
-            # Add rolled data
-            for col, tf, sk in rolling_cols:
+            # Add rolled data with specified method
+            for col, tf, sk, method in rolling_cols:
                 if sk == stocks_key:
-                    key = f"{col}_{tf}_{stocks_key}"
-                    required_data[key] = data[col].rolling(tf).sum()
+                    key = f"{col}_{tf}_{sk}_{method}"
+                    required_data[key] = Ta.apply_rolling(data[col], tf, method)
 
         return required_data, updated_conditions
 
@@ -1644,28 +1661,27 @@ class CombiConds:
 
         assert data_src in ['market_stats', 'daily_index'], "`data_src` must be one in `['market_stats', 'daily_index']"
 
-        required_data = {}  # Will store all needed data series/frames
-        original_cols = set()  # Track original columns needed
-        rolling_cols = set()  # Track (col, timeframe) combinations needed
+        required_data = {}
+        original_cols = set()
+        rolling_cols = set()
         
-        # First pass: Analyze data requirements and update conditions_params
         updated_conditions = []
         for condition in conditions_params:
             rolling_tf = condition['inputs'].get('rolling_timeframe')
+            rolling_method = condition['inputs'].get('rolling_method', 'sum')
             
-            # Create new condition with updated column names
             new_condition = deepcopy(condition)
             new_condition['inputs'] = {}
 
             for param_name, col_name in condition['inputs'].items():
-                if param_name not in ['rolling_timeframe', 'stocks']:
+                if param_name not in ['rolling_timeframe', 'stocks', 'rolling_method']:
                     if col_name == "":
                         raise InputSourceEmptyError(f"Input {param_name} is empty!")
                     
                     if rolling_tf:
                         rolling_tf_val = Utils.convert_timeframe_to_rolling(rolling_tf)
-                        rolling_cols.add((col_name, rolling_tf_val))
-                        new_key = f"{col_name}_{rolling_tf_val}"
+                        rolling_cols.add((col_name, rolling_tf_val, rolling_method))
+                        new_key = f"{col_name}_{rolling_tf_val}_{rolling_method}"
                     else:
                         original_cols.add(col_name)
                         new_key = f"{col_name}_None"
@@ -1675,8 +1691,7 @@ class CombiConds:
             
             updated_conditions.append(new_condition)
         
-        # Load all required data efficiently
-        all_cols = {col for col in original_cols} | {col for col, _ in rolling_cols}
+        all_cols = {col for col in original_cols} | {col for col, _, _ in rolling_cols}
 
         if data_src == 'market_stats':
             data = Adapters.load_market_stats_from_plasma(list(all_cols), use_sample_data)
@@ -1688,10 +1703,10 @@ class CombiConds:
             key = f"{col}_None"
             required_data[key] = data[col]
         
-        # Add rolled data
-        for col, tf in rolling_cols:
-            key = f"{col}_{tf}"
-            required_data[key] = data[col].rolling(tf).sum()
+        # Add rolled data with specified method
+        for col, tf, method in rolling_cols:
+            key = f"{col}_{tf}_{method}"
+            required_data[key] = Ta.apply_rolling(data[col], tf, method)
 
         return required_data, updated_conditions
 
@@ -1703,7 +1718,8 @@ class CombiConds:
                     "function": "absolute_change_in_range",
                     "inputs": {
                     "src": "bu",
-                    "rolling_timeframe": "15Min"
+                    "rolling_timeframe": "15Min",
+                    "rolling_method": "median"
                     },
                     "params": {
                     "n_bars": 1,
@@ -1714,29 +1730,29 @@ class CombiConds:
                     }
                 }
             ]
+            stocks = None
 
-        required_data = {}  # Will store all needed data series/frames
-        original_cols = set()  # Track original columns needed
-        rolling_cols = set()  # Track (col, timeframe) combinations needed
+        required_data = {}
+        original_cols = set()
+        rolling_cols = set()
         
-        # First pass: Analyze data requirements and update conditions_params
         updated_conditions = []
         for condition in conditions_params:
             rolling_tf = condition['inputs'].get('rolling_timeframe')
+            rolling_method = condition['inputs'].get('rolling_method', 'sum')
             
-            # Create new condition with updated column names
             new_condition = deepcopy(condition)
             new_condition['inputs'] = {}
             
             for param_name, col_name in condition['inputs'].items():
-                if param_name not in ['rolling_timeframe', 'stocks']:
+                if param_name not in ['rolling_timeframe', 'stocks', 'rolling_method']:
                     if col_name == "":
                         raise InputSourceEmptyError(f"Input {param_name} is empty!")
 
                     if rolling_tf:
                         rolling_tf_val = Utils.convert_timeframe_to_rolling(rolling_tf)
-                        rolling_cols.add((col_name, rolling_tf_val))
-                        new_key = f"{col_name}_{rolling_tf_val}"
+                        rolling_cols.add((col_name, rolling_tf_val, rolling_method))
+                        new_key = f"{col_name}_{rolling_tf_val}_{rolling_method}"
                     else:
                         original_cols.add(col_name)
                         new_key = f"{col_name}_None"
@@ -1746,22 +1762,19 @@ class CombiConds:
             
             updated_conditions.append(new_condition)
         
-        # Load all required data efficiently
-        all_cols = {col for col in original_cols} | {col for col, _ in rolling_cols}
+        all_cols = {col for col in original_cols} | {col for col, _, _ in rolling_cols}
 
         data = Adapters.load_stock_data_from_plasma(list(all_cols), stocks=stocks, load_sample=use_sample_data)
-
-        # print(len(data))
         
         # Add original columns
         for col in original_cols:
             key = f"{col}_None"
             required_data[key] = data[col]
         
-        # Add rolled data
-        for col, tf in rolling_cols:
-            key = f"{col}_{tf}"
-            required_data[key] = data[col].rolling(tf).sum()
+        # Add rolled data with specified method
+        for col, tf, method in rolling_cols:
+            key = f"{col}_{tf}_{method}"
+            required_data[key] = Ta.apply_rolling(data[col], tf, method)
 
         return required_data, updated_conditions
     
@@ -1986,6 +1999,9 @@ class QuerryData:
                 }
             ]
 
+            start_day = '2025_01_13'
+            end_day = '2025_01_14'
+
         start_timestamp = Utils.day_to_timestamp(start_day)
         end_timestamp = Utils.day_to_timestamp(end_day, is_end_day=True)
 
@@ -2057,7 +2073,7 @@ class QuerryData:
 
             result_df = pd.concat([result_df, indexdaily_data], axis=1) if result_df is not None else indexdaily_data 
             result_df = result_df.fillna(method='ffill')
-            result_df = result_df[(result_df.index >= start_timestamp) & (result_df.index <= end_timestamp)]
+            
 
             result_info.extend(indexdaily_info)
 
@@ -2065,6 +2081,8 @@ class QuerryData:
         if result_df is None:
             return {}, {}
         
+        result_df = result_df[(result_df.index >= start_timestamp) & (result_df.index <= end_timestamp)]
+
         def remove_nan_keys(data):
             """Xoá tất cả key có value bằng NaN trong từng object của list"""
             return [{key: value for key, value in obj.items() if not np.isnan(value)} for obj in data]
