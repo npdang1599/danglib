@@ -1,7 +1,6 @@
 from typing import Dict, Union
 import pandas as pd
 import numpy as np
-from danglib.utils import get_traday_from_gsd
 
 from danglib.pslab.resources import Adapters, Globs, RedisHandler
 from danglib.pslab.utils import Utils
@@ -20,6 +19,9 @@ class InputSourceEmptyError(Exception):
 
 PandasObject = Union[pd.Series, pd.DataFrame]
 
+def remove_nan_keys(data):
+    """Xoá tất cả key có value bằng NaN trong từng object của list"""
+    return [{key: value for key, value in obj.items() if not np.isnan(value)} for obj in data]
 
 def append_to_file(filename: str, content: str) -> None:
     """
@@ -72,7 +74,7 @@ def function_mapping():
             'function': Conds.consecutive_above_below,
             'title': 'Consecutive Above/Below',
             'description': "một đường nằm trên/dưới đường khác liên tiếp",
-            'inputs': ['line1', 'line2'],
+            'inputs': ['src1', 'src2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'above', 'values': ['above', 'below']},
                 'num_bars': {'type': 'int', 'default': 5},
@@ -84,7 +86,7 @@ def function_mapping():
             'function': Conds.cross_no_reverse,
             'title': 'Cross Without Reversal',
             'description': "Xác định giao cắt mà không đảo chiều sau đó",
-            'inputs': ['line1', 'line2'],
+            'inputs': ['src1', 'src2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder']},
                 'bars_no_reverse': {'type': 'int', 'default': 5},
@@ -92,11 +94,24 @@ def function_mapping():
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
         },
+        'percentile_in_range': {
+            'function': Conds.percentile_in_range,
+            'title': 'Percentile in Range',
+            'description': "Kiểm tra percentile của source trong khi lookback n bars có nằm trong range giá trị",
+            'inputs': ['src'],
+            'params': {
+                'lookback_period': {'type': 'int', 'default': 20},
+                'lower_thres': {'type': 'float', 'default': -999},
+                'upper_thres': {'type': 'float', 'default': 999},
+                "use_as_lookback_cond" : {'type': 'bool', 'default': False},
+                'lookback_cond_nbar' : {'type': 'int', 'default': 5}
+            },
+        },
         'gap_percentile': {
             'function': Conds.gap_percentile,
             'title': 'Gap Percentile',
             'description': "Kiểm tra khoảng cách giữa hai đường thuộc nhóm phần trăm cao nhất",
-            'inputs': ['line1', 'line2'],
+            'inputs': ['src1', 'src2'],
             'params': {
                 'lookback_period': {'type': 'int', 'default': 20},
                 'threshold': {'type': 'float', 'default': 90},
@@ -108,7 +123,7 @@ def function_mapping():
             'function': Conds.gap_trend,
             'title': 'Gap Trend Analysis',
             'description': "Phân tích xu hướng tăng/giảm của gap giữa hai đường",
-            'inputs': ['line1', 'line2'],
+            'inputs': ['src1', 'src2'],
             'params': {
                 'sign': {'type': 'str', 'default': 'positive', 'values': ['positive', 'negative']},
                 'trend_direction': {'type': 'str', 'default': 'increase', 'values': ['increase', 'decrease']},
@@ -121,7 +136,7 @@ def function_mapping():
             'function': Conds.gap_range,
             'title': 'Gap Range',
             'description': "Kiểm tra khoảng cách giữa hai đường nằm trong một khoảng xác định",
-            'inputs': ['line1', 'line2'],
+            'inputs': ['src1', 'src2'],
             'params': {
                 'lower_thres': {'type': 'float', 'default': -999},
                 'upper_thres': {'type': 'float', 'default': 999},
@@ -172,7 +187,7 @@ def function_mapping():
             'function': Conds.range_nbars,
             'title': 'Total value over n bars in Range',
             'description': " Kiểm tra tổng giá trị của n bars có nằm trong một khoảng xác định",
-            'inputs': ['line'],
+            'inputs': ['src'],
             'params': {
                 'lower_thres': {'type': 'float', 'default': -999},
                 'upper_thres': {'type': 'float', 'default': 999},
@@ -185,7 +200,7 @@ def function_mapping():
             'function': Conds.range_cond,
             'title': 'Value in Range',
             'description': "Kiểm tra giá trị có nằm trong một khoảng xác định",
-            'inputs': ['line'],
+            'inputs': ['src'],
             'params': {
                 'lower_thres': {'type': 'float', 'default': -999},
                 'upper_thres': {'type': 'float', 'default': 999},
@@ -197,10 +212,10 @@ def function_mapping():
             'function': Conds.two_line_pos,
             'title': 'Two Line Position',
             'description': "Kiểm tra vị trí giữa hai đường",
-            'inputs': ['line1', 'line2'],
+            'inputs': ['src1', 'src2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
-                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option line1 crossover line2, mà equal = True thì khi line1 = line2 cũng được xem là crossover, tương tự với crossunder, above, below'},
+                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option src1 crossover src2, mà equal = True thì khi src1 = src2 cũng được xem là crossover, tương tự với crossunder, above, below'},
                 "use_as_lookback_cond" : {'type': 'bool', 'default': False},
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
@@ -230,7 +245,7 @@ def function_mapping():
                 'ma2': {'type': 'int', 'default': 15},
                 'ma_type': {'type': 'str', 'default': 'SMA', 'values': ['SMA', 'EMA']},
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
-                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option line1 crossover line2, mà equal = True thì khi line1 = line2 cũng được xem là crossover, tương tự với crossunder, above, below'},
+                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option src1 crossover src2, mà equal = True thì khi src1 = src2 cũng được xem là crossover, tương tự với crossunder, above, below'},
                 "use_as_lookback_cond" : {'type': 'bool', 'default': False},
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
@@ -246,7 +261,7 @@ def function_mapping():
                 'smooth': {'type': 'int', 'default': 14},
                 'smo_type2': {'type': 'str', 'default': 'EMA', 'values': ['SMA', 'EMA', 'RMA']},
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
-                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option line1 crossover line2, mà equal = True thì khi line1 = line2 cũng được xem là crossover, tương tự với crossunder, above, below'},
+                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option src1 crossover src2, mà equal = True thì khi src1 = src2 cũng được xem là crossover, tương tự với crossunder, above, below'},
                 'range_lower': {'type': 'float', 'default': 30},
                 'range_upper': {'type': 'float', 'default': 70},
                 'use_as_lookback_cond': {'type': 'bool', 'default': False},
@@ -264,7 +279,7 @@ def function_mapping():
                 'slow': {'type': 'int', 'default': 20},
                 'signal_length': {'type': 'int', 'default': 9},
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
-                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option line1 crossover line2, mà equal = True thì khi line1 = line2 cũng được xem là crossover, tương tự với crossunder, above, below'},
+                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option src1 crossover src2, mà equal = True thì khi src1 = src2 cũng được xem là crossover, tương tự với crossunder, above, below'},
                 'range_lower': {'type': 'float', 'default': 30},
                 'range_upper': {'type': 'float', 'default': 70},
                 'use_as_lookback_cond': {'type': 'bool', 'default': False},
@@ -326,7 +341,7 @@ def input_source_functions():
                 'ma_type': {'type': 'str', 'default': 'SMA', 'values': ['SMA', 'EMA', 'RMA']},
             },
             'outputs': {
-                'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA'}
+                'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA', 'color': Utils.random_color()}
             }
         },
         'ursi': {
@@ -341,8 +356,8 @@ def input_source_functions():
                 'smo_type2': {'type': 'str', 'default': 'EMA', 'values': ['SMA', 'EMA', 'RMA']},
             },
             'outputs': {
-                'output1':{'type': 'line', 'mapping': 'arsi', 'value': 'ursi'},
-                'output2':{'type': 'line', 'mapping': 'arsi_signal', 'value': 'ursi_signal'},
+                'output1':{'type': 'line', 'mapping': 'arsi',        'value': 'ursi',        'color': Utils.random_color()},
+                'output2':{'type': 'line', 'mapping': 'arsi_signal', 'value': 'ursi_signal', 'color': Utils.random_color()},
             }
         }, 
         'squeeze': {
@@ -357,11 +372,184 @@ def input_source_functions():
                 'use_true_range': {'type': 'bool', 'default': False},
             },
             'outputs': {
-                'output1':{'type': 'bool', 'mapping':'sqz_on', 'value': 'sqz_on'},
-                'output2':{'type': 'bool', 'mapping':'sqz_off', 'value': 'sqz_off'},
+                'output1':{'type': 'bool', 'mapping':'sqz_on',  'value': 'sqz_on',  'color': Utils.random_color()},
+                'output2':{'type': 'bool', 'mapping':'sqz_off', 'value': 'sqz_off', 'color': Utils.random_color()},
+            }
+        },
+        'macd': {
+            'function': Indicators.macd,
+            'title': 'MACD',
+            'description': "Moving Average Convergence Divergence",
+            'inputs': ['src'],
+            'params': {
+                'r2_period': {'type': 'int', 'default': 20},
+                'fast': {'type': 'int', 'default': 10},
+                'slow': {'type': 'int', 'default': 20},
+                'signal_length': {'type': 'int', 'default': 9}
+            },
+            'outputs': {
+                'output1': {'type': 'line', 'mapping': 'macd', 'value': 'macd', 'color': Utils.random_color()},
+                'output2': {'type': 'line', 'mapping': 'macd_signal', 'value': 'macd_signal', 'color': Utils.random_color()}
+            }
+        },
+        'bbwp': {
+            'function': Indicators.bbwp,
+            'title': 'Bollinger Bands Width Percentile',
+            'description': "Bollinger Bands Width Percentile",
+            'inputs': ['src'],
+            'params': {
+                'basic_type': {'type': 'str', 'default': 'SMA', 'values': ['SMA', 'EMA']},
+                'bbwp_len': {'type': 'int', 'default': 13},
+                'bbwp_lkbk': {'type': 'int', 'default': 128}
+            },
+            'outputs': {
+                'output': {'type': 'line', 'mapping': 'bbwp', 'value': 'bbwp', 'color': Utils.random_color()}
+            }
+        },
+        'bbpctb': {
+            'function': Indicators.bbpctb,
+            'title': 'Bollinger Bands %B',
+            'description': "Bollinger Bands %B",
+            'inputs': ['src'],
+            'params': {
+                'length': {'type': 'int', 'default': 20},
+                'mult': {'type': 'float', 'default': 2}
+            },
+            'outputs': {
+                'output1': {'type': 'line', 'mapping': 'BBpctB', 'value': 'BBpctB', 'color': Utils.random_color()},
+                'output2': {'type': 'line', 'mapping': 'BBpctB_upper', 'value': 'BBpctB_upper', 'color': Utils.random_color()},
+                'output3': {'type': 'line', 'mapping': 'BBpctB_lower', 'value': 'BBpctB_lower', 'color': Utils.random_color()}
+            }
+        },
+        'subtract': {
+            'function': Indicators.subtract,
+            'title': 'Subtract Two Sources',
+            'description': "Calculate the difference between two sources (src1 - src2)",
+            'inputs': ['src1', 'src2'],
+            'params': {},
+            'outputs': {
+                'output': {'type': 'line', 'mapping': 'net', 'value': 'net', 'color': Utils.random_color()}
+            }
+        },
+        'percentile': {
+            'function': Indicators.percentile,
+            'title': 'Percentile Rank',
+            'description': "Calculate rolling percentile rank of values",
+            'inputs': ['src'],
+            'params': {
+                'window': {'type': 'int', 'default': 20}
+            },
+            'outputs': {
+                'output': {'type': 'line', 'mapping': 'percentile', 'value': 'percentile', 'color': Utils.random_color()}
             }
         }
     }
+
+class Resampler:
+    
+    @staticmethod
+    def _calculate_candle_time(timestamps: pd.Series, timeframe):
+        """
+        Tính toán candleTime mới dựa trên timestamps và timeframe
+        
+        Parameters:
+        -----------
+        timestamps : int
+            Timestamp gốc (nanoseconds)
+        timeframe : str
+            Timeframe mới ('1min', '5min', '10min', '30min', '1H', '2H', 'D')
+        """
+
+        # Chuyển timestamps từ nanoseconds sang seconds
+        ts_seconds = timestamps // 1_000_000_000 
+
+        tf_minutes = {
+            '1min': 1,
+            '5min': 5,
+            '10min': 10,
+            '30min': 30,
+            '1H': 60,
+            '2H': 120,
+            'D': 1440
+        }.get(timeframe) * 60
+
+        base_candles = (ts_seconds // tf_minutes) * tf_minutes
+        if timeframe == 'D':
+            new_candles = base_candles + 9*60*60 + 15*60
+        else:
+            seconds_in_day = ts_seconds % 86400
+            
+            # Thời điểm ATC (14:45:00)
+            atc_seconds = 14 * 3600 + 45 * 60  # = 53100
+            
+            new_candles = pd.Series(
+                np.where(seconds_in_day == atc_seconds, ts_seconds, base_candles),
+                index = timestamps.index
+            )
+
+        return new_candles * 1_000_000_000
+
+    @staticmethod
+    def _validate_agg_dict(df: pd.DataFrame, agg_dict: dict):
+        """
+        Kiểm tra và chuẩn hóa agg_dict
+        """
+        if not agg_dict:
+            return {col: 'last' for col in df.columns if col != 'datetime'}
+        
+        # Kiểm tra columns không tồn tại
+        invalid_cols = set(agg_dict.keys()) - set(df.columns)
+        if invalid_cols:
+            raise ValueError(f"Columns không tồn tại trong DataFrame: {invalid_cols}")
+        
+        # Thêm columns còn thiếu với aggregation mặc định là 'last'
+        missing_cols = set(df.columns) - set(agg_dict.keys()) - {'datetime'}
+        if missing_cols:
+            for col in missing_cols:
+                agg_dict[col] = 'last'
+        
+        return agg_dict
+
+    @classmethod
+    def resample_vn_stock_data(cls, df: pd.DataFrame, timeframe='1min', agg_dict=None):
+        """
+        Resample data chứng khoán theo timeframe với custom aggregation
+        
+        Parameters:
+        -----------
+        df : pandas.DataFrame
+            DataFrame gốc với index là candleTime (nanoseconds)
+        timeframe : str
+            Timeframe mới ('1min', '5min', '10min', '30min', '1H', '2H', 'D')
+        agg_dict : dict
+            Dictionary chỉ định phương thức aggregation cho từng column
+        """
+
+        # def test():
+        #     df: pd.DataFrame = sample_data.copy()
+        #     timeframe = '30min'
+        #     agg_dict = {'buyImpact': 'last', 'sellImpact': 'last'}
+
+        # Validate và chuẩn hóa agg_dict
+        agg_dict = cls._validate_agg_dict(df, agg_dict)
+        
+        # Reset index để có thể xử lý candleTime
+        df = df.reset_index()
+
+        # Tính candleTime mới cho mỗi row
+        df['candleTime'] = cls._calculate_candle_time(
+                timestamps=df['candleTime'],
+                timeframe=timeframe
+            )
+
+        df['test'] = pd.to_datetime(df.index)
+        df['test2'] = pd.to_datetime(df['candleTime'])
+        
+        # Group theo candleTime mới và áp dụng aggregation
+        grouped = df.groupby('candleTime').agg(agg_dict)
+        
+        return grouped.sort_index()
+
 
 class Ta:
     """Technical analysis with vectorized operations for both Series and DataFrame"""
@@ -648,6 +836,32 @@ class Ta:
             index=df_ls[0].index
         )
     
+    @staticmethod
+    def apply_rolling(data: PandasObject, window: int, method: str = 'sum'):
+        """Apply rolling operation based on specified method
+        
+        Args:
+            data: Input series/dataframe
+            window: Rolling window size
+            method: Rolling method - 'sum', 'median', 'mean', 'last', 'rank'
+            
+        Returns:
+            Rolled data with specified method
+        """
+        rolling = data.rolling(window)
+        
+        if method == 'sum':
+            return rolling.sum()
+        elif method == 'median':
+            return rolling.median() 
+        elif method == 'mean':
+            return rolling.mean()
+        elif method == 'rank':
+            return (rolling.rank() - 1) / (window - 1) * 100
+        else:
+            raise ValueError(f"Invalid rolling method: {method}. Must be one of: sum, median, mean, rank")
+
+
 class Indicators:
     """Technical indicators with vectorized operations for both Series and DataFrame"""
     @staticmethod
@@ -841,9 +1055,14 @@ class Indicators:
         
         if isinstance(src, pd.Series):
             macd = pd.Series(np_macd, index=origin_index)
+            macd.name = 'macd'
+            
         else:
             macd = pd.DataFrame(np_macd, index=origin_index, columns=src.columns)
+
         signal = Ta.ema(macd, signal_length)
+        if isinstance(macd, pd.Series):
+            signal.name = 'macd_signal'
 
         return macd, signal
 
@@ -869,16 +1088,23 @@ class Indicators:
 
         index = src.reset_index(drop=True).index
         bbwp_denominator = pd.Series(np.where(index < bbwp_lkbk, index, bbwp_lkbk), index=src.index)
-        _bbw_sum = (_bbw.rolling(bbwp_lkbk + 1, min_periods= bbwp_len).rank() - 1).div(bbwp_denominator, axis=0)
+        _bbw_sum = (
+            _bbw.rolling(
+                bbwp_lkbk + 1, 
+                min_periods= bbwp_len
+                ).rank() - 1
+            ).div(bbwp_denominator, axis=0) * 100
 
-        return _bbw_sum * 100
+        if isinstance(src, pd.Series):
+            _bbw_sum.name = 'bbwp'
+
+        return _bbw_sum
     
     @staticmethod
     def bbpctb(
         src: PandasObject, 
         length: int = 20, 
         mult: float = 2, 
-        return_upper_lower = False
     ):
         """bbpctb"""
 
@@ -893,10 +1119,35 @@ class Indicators:
         upper = basic + dev
         lower = basic - dev
         bbpctb = (src - lower) / (upper - lower) * 100
-        if not return_upper_lower:
-            return bbpctb
-        else:
-            return bbpctb, upper, lower
+
+        if isinstance(src, pd.Series):
+            bbpctb.name = 'BBpctB'
+            upper.name = 'BBpctB_upper'
+            lower.name = 'BBpctB_lower'
+
+        return bbpctb, upper, lower
+
+    @staticmethod
+    def subtract(src1: PandasObject, src2: PandasObject):
+        """Calculate the difference between two sources"""
+        result: PandasObject = src1 - src2
+        
+        if isinstance(src1, pd.Series):
+            result.name = 'net'
+            
+        return result
+
+    @staticmethod
+    def percentile(src: PandasObject, window: int = 20):
+        """Calculate rolling percentile rank"""
+        result: PandasObject = Ta.rolling_rank(src, window)
+        
+        if isinstance(src, pd.Series):
+            result.name = 'percentile'
+            
+        return result
+
+   
 
 class Conds:
     """Market condition analysis functions with vectorized operations"""
@@ -962,8 +1213,8 @@ class Conds:
 
     @staticmethod
     def two_line_pos(
-        line1: PandasObject,
-        line2: PandasObject,
+        src1: PandasObject,
+        src2: PandasObject,
         direction: str = 'crossover',
         equal: bool = False,
         use_as_lookback_cond: bool = False,
@@ -973,8 +1224,8 @@ class Conds:
         """Check relative position of two lines
         
         Args:
-            line1: pd.Series or pd.DataFrame 
-            line2: pd.Series or pd.DataFrame
+            src1: pd.Series or pd.DataFrame 
+            src2: pd.Series or pd.DataFrame
             direction: 'crossover', 'crossunder', 'above', or 'below'
             equal: Whether to include equal values in comparison
         """
@@ -983,13 +1234,13 @@ class Conds:
             return None
             
         if direction == "crossover":
-            result = Ta.crossover(line1, line2)
+            result = Ta.crossover(src1, src2)
         elif direction == "crossunder":
-            result = Ta.crossunder(line1, line2)
+            result = Ta.crossunder(src1, src2)
         elif direction == "above":
-            result = line1 >= line2 if equal else line1 > line2
+            result = src1 >= src2 if equal else src1 > src2
         elif direction == "below":
-            result = line1 <= line2 if equal else line1 < line2
+            result = src1 <= src2 if equal else src1 < src2
         
         if use_as_lookback_cond:
             result = Ta.make_lookback(result, lookback_cond_nbar)
@@ -998,8 +1249,8 @@ class Conds:
 
     @staticmethod
     def consecutive_above_below(
-        line1: PandasObject,
-        line2: PandasObject,
+        src1: PandasObject,
+        src2: PandasObject,
         direction: str = 'above',
         num_bars: int = 5,
         use_as_lookback_cond: bool = False,
@@ -1009,8 +1260,8 @@ class Conds:
         """Check for consecutive bars where one line is above/below another
         
         Args:
-            line1: pd.Series or pd.DataFrame
-            line2: pd.Series or pd.DataFrame
+            src1: pd.Series or pd.DataFrame
+            src2: pd.Series or pd.DataFrame
             direction: 'above' or 'below'
             num_bars: Required number of consecutive bars
         """
@@ -1018,7 +1269,7 @@ class Conds:
             return None
         
         # Create condition based on direction
-        condition = line1 > line2 if direction == "above" else line1 < line2
+        condition = src1 > src2 if direction == "above" else src1 < src2
         
         # Count consecutive occurrences
         streak = Ta.streak_count(condition)
@@ -1031,8 +1282,8 @@ class Conds:
 
     @staticmethod
     def cross_no_reverse(
-        line1: PandasObject,
-        line2: PandasObject,
+        src1: PandasObject,
+        src2: PandasObject,
         direction: str = "crossover",
         bars_no_reverse: int = 5,
         use_as_lookback_cond: bool = False,
@@ -1042,8 +1293,8 @@ class Conds:
         """Check for crosses without reversal within specified period
         
         Args:
-            line1: pd.Series or pd.DataFrame
-            line2: pd.Series or pd.DataFrame
+            src1: pd.Series or pd.DataFrame
+            src2: pd.Series or pd.DataFrame
             direction: 'crossover' or 'crossunder'
             bars_no_reverse: Number of bars to check for no reversal
         """
@@ -1051,8 +1302,8 @@ class Conds:
             return None
 
         # Get initial cross signals
-        cross_signals = Ta.crossover(line1, line2) if direction == "crossover" else Ta.crossunder(line1, line2)
-        reverse_signals = Ta.crossunder(line1, line2) if direction == "crossover" else Ta.crossover(line1, line2)
+        cross_signals = Ta.crossover(src1, src2) if direction == "crossover" else Ta.crossunder(src1, src2)
+        reverse_signals = Ta.crossunder(src1, src2) if direction == "crossover" else Ta.crossover(src1, src2)
 
         # Check for reverse signals in forward window
         reverse_windows = reverse_signals.rolling(window=bars_no_reverse, min_periods=1).sum()
@@ -1096,7 +1347,7 @@ class Conds:
 
     @staticmethod
     def range_nbars(
-        line: PandasObject,
+        src: PandasObject,
         lower_thres: float,
         upper_thres: float,
         sum_nbars: int = 1,
@@ -1114,7 +1365,7 @@ class Conds:
         if not useflag:
             return None
         
-        src = line.rolling(sum_nbars).sum()
+        src = src.rolling(sum_nbars).sum()
         
         result = (src >= lower_thres) & (src <= upper_thres)
     
@@ -1124,7 +1375,7 @@ class Conds:
 
     @staticmethod
     def range_cond(
-        line: PandasObject,
+        src: PandasObject,
         lower_thres: float,
         upper_thres: float,
         use_as_lookback_cond: bool = False,
@@ -1134,14 +1385,14 @@ class Conds:
         """Check if values are within specified range
         
         Args:
-            line: pd.Series or pd.DataFrame
+            src: pd.Series or pd.DataFrame
             lower_thres: Lower bound of range
             upper_thres: Upper bound of range
         """
         if not useflag:
             return None
         
-        result = (line >= lower_thres) & (line <= upper_thres)
+        result = (src >= lower_thres) & (src <= upper_thres)
     
         if use_as_lookback_cond:
             result = Ta.make_lookback(result, lookback_cond_nbar)
@@ -1200,8 +1451,6 @@ class Conds:
 
         change = src.diff(periods=n_bars)
         result = (change >= lower_thres) & (change <= upper_thres)
-
-
     
         if use_as_lookback_cond:
             result = Ta.make_lookback(result, lookback_cond_nbar)
@@ -1209,8 +1458,8 @@ class Conds:
 
     @staticmethod
     def gap_trend(
-        line1: PandasObject,
-        line2: PandasObject,
+        src1: PandasObject,
+        src2: PandasObject,
         sign: str = "positive",
         trend_direction: str = "increase",
         trend_bars: int = 5,
@@ -1221,8 +1470,8 @@ class Conds:
         """Analyze trend in gap between two lines
         
         Args:
-            line1: pd.Series or pd.DataFrame
-            line2: pd.Series or pd.DataFrame
+            src1: pd.Series or pd.DataFrame
+            src2: pd.Series or pd.DataFrame
             sign: 'positive' or 'negative' gap
             trend_direction: 'increase' or 'decrease'
             trend_bars: Number of bars for trend confirmation
@@ -1231,7 +1480,7 @@ class Conds:
             return None
         
         # Calculate gap and its properties
-        gap = line1 - line2
+        gap = src1 - src2
         gap_sign_cond = gap > 0 if sign == "positive" else gap < 0
         gap_change = gap.diff()
         trend_cond = gap_change > 0 if trend_direction == "increase" else gap_change < 0
@@ -1245,8 +1494,8 @@ class Conds:
 
     @staticmethod
     def gap_percentile(
-        line1: PandasObject,
-        line2: PandasObject,
+        src1: PandasObject,
+        src2: PandasObject,
         lookback_period: int = 20,
         threshold: float = 90,
         use_as_lookback_cond: bool = False,
@@ -1256,15 +1505,15 @@ class Conds:
         """Check if gap between lines is in high percentile
         
         Args:
-            line1: pd.Series or pd.DataFrame
-            line2: pd.Series or pd.DataFrame
+            src1: pd.Series or pd.DataFrame
+            src2: pd.Series or pd.DataFrame
             lookback_period: Period for percentile calculation
             threshold: Percentile threshold
         """
         if not useflag:
             return None
         
-        gap = abs(line1 - line2)
+        gap = abs(src1 - src2)
         gap_rank = Ta.rolling_rank(gap, lookback_period)
         result = gap_rank >= threshold
     
@@ -1274,8 +1523,8 @@ class Conds:
 
     @staticmethod
     def gap_range(
-        line1: PandasObject,
-        line2: PandasObject,
+        src1: PandasObject,
+        src2: PandasObject,
         lower_thres: float = -999,
         upper_thres: float = 999,
         use_as_lookback_cond: bool = False,
@@ -1284,13 +1533,29 @@ class Conds:
         """Check if gap between lines is within specified range
         
         Args:
-            line1: pd.Series or pd.DataFrame
-            line2: pd.Series or pd.DataFrame
+            src1: pd.Series or pd.DataFrame
+            src2: pd.Series or pd.DataFrame
             lower_thres: Lower bound for gap
             upper_thres: Upper bound for gap
         """
-        gap = line1 - line2
+        gap = src1 - src2
         result = (gap >= lower_thres) & (gap <= upper_thres)
+        if use_as_lookback_cond:
+            result = Ta.make_lookback(result, lookback_cond_nbar)
+        return result
+
+    @staticmethod
+    def percentile_in_range(
+        src: PandasObject,
+        lookback_period: int = 20,
+        lower_thres: float = 10,
+        upper_thres: float = 90,
+        use_as_lookback_cond: bool = False,
+        lookback_cond_nbar = 5,
+        ):
+        """Check if values are within specified percentile range"""
+        rank = Ta.rolling_rank(src, lookback_period)
+        result = (rank >= lower_thres) & (rank <= upper_thres)
         if use_as_lookback_cond:
             result = Ta.make_lookback(result, lookback_cond_nbar)
         return result
@@ -1444,13 +1709,13 @@ class Conds:
 
             length = int(length)
 
-            bbpctb = Indicators.bbpctb(src, length, mult)
+            bbpctb, _, _ = Indicators.bbpctb(src, length, mult)
 
             cross_l = Utils.new_1val_pdObj(100 if cross_line == "Upper band" else 0, src)
 
             res = Conds.two_line_pos(
-                line1=bbpctb,
-                line2=cross_l,
+                src1=bbpctb,
+                src2=cross_l,
                 direction=direction
             )
 
@@ -1472,182 +1737,271 @@ class Conds:
         ):
             ma1_line, ma2_line = Indicators.two_MA(src, ma1, ma2, ma_type)
             return Conds.two_line_pos(ma1_line, ma2_line, direction, equal, use_as_lookback_cond, lookback_cond_nbar)
-class DataLoader:
-    """Interface for different data loading strategies"""
+
+
+class CombiConds:
     @staticmethod
-    def load(columns: list, **kwargs) -> pd.DataFrame:
-        raise NotImplementedError
+    def load_and_process_group_data(conditions_params: list[dict], use_sample_data = False):
+
+        def test():
+            conditions_params = [
+                {
+                    'function': "is_in_top_bot_percentile",
+                    'inputs': {
+                        'src': 'bu2',
+                        'stocks': ['VN30', 'Super High Beta'],
+                        'rolling_timeframe': '15Min'
+                    },
+                    'params': {
+                        'lookback_period': 1000,
+                        'direction': 'top',
+                        'threshold': 90,
+                        'use_as_lookback_cond': False,
+                        'lookback_cond_nbar': 5
+                    }
+                },
+                {
+                    'function': 'gap_trend',
+                    'inputs': {
+                        'src1': 'bid',
+                        'src2': 'ask',
+                        'stocks': ['HPG', 'SSI', 'NVL']
+                    },
+                    'params': {
+                        'direction': 'above'
+                    }
+                },
+                {
+                    'function': 'two_line_pos',
+                    'inputs': {
+                        'src1': 'bu',
+                        'src2': 'sd',
+                        'stocks': ['SSI', 'NVL', "VN30"],
+                    },
+                    'params': {
+                        'direction': 'crossover'
+                    }
+                },
+            ]
+
+        required_data = {}
+        original_cols = set()
+        rolling_cols = set()
         
-class StockDataLoader(DataLoader):
-    @staticmethod
-    def load(columns: list, stocks: list = None) -> pd.DataFrame:
-        return Adapters.load_stock_data_from_plasma(columns, stocks=stocks)
-
-class GroupDataLoader(DataLoader):
-    @staticmethod 
-    def load(columns: list, stocks: list) -> pd.DataFrame:
-        data = Adapters.load_groups_and_stocks_data_from_plasma(columns, stocks)
-        return data.groupby(level=0, axis=1).sum()
-
-class SeriesDataLoader(DataLoader):
-    @staticmethod
-    def load(columns: list, data_src: str = 'market_stats') -> pd.DataFrame:
-        loaders = {
-            'market_stats': Adapters.load_market_stats_from_plasma,
-            'daily_index': Adapters.load_index_daily_ohlcv_from_plasma
-        }
-        return loaders[data_src](columns)
-
-class DataProcessor:
-    """Handles data processing logic"""
-    @staticmethod
-    def process_conditions(conditions: list[dict]) -> tuple[set, dict, list[dict], dict]:
-        columns = set()
-        rolling_info = {}  # {(col, timeframe): stock_key}
         updated_conditions = []
-        stocks_info = {}  # {stock_key: stock_list}
-
-        for condition in conditions:
+        for condition in conditions_params:
+            # Ưu tiên rolling_window nếu có, nếu không thì dùng rolling_timeframe
+            rolling_window = condition['inputs'].get('rolling_window')
+            rolling_tf = condition['inputs'].get('rolling_timeframe')
+            rolling_method = condition['inputs'].get('rolling_method', 'sum')
+            stocks = condition['inputs'].get('stocks', Globs.STOCKS)
+            stocks_key = hash('_'.join(sorted(stocks)))
+            
             new_condition = deepcopy(condition)
             new_condition['inputs'] = {}
             
-            stocks = condition['inputs'].get('stocks')
-            rolling_tf = condition['inputs'].get('rolling_timeframe')
-            
-            # Handle stock key for group data
-            stock_key = None
-            if stocks:
-                stock_key = hash('_'.join(sorted(stocks)))
-                stocks_info[stock_key] = stocks
-                new_condition['stock_key'] = stock_key  # Store stock_key in condition for group processing
-
             for param_name, col_name in condition['inputs'].items():
-                if param_name not in ['rolling_timeframe', 'stocks']:
-                    if not col_name:
+                if param_name not in ['rolling_timeframe', 'rolling_window', 'stocks', 'rolling_method']:
+                    if col_name == "":
                         raise InputSourceEmptyError(f"Input {param_name} is empty!")
-
-                    columns.add(col_name)
-                    if rolling_tf:
-                        tf_val = Utils.convert_timeframe_to_rolling(rolling_tf)
-                        rolling_info[(col_name, tf_val)] = stock_key
-                    new_condition['inputs'][param_name] = DataProcessor._make_key(
-                        col_name, rolling_tf, stock_key
-                    )
+                    if rolling_window is not None or rolling_tf:
+                        rolling_tf_val = rolling_window if rolling_window is not None else Utils.convert_timeframe_to_rolling(rolling_tf)
+                        rolling_cols.add((col_name, rolling_tf_val, stocks_key, rolling_method))
+                        new_key = f"{col_name}_{rolling_tf_val}_{stocks_key}_{rolling_method}"
+                    else:
+                        original_cols.add((col_name, stocks_key))
+                        new_key = f"{col_name}_None_{stocks_key}"
+                    new_condition['inputs'][param_name] = new_key
                 else:
                     new_condition['inputs'][param_name] = condition['inputs'][param_name]
             
             updated_conditions.append(new_condition)
 
-        return columns, rolling_info, updated_conditions, stocks_info
+        # Group all required columns by unique stocks combinations
+        all_cols_by_stocks = {}
+        for col, stocks_key in original_cols:
+            if stocks_key not in all_cols_by_stocks:
+                all_cols_by_stocks[stocks_key] = set()
+            all_cols_by_stocks[stocks_key].add(col)
+            
+        for col, tf, stocks_key, _ in rolling_cols:
+            if stocks_key not in all_cols_by_stocks:
+                all_cols_by_stocks[stocks_key] = set()
+            all_cols_by_stocks[stocks_key].add(col)
+
+        # Load data for each unique stocks combination  
+        for stocks_key, cols in all_cols_by_stocks.items():
+            filtered_stocks = Globs.STOCKS
+            for condition in conditions_params:
+                stocks = condition['inputs'].get('stocks', Globs.STOCKS)
+                if hash('_'.join(sorted(stocks))) == stocks_key:
+                    filtered_stocks = stocks
+                    break
+
+            data = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks, use_sample_data)
+            data = data.groupby(level=0, axis=1).sum()
+            
+            # Add original columns
+            for col, sk in original_cols:
+                if sk == stocks_key:
+                    key = f"{col}_None_{stocks_key}"
+                    required_data[key] = data[col]
+            
+            # Add rolled data with specified method
+            for col, tf, sk, method in rolling_cols:
+                if sk == stocks_key:
+                    key = f"{col}_{tf}_{sk}_{method}"
+                    required_data[key] = Ta.apply_rolling(data[col], tf, method)
+
+        return required_data, updated_conditions
 
     @staticmethod
-    def _make_key(col: str, timeframe=None, stock_key=None) -> str:
-        key = f"{col}_{timeframe if timeframe else 'None'}"
-        return f"{key}_{stock_key}" if stock_key else key
+    def load_and_process_one_series_data(conditions_params: list[dict], data_src: str = 'market_stats', use_sample_data=False):
 
-    @staticmethod
-    def prepare_data(data: pd.DataFrame, columns: set, rolling_info: dict) -> dict:
-        result = {}
-        
-        for col in columns:
-            key = DataProcessor._make_key(col)
-            result[key] = data[col]
+        def test():
+            conditions_params = [
+                {
+                    "function": "absolute_change_in_range",
+                    "inputs": {
+                    "src": "VnindexClose",
+                    },
+                    "params": {
+                    "n_bars": 5,
+                    "lower_thres": 1,
+                    "upper_thres": 999,
+                    "use_as_lookback_cond": False,
+                    "lookback_cond_nbar": 5
+                    }
+                }
+            ]
 
-        for (col, tf), stock_key in rolling_info.items():
-            key = DataProcessor._make_key(col, tf, stock_key)
-            result[key] = data[col].rolling(tf).sum()
+        assert data_src in ['market_stats', 'daily_index'], "`data_src` must be one in `['market_stats', 'daily_index']"
 
-        return result
-
-class CombiConds:
-    _loaders = {
-        'stock': StockDataLoader,
-        'group': GroupDataLoader,
-        'series': SeriesDataLoader
-    }
-
-    @classmethod
-    def load_and_process_data(cls, conditions: list[dict], data_type: str, **kwargs) -> tuple[dict, list]:
-        if data_type not in cls._loaders:
-            raise ValueError(f"Invalid data_type. Must be one of {list(cls._loaders.keys())}")
-        
-
-        columns, rolling_info, updated_conditions, stocks_info = DataProcessor.process_conditions(conditions)
-        loader = cls._loaders[data_type]
         required_data = {}
+        original_cols = set()
+        rolling_cols = set()
+        
+        updated_conditions = []
+        for condition in conditions_params:
+            # Ưu tiên rolling_window nếu có, nếu không thì dùng rolling_timeframe
+            rolling_window = condition['inputs'].get('rolling_window')
+            rolling_tf = condition['inputs'].get('rolling_timeframe') 
+            rolling_method = condition['inputs'].get('rolling_method', 'sum')
+            
+            new_condition = deepcopy(condition)
+            new_condition['inputs'] = {}
 
-        if data_type == 'group':
-            # Group conditions by stock_key
-            conditions_by_stock = {}
-            for condition in updated_conditions:
-                stock_key = condition.pop('stock_key', None)  # Remove stock_key from condition
-                if stock_key not in conditions_by_stock:
-                    conditions_by_stock[stock_key] = []
-                conditions_by_stock[stock_key].append(condition)
+            for param_name, col_name in condition['inputs'].items():
+                if param_name not in ['rolling_timeframe', 'rolling_window', 'stocks', 'rolling_method']:
+                    if col_name == "":
+                        raise InputSourceEmptyError(f"Input {param_name} is empty!")
+                    
+                    if rolling_window is not None or rolling_tf:
+                        rolling_tf_val = rolling_window if rolling_window is not None else Utils.convert_timeframe_to_rolling(rolling_tf)
+                        rolling_cols.add((col_name, rolling_tf_val, rolling_method))
+                        new_key = f"{col_name}_{rolling_tf_val}_{rolling_method}"
+                    else:
+                        original_cols.add(col_name)
+                        new_key = f"{col_name}_None"
+                    new_condition['inputs'][param_name] = new_key
+                else:
+                    new_condition['inputs'][param_name] = condition['inputs'][param_name]
             
-            # Process each stock group separately
-            for stock_key, stock_conditions in conditions_by_stock.items():
-                data = loader.load(list(columns), stocks=stocks_info[stock_key])
-                group_data = DataProcessor.prepare_data(data, columns, rolling_info)
-                required_data.update(group_data)
-            
-            # Update conditions to include only relevant ones
-            updated_conditions = [cond for conds in conditions_by_stock.values() for cond in conds]
+            updated_conditions.append(new_condition)
+        
+        all_cols = {col for col in original_cols} | {col for col, _, _ in rolling_cols}
+
+        if data_src == 'market_stats':
+            data = Adapters.load_market_stats_from_plasma(list(all_cols), use_sample_data)
         else:
-            data = loader.load(list(columns), **kwargs)
-            required_data = DataProcessor.prepare_data(data, columns, rolling_info)
+            data = Adapters.load_index_daily_ohlcv_from_plasma(list(all_cols), use_sample_data)
+        
+        # Add original columns
+        for col in original_cols:
+            key = f"{col}_None"
+            required_data[key] = data[col]
+        
+        # Add rolled data with specified method
+        for col, tf, method in rolling_cols:
+            key = f"{col}_{tf}_{method}"
+            required_data[key] = Ta.apply_rolling(data[col], tf, method)
+
+        return required_data, updated_conditions
+
+    @staticmethod
+    def load_and_process_stock_data(conditions_params: list[dict], stocks: list = None, use_sample_data=False):
+        def test():
+            conditions_params = [
+                {
+                    "function": "absolute_change_in_range",
+                    "inputs": {
+                    "src": "bu",
+                    "rolling_timeframe": "15Min",
+                    "rolling_method": "sum"
+                    },
+                    "params": {
+                    "n_bars": 1,
+                    "lower_thres": 10,
+                    "upper_thres": 999,
+                    "use_as_lookback_cond": False,
+                    "lookback_cond_nbar": 5
+                    }
+                }
+            ]
+            stocks = None
+            use_sample_data = True
+
+        required_data = {}
+        original_cols = set()
+        rolling_cols = set()
+        
+        updated_conditions = []
+        for condition in conditions_params:
+            # Ưu tiên rolling_window nếu có, nếu không thì dùng rolling_timeframe
+            rolling_window = condition['inputs'].get('rolling_window')
+            rolling_tf = condition['inputs'].get('rolling_timeframe')
+            rolling_method = condition['inputs'].get('rolling_method', 'sum')
+            
+            new_condition = deepcopy(condition)
+            new_condition['inputs'] = {}
+            
+            for param_name, col_name in condition['inputs'].items():
+                if param_name not in ['rolling_timeframe', 'rolling_window', 'stocks', 'rolling_method']:
+                    if col_name == "":
+                        raise InputSourceEmptyError(f"Input {param_name} is empty!")
+
+                    if rolling_window is not None or rolling_tf:
+                        rolling_tf_val = rolling_window if rolling_window is not None else Utils.convert_timeframe_to_rolling(rolling_tf)
+                        rolling_cols.add((col_name, rolling_tf_val, rolling_method))
+                        new_key = f"{col_name}_{rolling_tf_val}_{rolling_method}"
+                    else:
+                        original_cols.add(col_name)
+                        new_key = f"{col_name}_None"
+                    new_condition['inputs'][param_name] = new_key
+                else:
+                    new_condition['inputs'][param_name] = condition['inputs'][param_name]
+            
+            updated_conditions.append(new_condition)
+        
+        all_cols = {col for col in original_cols} | {col for col, _, _ in rolling_cols}
+
+        data = Adapters.load_stock_data_from_plasma(list(all_cols), stocks=stocks, load_sample=use_sample_data)
+        
+        # Add original columns
+        for col in original_cols:
+            key = f"{col}_None"
+            required_data[key] = data[col]
+        
+        # Add rolled data with specified method
+        for col, tf, method in rolling_cols:
+            key = f"{col}_{tf}_{method}"
+            required_data[key] = Ta.apply_rolling(data[col], tf, method)
 
         return required_data, updated_conditions
     
     @staticmethod
     def combine_conditions(required_data: dict[str, pd.DataFrame], conditions_params: list[dict]):
         """Combine multiple conditions with optimized data loading and rolling operations"""
-
-        test_conditions = [
-            {
-                'function': "is_in_top_bot_percentile",
-                'inputs': {
-                    'src': 'bu2',
-                    'stocks': ['VN30', 'Super High Beta'],
-                    'rolling_timeframe': '15Min'
-                },
-                'params': {
-                    'lookback_period': 1000,
-                    'direction': 'top',
-                    'threshold': 90,
-                    'use_as_lookback_cond': False,
-                    'lookback_cond_nbar': 5
-                }
-            },
-            {
-                'function': 'gap_trend',
-                'inputs': {
-                    'line1': 'bid',
-                    'line2': 'ask',
-                    'stocks': ['HPG', 'SSI', 'NVL']
-                },
-                'params': {
-                    'direction': 'above'
-                }
-            },
-            {
-                'function': 'two_line_pos',
-                'inputs': {
-                    'line1': 'bu',
-                    'line2': 'sd',
-                    'stocks': ['SSI', 'NVL', "VN30"],
-                },
-                'params': {
-                    'direction': 'crossover'
-                }
-            },
-        ]
-
-        required_data, conditions_params = CombiConds.load_and_process_data(
-            test_conditions,
-            data_type='group'
-        )
-
         # Get function mapping
         func_map = function_mapping()
         
@@ -1665,7 +2019,7 @@ class CombiConds:
             func_inputs = {
                 param_name: required_data[col_name]
                 for param_name, col_name in condition['inputs'].items()
-                if param_name not in ['rolling_timeframe', 'stocks']
+                if param_name not in ['rolling_timeframe', 'rolling_method', 'rolling_window', 'stocks']
             }
 
             # Apply condition function
@@ -1676,10 +2030,11 @@ class CombiConds:
         
         return result
 
+
 class QuerryData:
 
     @staticmethod
-    def load_data(required_data: dict[str, pd.DataFrame], conditions_params: list[dict]):
+    def load_data(required_data: dict[str, pd.DataFrame], conditions_params: list[dict], sub_rediskey: str=''):
         def test():
             other_params = [
                 {
@@ -1692,7 +2047,7 @@ class QuerryData:
                         'ma_type': 'EMA'
                     },
                     'outputs': {
-                        'MA': 'MA'
+                        'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA', 'color': Utils.random_color()}
                     }
                 },
                 {
@@ -1705,7 +2060,7 @@ class QuerryData:
                         'ma_type': 'EMA'
                     },
                     'outputs': {
-                        'MA': 'MA1'
+                        'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA1', 'color': Utils.random_color()}
                     }
                 },
                 {
@@ -1720,14 +2075,30 @@ class QuerryData:
                         'smo_type2': 'EMA'
                     },
                     'outputs': {
-                        'arsi': 'ursi',
-                        'arsi_signal': 'ursi_signal'
+                        'output1':{'type': 'line', 'mapping': 'arsi', 'value': 'ursi', 'color': Utils.random_color()},
+                        'output2':{'type': 'line', 'mapping': 'arsi_signal', 'value': 'ursi_signal', 'color': Utils.random_color()},
+                    }
+                }
+            ]
+
+            dailyindex_params = [
+                {
+                    "function": "MA",
+                    "inputs": {
+                        "src": "F1Close",
+                    },
+                    "params": {
+                        'window': 10,
+                        'ma_type': 'EMA'
+                    },
+                    'outputs': {
+                        'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA3', 'color': Utils.random_color()}
                     }
                 }
             ]
 
             required_data, conditions_params  = CombiConds.load_and_process_one_series_data(
-                conditions_params=other_params
+                conditions_params=dailyindex_params, data_src='daily_index'
             )
 
         redis_handler = RedisHandler()
@@ -1737,10 +2108,8 @@ class QuerryData:
         
         # Process conditions and combine results
         result = None
+        data_info = []
         for condition in conditions_params:
-            # Skip if useflag is False
-            if not condition['params'].get('useflag', True):
-                continue
                 
             # Get condition function
             func = func_map[condition['function']]['function']
@@ -1749,34 +2118,196 @@ class QuerryData:
             func_inputs = {
                 param_name: required_data[col_name]
                 for param_name, col_name in condition['inputs'].items()
-                if param_name not in ['rolling_timeframe', 'stocks']
+                if param_name not in ['rolling_timeframe', 'rolling_method', 'rolling_window', 'stocks']
             }
 
-            func_outputs = condition['outputs']
-
             def _redis_cache(func_inputs, condition):
-                key = redis_handler.create_hash_key(str(condition), prefix='pslab/stockcount/test')
+                hash_condition = {k: v for k, v in condition.items() if k != 'outputs'}
+
+                key = redis_handler.create_hash_key(str(hash_condition), prefix=f'pslab/stockcount/source/{sub_rediskey}')
+
+                func_outputs = {
+                    k['mapping']: k['value'] for k in condition['outputs'].values()
+                }
+
+                style_mapping = {
+                    k['value'] : k['type'] for k in condition['outputs'].values()
+                }
+
+                color_mapping = {
+                    k['value'] : k['color'] for k in condition['outputs'].values()
+                }
+
+                col_mapping = {
+                    k['value'] : k['mapping'] for k in condition['outputs'].values()
+                }
+
                 if redis_handler.check_exist(key):
-                    data = redis_handler.get_key(key, pickle_data=True)
+                    df_data = redis_handler.get_key(key, pickle_data=True)
                 else:
                     data = func(**func_inputs, **condition['params'])
-                    redis_handler.set_key_with_ttl(key, data, pickle_data=True)
+                    if isinstance(data, pd.Series):
+                        df_data = pd.DataFrame(data)
+                    else:
+                        df_data = pd.concat(data, axis=1)
+                    redis_handler.set_key_with_ttl(key, df_data, pickle_data=True)
 
-                return data
+                df_data: pd.DataFrame = df_data.rename(columns=func_outputs)
 
-            # Apply condition function
-            data = _redis_cache(func_inputs, condition)
+                info = [{'name': c, 'key': f"{key}-{col_mapping[c]}", 'type': style_mapping[c], 'color': color_mapping[c], 'mapping':col_mapping[c]} for c in df_data.columns]
 
-            if isinstance(data, pd.Series):
-                df_data = pd.DataFrame(data)
-            else:
-                df_data = pd.concat(data, axis=1)
-            df_data = df_data.rename(columns=func_outputs)
-            
+                return df_data, info
+
+            df_data, info = _redis_cache(func_inputs, condition)
+
+            data_info.extend(info)
+
             if result is None:
                 result = df_data.copy()
             else:
                 result = pd.concat([result, df_data], axis=1)
+
+        return result, data_info
+
+    def load_all_data(group_params, other_params, dailyindex_params, start_day, end_day):
+
+        def test():
+            group_params = [
+                {
+                    "function": "MA",
+                    "inputs": {
+                        "src": "bu2",
+                        "stocks": ["All"]
+                    },
+                    "params": {
+                        'window': 10,
+                        'ma_type': 'EMA'
+                    },
+                    'outputs': {
+                        'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA', 'color': '#92c12e'}
+                    }
+                }
+            ]
+
+            other_params = [
+                {
+                    "function": "MA",
+                    "inputs": {
+                        "src": "Arbit",
+                    },
+                    "params": {
+                        'window': 30,
+                        'ma_type': 'EMA'
+                    },
+                    'outputs': {
+                        'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA2', 'color': '#0c8fbd'}
+                    }
+                }
+            ]
+
+            dailyindex_params = [
+                {
+                    "function": "MA",
+                    "inputs": {
+                        "src": "F1Close",
+                    },
+                    "params": {
+                        'window': 10,
+                        'ma_type': 'EMA'
+                    },
+                    'outputs': {
+                        'output': {'type': 'line', 'mapping': 'MA', 'value': 'MA3', 'color': '#c027a1'}
+                    }
+                }
+            ]
+
+            start_day = '2025_01_13'
+            end_day = '2025_01_14'
+
+        start_timestamp = Utils.day_to_timestamp(start_day)
+        end_timestamp = Utils.day_to_timestamp(end_day, is_end_day=True)
+
+        def _process_group_data(group_params):
+            if not group_params:
+                return None, None
+            required_data, updated_params = CombiConds.load_and_process_group_data(group_params)
+            return QuerryData.load_data(required_data, updated_params)
+        
+        def _process_other_data(other_params):
+            if not other_params:
+                return None, None
+            required_data, updated_params = CombiConds.load_and_process_one_series_data(other_params)
+            return QuerryData.load_data(required_data, updated_params)
+        
+        def _process_indexdaily_data(dailyindex_params):
+            if not dailyindex_params:
+                return None, None
+            required_data, updated_params = CombiConds.load_and_process_one_series_data(dailyindex_params, data_src='daily_index')
+            return QuerryData.load_data(required_data, updated_params, sub_rediskey='dailyindex')
+        
+        result_df = None
+        result_info = []
+
+        group_data, group_info = _process_group_data(group_params)
+        if group_data is not None:
+            result_df = group_data
+            result_info.extend(group_info)
+
+        other_data, other_info = _process_other_data(other_params)
+        if other_data is not None:
+            result_df = pd.concat([result_df, other_data], axis=1) if result_df is not None else other_data
+            result_info.extend(other_info)
+
+        def _daily_to_timestamp(df: pd.DataFrame):
+            df['datetime'] = pd.to_datetime(df.index + ' ' + '09:15:00', format = '%Y_%m_%d %H:%M:%S')
+            df['candleTime'] = df['datetime'].astype(int)
+            df = df.set_index('candleTime')
+            df = df.drop('datetime', axis=1)
+            return df
+        
+        indexdaily_data, indexdaily_info = _process_indexdaily_data(dailyindex_params)
+        if indexdaily_data is not None:
+            if result_df is None:
+                df_ohlc = Adapters.load_index_ohlcv_from_plasma(name="VNINDEX")
+  
+                def _convert_daily_to_intraday(df: pd.DataFrame, intraday_index: pd.Series):
+                    def test():
+                        df = indexdaily_data
+                        intraday_index = df_ohlc.index
+
+                    df = _daily_to_timestamp(df)
+
+                    intraday_index = pd.DataFrame(intraday_index)
+
+                    intraday_index = intraday_index.set_index('candleTime')
+                    intraday_index = intraday_index.sort_values('candleTime')
+
+                    df = pd.concat([intraday_index, df], axis=1, join='outer')    
+                    df = df.fillna(method='ffill')
+                    
+                    return df
+
+                result_df = _convert_daily_to_intraday(indexdaily_data, df_ohlc.index)
+            else:
+                indexdaily_data = _daily_to_timestamp(indexdaily_data)
+
+                result_df = pd.concat([result_df, indexdaily_data], axis=1) if result_df is not None else indexdaily_data 
+                result_df = result_df.fillna(method='ffill')
+                
+                result_info.extend(indexdaily_info)
+
+
+        if result_df is None:
+            return {}, {}
+        
+        result_df = result_df[(result_df.index >= start_timestamp) & (result_df.index <= end_timestamp)]
+
+
+        res = result_df.reset_index().to_dict('records')
+        res = remove_nan_keys(res)
+
+        return res, result_info
+
 
 @dataclass
 class ReturnStatsConfig:
@@ -1849,7 +2380,7 @@ class ReturnStats:
         if use_pct:
             return (a / b - 1) * 100
         return a - b
-
+            
     @staticmethod
     def get_statistics(df: pd.DataFrame) -> Dict[str, Dict[str, pd.DataFrame]]:
         """
@@ -1936,14 +2467,18 @@ class ReturnStats:
             df: DataFrame with calculated returns
             
         Returns:
-            Dictionary containing key performance metrics
+            Dictionary containing key performance metrics including number of entry days
         """
         signal_rows = df[df['matched'] == True]
         non_nan_returns = signal_rows['c_o'].dropna()
         
         if len(non_nan_returns) > 0:
+            # Calculate number of unique trading days
+            num_entry_days = signal_rows['day'].nunique()
+            
             return {
                 'Number of Trades': len(non_nan_returns),
+                'Number Entry Days': num_entry_days,  # Added this metric
                 'Win Rate (%)': (non_nan_returns > 0).mean() * 100,
                 'Average Return': non_nan_returns.mean(),
                 'Average High Return': signal_rows['h_o'].dropna().mean(),
@@ -1951,7 +2486,7 @@ class ReturnStats:
                 'Max Return': non_nan_returns.max(),
                 'Min Return': non_nan_returns.min(),
                 'Profit Factor': abs(non_nan_returns[non_nan_returns > 0].sum() / 
-                                  non_nan_returns[non_nan_returns < 0].sum()) 
+                                non_nan_returns[non_nan_returns < 0].sum()) 
                 if len(non_nan_returns[non_nan_returns < 0]) > 0 else float('inf'),
                 'Average Win': non_nan_returns[non_nan_returns > 0].mean()
                 if len(non_nan_returns[non_nan_returns > 0]) > 0 else 0,
@@ -1961,6 +2496,7 @@ class ReturnStats:
         else:
             return {
                 'Number of Trades': 0,
+                'Number Entry Days': 0,  # Added this metric
                 'Win Rate (%)': 0,
                 'Average Return': 0,
                 'Average High Return': 0,
@@ -1979,7 +2515,7 @@ class ReturnStats:
 #     'marketCapIndex': ['VN30', 'VNSML']
 # }
 
-# # 'gap_trend(line1=bid,line2=ask,stocks=VN30,rolling_timeframe=30Min,sign=negative,trend_direction=increase,trend_bars=10,use_as_lookback_cond=True,lookback_cond_nbar=5) | 
+# # 'gap_trend(src1=bid,src2=ask,stocks=VN30,rolling_timeframe=30Min,sign=negative,trend_direction=increase,trend_bars=10,use_as_lookback_cond=True,lookback_cond_nbar=5) | 
 # # range_nbars(line=Unwind,lower_thres=20,upper_thres=80,sum_nbars=1,use_as_lookback_cond=True,lookback_cond_nbar=10)'
 # conditions_params = [
 #   {
@@ -2033,10 +2569,10 @@ class ReturnStats:
 # # # # Generate signals
 # signals = CombiConds.combine_conditions(required_data, updated_params)
 
-# # 'two_line_pos(line1=bu2,line2=sd2,stocks=VN30,rolling_timeframe=30Min,direction=crossover,use_as_lookback_cond=True,lookback_cond_nbar=5)
+# # 'two_line_pos(src1=bu2,src2=sd2,stocks=VN30,rolling_timeframe=30Min,direction=crossover,use_as_lookback_cond=True,lookback_cond_nbar=5)
 # # range_nbars(line=Unwind,lower_thres=20,upper_thres=80,sum_nbars=5,use_as_lookback_cond=False,lookback_cond_nbar=5)'
 
-# # 'cross_no_reverse(line1=bu2,line2=sd2,stocks=Super High Beta,rolling_timeframe=15Min,direction=crossover,bars_no_reverse=10,use_as_lookback_cond=True,lookback_cond_nbar=5) 
+# # 'cross_no_reverse(src1=bu2,src2=sd2,stocks=Super High Beta,rolling_timeframe=15Min,direction=crossover,bars_no_reverse=10,use_as_lookback_cond=True,lookback_cond_nbar=5) 
 # # range_nbars(line=Unwind,lower_thres=30,upper_thres=70,sum_nbars=10,use_as_lookback_cond=True,lookback_cond_nbar=5)'
 
 # Conds.absolute_change_in_range(required_data['bu_30'], **conditions_params)

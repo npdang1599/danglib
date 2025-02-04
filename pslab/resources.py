@@ -40,6 +40,52 @@ class Globs:
 
     GROUP_SRC = ['ask', 'bid', 'bu', 'bu2', 'fBuyVal', 'fSellVal','sd', 'sd2']
 
+    STANDARD_AGG_DIC = {
+        'buyImpact': 'last',
+        'sellImpact': 'last',
+        'Arbit': 'sum',
+        'Unwind': 'sum',
+        'premiumDiscount': 'last',
+        'f1Bid': 'last',
+        'f1Ask': 'last',
+        'Vn30Value': 'sum',
+        'F1Value': 'sum',
+        'F1Volume': 'sum',
+        'VnindexValue': 'sum',
+        'f1BuyVol': 'sum',
+        'f1SellVol': 'sum',
+        'outstandingFPos': 'last',
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'matchingValue': 'sum',
+        'bu': 'sum',
+        'sd': 'sum',
+        'bu2': 'sum',
+        'sd2': 'sum',
+        'bid': 'last',
+        'ask': 'last',
+        'refPrice': 'last',
+        'fBuyVal': 'sum',
+        'fSellVal': 'sum',
+        'return': 'last',
+        'F1Open': 'first',
+        'Vn30Open': 'first',
+        'VnindexOpen': 'first',
+        'F1High': 'max',
+        'Vn30High': 'max',
+        'VnindexHigh': 'max',
+        'F1Low': 'min', 
+        'Vn30Low': 'min',
+        'VnindexLow': 'min',
+        'F1Close': 'last',
+        'Vn30Close': 'last',
+        'VnindexClose': 'last',
+        'day': 'last'
+    }
+
+
     SECTOR_DIC = {
         'Super High Beta': ['SHS', 'VGS', 'MBS', 'VIX', 'CTS', 'ORS', 'CEO', 'FTS', 'DTD', 'AGR', 'GEX', 'BSI', 'HUT', 'VCI', 'DIG', 'VND', 'VDS', 'L14', 'DXG', 'DGW', 'PDR', 'HCM', 'CII', 'HTN', 'GVR', 'NKG', 'BVS', 'HSG', 'TCI', 'NVL', 'SSI', 'GIL', 'PXL', 'KSB', 'PLC', 'NLG', 'KBC', 'DDV', 'FCN', 'LCG', 'DPG', 'DBC', 'TCH', 'VOS', 'VPG', 'HDC', 'IDJ', 'ANV', 'VCG', 'PET', 'VGC', 'PC1', 'HAH', 'ASM'], 
         'High Beta': ['IJC', 'C4G', 'BCG', 'HHV', 'DXS', 'CSV', 'IDI', 'TNG', 'SZC', 'HHS', 'CTD', 'KHG', 'ADS', 'PVC', 'TLH', 'DCM', 'DGC', 'SCR', 'S99', 'TIG', 'MWG', 'LAS', 'PVD', 'AAA', 'PVT', 'POM', 'MSN', 'HBC', 'PVS', 'CMX', 'VTP', 'PVB', 'LSS', 'IDC', 'TIP', 'DPM', 'HDG', 'VSC', 'HQC', 'HPG', 'SMC', 'EVF', 'NTL', 'VGI', 'DRI', 'PAN', 'VHC', 'CSC', 'CNG'], 
@@ -58,7 +104,29 @@ class Globs:
         "All": STOCKS,
     }
 
-    ROLLING_TIMEFRAME = ['30S', '1Min', '5Min', '15Min', '30Min', '1H', '4H', '1D']
+    TF_TO_MIN = {
+        '30S' : 0.5, 
+        '1Min' : 1, 
+        '5Min' : 5, 
+        '10Min' : 10,
+        '15Min' : 15,
+        '30Min' : 30,
+        '45Min' : 45,
+        '1H' : 60,
+        '2H' : 120,
+        '1D' : 1440,
+    }
+    ROLLING_TIMEFRAME = list(TF_TO_MIN.keys())
+
+
+    ROLLING_METHOD = ['sum', 'median', 'mean', 'rank']
+    # if method == 'sum':
+    #     return rolling.sum()
+    # elif method == 'median':
+    #     return rolling.median() 
+    # elif method == 'mean':
+    #     return rolling.mean()
+    # elif method == 'rank':
 
     USE_SAMPLE_DATA = False
 
