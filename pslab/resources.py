@@ -132,6 +132,9 @@ class Globs:
 
     PLASMA_DB = 10
 
+    class RedisPatterns:
+        PSLAB_STOCKCOUNT = 'pslab/stockcount/*'
+
 class Resources:
     CACHED_FOLDER = "/data/dang"
     FILES_FOLDER = "/home/ubuntu/Dang/pslab/files"

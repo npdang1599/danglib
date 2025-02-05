@@ -526,10 +526,13 @@ class Resampler:
             timeframe = '10Min'
 
         first_seconds = 9 * 3600 + 15 * 60
+        lunch = 11 * 3600 + 30 * 60
+        afternoon = 13 * 3600 
         atc_seconds = 14 * 3600 + 45 * 60  # = 53100 Thời điểm ATC (14:45:00)
 
         ts_seconds = timestamps // 1_000_000_000
         ts_915 = ts_seconds // 86400 * 86400 + first_seconds
+        ts_afternoon =  ts_seconds // 86400 * 86400 + afternoon
         seconds_in_day = ts_seconds % 86400
        
         def _resample(timestamps, timeframe):
@@ -539,11 +542,16 @@ class Resampler:
             return base_candles
 
         new_candles = _resample(ts_seconds, timeframe)
+        new_candles_time = new_candles % 86400
         new_candles = pd.Series(
             np.where(
-                    new_candles % 86400 <= first_seconds, 
+                    new_candles_time <= first_seconds, 
                     ts_915,          
-                    new_candles
+                    np.where(
+                        new_candles_time.between(lunch, afternoon),  
+                        ts_afternoon, 
+                        new_candles
+                    )
                 ),
             index = timestamps.index
         )
@@ -2209,7 +2217,7 @@ class QuerryData:
         
         # Process conditions and combine results
         result = None
-        data_info = []
+        data_info = []      
         for condition in conditions_params:
                 
             # Get condition function
