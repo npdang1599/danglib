@@ -46,6 +46,24 @@ def append_to_file(filename: str, content: str) -> None:
     except IOError as e:
         print(f"Error occurred while writing to file: {e}")
 
+
+class Functions:
+    def __init__(self):
+        self.functions = function_mapping()
+        self.input_source_functions = input_source_functions()
+
+    def list_functions_names(self):
+        return list(self.functions.keys())
+    
+    def list_input_source_functions_names(self):
+        return list(self.input_source_functions.keys())
+    
+    def get_function(self, name):
+        return self.functions.get(name)
+    
+    def get_input_source_function(self, name):
+        return self.input_source_functions.get(name)
+
 def function_mapping():
     """
     Maps function names to their corresponding function objects and descriptive titles.
@@ -930,6 +948,7 @@ class Ta:
         Returns:
             Rolled data with specified method
         """
+        window = int(window)
         rolling = data.rolling(window)
         
         if method == 'sum':
@@ -1971,7 +1990,7 @@ class CombiConds:
                 timeframe = condition['inputs'].get('timeframe', Globs.BASE_TIMEFRAME)
                 rolling_window = condition['inputs'].get('rolling_window')
                 rolling_method = condition['inputs'].get('rolling_method', 'sum')
-                
+
                 new_condition = deepcopy(condition)
                 new_condition['inputs'] = {}
                 
@@ -2009,7 +2028,7 @@ class CombiConds:
                         agg_dict=Resampler.get_agg_dict([col])
                     )[col]
                     print('hello')
-                
+                    print(window)
                 # Apply rolling calculations if needed
                 if window is not None:
                     data_processed = Ta.apply_rolling(data_processed, window, method)
@@ -2383,6 +2402,7 @@ class ReturnStatsConfig:
     timeframe: str = Globs.BASE_TIMEFRAME
     lookback_periods: int = 5
     use_pct: bool = False  # If True, calculate percentage returns
+    start_day: str = Globs.DATA_FROM_DAY 
 
 class ReturnStats:
     """Class for calculating trading returns and statistics from signals"""
@@ -2411,6 +2431,7 @@ class ReturnStats:
 
         # Ensure index alignment
         df = df_ohlc[['open', 'high', 'low', 'close', 'day']].copy()
+        df = df[df['day'] >= config.start_day]
 
         if config.timeframe != Globs.BASE_TIMEFRAME:
             df = Resampler.resample_vn_stock_data(
@@ -2589,4 +2610,8 @@ class ReturnStats:
                 'Average Win': 0,
                 'Average Loss': 0
             }
+        
+def remove_redis():
+    redis_handler = RedisHandler()
+    redis_handler.delete_keys_by_pattern('pslab/stockcount/*')
 

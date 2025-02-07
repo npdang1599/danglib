@@ -190,7 +190,6 @@ class Resources:
         STOCK_CLASSIFICATION = "pslab_stock_classification"
     
 
-
 # Add logging configuration near the top after imports
 logging.basicConfig(
     level=logging.INFO,
@@ -421,7 +420,6 @@ class Adapters:
         if data_path is None:
             data_path = Resources.get_aggregated_data('30S', '.parquet')
 
-
         columns = FileHandler.get_parquet_columns(data_path, required_cols)
 
         df = pd.read_parquet(data_path, columns=columns)
@@ -479,6 +477,10 @@ class Adapters:
             _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
 
             key = Resources.PlasmaKeys.STOCK_DATA
+
+            def test():
+                df, smap = pd.read_pickle(Resources.get_aggregated_data('30S'))
+
 
             df = Adapters.load_stock_data_from_parquet()
 
@@ -930,7 +932,27 @@ class Adapters:
 
 
 
-        
+def fix_fBuySell_data():
+    pickle_path = Resources.get_aggregated_data('30S', '.pickle')
+    df_raw, smap = pd.read_pickle(pickle_path)
+    df_raw['stock'] = df_raw['stock'].map(smap)
+    df_raw = df_raw.rename(columns={"fBuyVol": "fBuyVal", "fSellVol": "fSellVal"})
+    from danglib.utils import flatten_columns
+
+
+    data_path = Resources.get_aggregated_data('30S', '.parquet')
+    pivot_df = df_raw.pivot(index = 'candleTime', columns='stock')
+    pivot_df = flatten_columns(pivot_df)
+    FileHandler.write_parquet(data_path, pivot_df)
+
+    df_old = pd.read_parquet(data_path)
+    df_old2 = pd.read_parquet(data_path)
+
+    Adapters.SaveDataToPlasma.save_stock_data_to_plasma()
+
+    redis_handler = RedisHandler()
+    redis_handler.delete_keys_by_pattern("pslab/stockcount/*")
+
 
 
 

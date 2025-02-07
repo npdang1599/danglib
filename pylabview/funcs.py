@@ -51,6 +51,7 @@ class Globs:
             "bbwp": Conds.bbwp,
             "bbwp2": Conds.bbwp2,
             "bbpctb": Conds.bbpctb,
+            "fourier_supertrend": Conds.fourier_supertrend,
             "net_income": Conds.Fa.net_income,
             "revenue": Conds.Fa.revenue,
             "inventory": Conds.Fa.inventory,
@@ -588,6 +589,7 @@ class Conds:
         high_range: float = 100,
         wait_bars: bool = False,
         wbars: int = 5,
+        compare_prev_peak_trough: bool = False,
         *args, **kwargs
         ):
         """Check if the percentage change between `close` price with lowest(`low`) (if direction is increase) 
@@ -640,8 +642,15 @@ class Conds:
             else:
                 isw = hlofclose > fwmark
             rs.loc[(fwmark.notna() & isw)] = True
+
+            # if not compare_prev_peak_trough:
+            #     return rs
+            # else:
+            #     df['res'] = rs
+            #     if direction == 'Increase':
+            #         df['peak'] = rs.shift(-wbars)
+            #     # if di            
             return rs
-            
         return None
 
     @staticmethod
@@ -1133,7 +1142,51 @@ class Conds:
             res = Conds.Standards.two_line_pos(wt1, wt2, direction = direction, use_flag = use_flag)
         
         return res
+    @staticmethod
+    def fourier_supertrend(
+        df: pd.DataFrame,
+        fft_period: int = 14,
+        fft_smooth: int = 7,
+        harmonic_weight: float = 0.5,
+        vol_length: int = 10,
+        vol_mult: float = 2.0,
+        vol_smooth: int = 10,
+        use_range: bool = False,
+        low_range: float = 80,
+        high_range: float = 100,
+        use_cross: bool = False,
+        direction: str = "crossover",
+        cross_line: float = 50,
+        use_flag: bool = False, 
+    ):
+        res = None
 
+        if use_flag:
+
+            fft_trend, upper_band, lower_band  = Ta.fourier_supertrend(
+                df,
+                fft_period,
+                fft_smooth,
+                harmonic_weight,
+                vol_length,
+                vol_mult,
+                vol_smooth,
+            )
+            fft_trend_ratio = (df['close'] - lower_band) / (upper_band - lower_band) * 100
+
+            cross_l = Utils.new_1val_series(cross_line, df)
+
+            res = Conds.Standards.two_line_conditions(
+                fft_trend_ratio,
+                cross_l,
+                use_cross,
+                direction,
+                use_range,
+                low_range,
+                high_range,
+            )
+
+        return res
     @staticmethod
     def general_cond(
                     df: pd.DataFrame,

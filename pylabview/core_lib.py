@@ -1508,7 +1508,47 @@ class Ta:
 
         return wt1, wt2
 
-        
+    @staticmethod
+    def fourier_supertrend(
+        df: pd.DataFrame,
+        # src_name: str = 'close',
+        fft_period: int = 14,
+        fft_smooth: int = 7,
+        harmonic_weight: float = 0.5,
+        vol_length: int = 10,
+        vol_mult: float = 2.0,
+        vol_smooth: int = 10
+    ):
+        def get_fft_trend(src, length, harmonic_weight):
+           
+            wave1 = src.ewm(span=length, adjust=False).mean()
+            wave2 = src.ewm(span=length // 2, adjust=False).mean()
+            wave3 = src.ewm(span=length // 3, adjust=False).mean()
+
+            trend = wave1 + harmonic_weight * (wave2 - wave1) + harmonic_weight**2 * (wave3 - wave2)
+            return trend
+
+        def get_adaptive_volatility(df, vol_length):
+            # atr = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=vol_length).average_true_range()
+            tr = Math.max([df['high'] - df['low'], abs(df['high'] - df['close'].shift(1)), abs(df['low'] - df['close'].shift(1))], skipna=False)
+            atr = Ta.sma(tr, vol_length)
+            std = df['close'].rolling(window=vol_length).std(ddof=0)
+            vol = (atr + std) / 2
+            return vol
+
+        # Tính Fourier Trend
+        fft_trend = get_fft_trend(df['close'], fft_period, harmonic_weight)
+        fft_trend = fft_trend.ewm(span=fft_smooth, adjust=False).mean()
+
+        # Tính volatility
+        volatility = get_adaptive_volatility(df, vol_length=vol_length)
+        volatility = volatility.ewm(span=vol_smooth, adjust=False).mean()
+
+        # Dải Supertrend
+        upper_band = fft_trend + volatility * vol_mult
+        lower_band = fft_trend - volatility * vol_mult
+
+        return fft_trend, upper_band, lower_band    
     
 class VTa:
     """TA functions used for vector calculations"""
