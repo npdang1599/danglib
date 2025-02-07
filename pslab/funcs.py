@@ -2508,6 +2508,9 @@ class ReturnStats:
     @staticmethod
     def _calculate_yearly_stats(df: pd.DataFrame) -> pd.DataFrame:
         """Calculate yearly trading statistics"""
+        if 'year' not in df.columns:
+            df['year'] = df['day'].str[:4]
+
         stats = df.groupby('year')['matched'].count().to_frame('numtrade')
         
         # Calculate average returns
@@ -2539,6 +2542,9 @@ class ReturnStats:
     @staticmethod
     def _calculate_monthly_stats(df: pd.DataFrame) -> pd.DataFrame:
         """Calculate monthly trading statistics"""
+        if 'yearmonth' not in df.columns:
+            df['yearmonth'] = df['day'].str[:7]
+            
         stats = df.groupby('yearmonth')['matched_c_o'].count().to_frame('numtrade')
         
         # Calculate average returns
@@ -2562,7 +2568,7 @@ class ReturnStats:
         return daily_returns.cumsum().to_frame('cum_return')
 
     @staticmethod
-    def get_trade_summary(df: pd.DataFrame) -> Dict[str, float]:
+    def get_trade_summary(df: pd.DataFrame, exclude_22: bool = False) -> Dict[str, float]:
         """
         Generate a summary of trading performance metrics.
         
@@ -2574,12 +2580,18 @@ class ReturnStats:
         """
         signal_rows = df[df['matched'] == True]
         non_nan_returns = signal_rows['c_o'].dropna()
+
+        if exclude_22:
+            # Calculate Win Rate Not 22 (from 2023 onwards)
+            signal_rows_2023 = signal_rows[signal_rows['day'] >= '2023_01_01']
+            non_nan_returns_2023 = signal_rows_2023['c_o'].dropna()
+            win_rate_not_22 = (non_nan_returns_2023 > 0).mean() * 100 if len(non_nan_returns_2023) > 0 else 0
         
         if len(non_nan_returns) > 0:
             # Calculate number of unique trading days
             num_entry_days = signal_rows['day'].nunique()
             
-            return {
+            results =  {
                 'Number of Trades': len(non_nan_returns),
                 'Number Entry Days': num_entry_days,  # Added this metric
                 'Win Rate (%)': (non_nan_returns > 0).mean() * 100,
@@ -2596,8 +2608,10 @@ class ReturnStats:
                 'Average Loss': non_nan_returns[non_nan_returns <= 0].mean()
                 if len(non_nan_returns[non_nan_returns <= 0]) > 0 else 0
             }
+            if exclude_22:
+                results['Win Rate Not 22 (%)'] = win_rate_not_22
         else:
-            return {
+            results = {
                 'Number of Trades': 0,
                 'Number Entry Days': 0,  # Added this metric
                 'Win Rate (%)': 0,
@@ -2610,6 +2624,10 @@ class ReturnStats:
                 'Average Win': 0,
                 'Average Loss': 0
             }
+            if exclude_22:
+                results['Win Rate Not 22 (%)'] = 0
+                
+        return results
         
 def remove_redis():
     redis_handler = RedisHandler()

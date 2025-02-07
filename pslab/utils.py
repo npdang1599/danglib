@@ -102,12 +102,79 @@ class Utils:
                     res = res & cond 
         return res
     
+    @staticmethod
     def day_to_timestamp(day: str, is_end_day = False):
         stamp = int(pd.to_datetime(day, format='%Y_%m_%d').timestamp())
         if is_end_day:
             stamp += 86400
 
         return stamp * 1000000000
+
+    @staticmethod    
+    def convert_bool_series_to_bitwise(series: pd.Series) -> bytearray:
+        """Chuyển đổi pandas Series boolean thành dạng bitwise để tiết kiệm bộ nhớ.
+        
+        Args:
+            series (pd.Series): Series boolean cần chuyển đổi
+            
+        Returns:
+            bytearray: Dữ liệu dạng bitwise
+        """
+        # Chuyển series thành list các bit (0/1)
+        bits = series.astype(int).values
+        
+        # Chuyển list bit thành bytearray
+        # Mỗi byte sẽ chứa 8 bit
+        byte_array = bytearray()
+        for i in range(0, len(bits), 8):
+            byte = 0
+            for j in range(8):
+                if i + j < len(bits):
+                    byte |= bits[i + j] << j
+            byte_array.append(byte)
+        
+        return byte_array
+    
+    @staticmethod
+    def convert_bool_series_to_integer(series: pd.Series) -> int:
+        """Chuyển đổi pandas Series boolean thành một số nguyên sử dụng bitwise operations.
+        
+        Args:
+            series (pd.Series): Series boolean cần chuyển đổi
+            
+        Returns:
+            int: Số nguyên chứa thông tin của series boolean
+        """
+        # Chuyển series thành list các bit (0/1)
+        bits = series.astype(int).values
+        
+        # Chuyển list bit thành một số nguyên
+        result = 0
+        for i in range(len(bits)):
+            result |= bits[i] << i
+            
+        return result
+
+    @staticmethod
+    def convert_integer_to_bool_list(integer: int, length: int) -> list:
+        """Chuyển đổi số nguyên trở lại thành list boolean.
+        
+        Args:
+            integer (int): Số nguyên cần giải nén
+            length (int): Độ dài của series boolean gốc
+            
+        Returns:
+            list: List các giá trị boolean
+        """
+        return [(integer >> i) & 1 == 1 for i in range(length)]
+        
+    @staticmethod
+    def align_indexes(target: pd.Series, source: pd.Series) -> pd.Series:
+        """Align index của target với source, fill_value là False"""
+        target = target.copy()
+        if not target.index.equals(source.index):
+            target = target.reindex(source.index, fill_value=False)
+        return target
 
     
     @staticmethod
