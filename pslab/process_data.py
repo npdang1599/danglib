@@ -144,14 +144,25 @@ class ProcessData:
                 df.dropna(subset=[column_name], inplace=True)
                 return df
 
+            # if 'matchingValue' not in df.columns:
+            #     if 'matchingVolume' in df.columns:
+            #         df['matchingValue'] = df['matchingVolume'] * df['last']
+            #     elif 'totalMatchValue' in df.columns:
+            #         df = diff(df, 'totalMatchValue')
+            #     elif 'totalMatchVolume' in df.columns:
+            #         df = diff(df, 'totalMatchVolume')
+            #         df['matchingValue'] = df['matchingValue'] * df['last']
+            #     else:
+            #         raise ValueError("Can not calculate `matchingValue`")
+
             if 'matchingValue' not in df.columns:
-                if 'matchingVolume' in df.columns:
-                    df['matchingValue'] = df['matchingVolume'] * df['last']
+                if 'totalMatchVolume' in df.columns:
+                    df = diff(df, 'totalMatchVolume')
+                    df['matchingValue'] = df['matchingValue'] * df['close']
+                elif 'matchingVolume' in df.columns:
+                    df['matchingValue'] = df['matchingVolume'] * df['close']
                 elif 'totalMatchValue' in df.columns:
                     df = diff(df, 'totalMatchValue')
-                elif 'totalMatchVolume' in df.columns:
-                    df = diff(df, 'totalMatchVolume')
-                    df['matchingValue'] = df['matchingValue'] * df['last']
                 else:
                     raise ValueError("Can not calculate `matchingValue`")
             
@@ -744,7 +755,7 @@ class Aggregator:
     @classmethod
     def run_resample_history(cls, day, timeframe = '30S', to_plasma=False):
         def test():
-            day = '2025_02_18'
+            day = '2025_02_24'
             timeframe = '30S'
             to_plasma = True
 
