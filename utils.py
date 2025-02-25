@@ -631,3 +631,10 @@ def underscore_to_camel(text):
     
     # Chuyển đổi chữ đầu tiên của mỗi từ thành chữ hoa
     return ''.join(word.capitalize() for word in words)
+
+def check_run_with_interactive():
+    import sys
+    return any(
+        arg in sys.argv[0] for arg in 
+        ['ipykernel_launcher', 'ipykernel', '-c', 'jupyter', 'vscode']
+    )

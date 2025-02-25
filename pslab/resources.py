@@ -1,5 +1,6 @@
 import warnings
 import logging
+import json
 
 import pandas as pd
 import numpy as np
@@ -29,10 +30,15 @@ class Globs:
     DATA_FROM_TIMESTAMP = day_to_timestamp(DATA_FROM_DAY)
     SAMPLE_DATA_FROM_TIMESTAMP = day_to_timestamp('2024_12_05')
     BASE_TIMEFRAME = '30S'
-
-    MAKETSTATS_SRC = ['buyImpact', 'sellImpact', 'Arbit', 'Unwind', 'premiumDiscount', 'f1Bid', 'f1Ask', 'Vn30Value', 'F1Value', 'F1Volume', 'VnindexValue', 'f1BuyVol', 'f1SellVol', 'outstandingFPos']
     
-    STOCKSTATS_SRC = ['open', 'high', 'low', 'close', 'matchingValue', 'bu', 'sd', 'bu2', 'sd2', 'bid', 'ask', 'refPrice', 'fBuyVal', 'fSellVal', 'return']
+    MAKETSTATS_SRC = ['buyImpact', 'sellImpact', 'Arbit', 'Unwind', 'premiumDiscount',
+                    'f1Bid', 'f1Ask', 'fF1BuyVol', 'fF1SellVol', 'outstandingFPos',
+                    'fPsBuyVol', 'fPsSellVol', 'F1Open', 'Vn30Open', 'VnindexOpen',
+                    'F1High', 'Vn30High', 'VnindexHigh', 'F1Low', 'Vn30Low', 'VnindexLow',
+                    'F1Close', 'Vn30Close', 'VnindexClose', 'F1Value', 'Vn30Value',
+                    'VnindexValue', 'F1Volume', 'Vn30Volume', 'VnindexVolume']
+    
+    STOCKSTATS_SRC = ['open', 'high', 'low', 'close', 'matchingValue', 'bu', 'sd', 'bu2', 'sd2', 'bid', 'ask', 'refPrice', 'fBuyVal', 'fSellVal', 'return', 'accNetBusd', 'accNetBusd2']
     
     DAILYINDEX_SRC = ['F1Open', 'Vn30Open', 'VnindexOpen', 'F1High', 'Vn30High', 'VnindexHigh', 'F1Low', 'Vn30Low', 'VnindexLow', 'F1Close', 'Vn30Close', 'VnindexClose', 'F1Value', 'Vn30Value', 'VnindexValue']
     
@@ -55,6 +61,8 @@ class Globs:
         'f1BuyVol': 'sum',
         'f1SellVol': 'sum',
         'outstandingFPos': 'last',
+        'fPsBuyVol': 'sum', 
+        'fPsSellVol': 'sum',
         'open': 'first',
         'high': 'max',
         'low': 'min',
@@ -82,7 +90,12 @@ class Globs:
         'F1Close': 'last',
         'Vn30Close': 'last',
         'VnindexClose': 'last',
-        'day': 'last'
+        'day': 'last',
+        'timestamp': 'last',
+        'foreignerBuyVolume': 'last',
+        'foreignerSellVolume': 'last',
+        'volume': 'sum',
+        'value': 'sum'
     }
 
 
@@ -120,13 +133,6 @@ class Globs:
 
 
     ROLLING_METHOD = ['sum', 'median', 'mean', 'rank']
-    # if method == 'sum':
-    #     return rolling.sum()
-    # elif method == 'median':
-    #     return rolling.median() 
-    # elif method == 'mean':
-    #     return rolling.mean()
-    # elif method == 'rank':
 
     USE_SAMPLE_DATA = False
 
@@ -134,6 +140,12 @@ class Globs:
 
     class RedisPatterns:
         PSLAB_STOCKCOUNT = 'pslab/stockcount/*'
+
+    VN30_WEIGHT = None
+    
+    @classmethod
+    def load_vn30_weight(cls):
+        cls.VN30_WEIGHT = Adapters.load_vn30_weights_from_db()
 
 class Resources:
     CACHED_FOLDER = "/data/dang"
@@ -188,7 +200,13 @@ class Resources:
         GROUP_STATS = "pslab_group_stats_data"
         INDEX_DAILY_OHLC = "pslab_daily_index_ohlcv"
         STOCK_CLASSIFICATION = "pslab_stock_classification"
-    
+        STOCK_DATA_REALTIME = "pslab_realtime_stockdata.30S"    
+
+    class RedisKeys:
+        @staticmethod
+        def get_hose500_realtime_key(day):
+            return f"pylabview_hose_{day}"
+        
 
 # Add logging configuration near the top after imports
 logging.basicConfig(
@@ -202,6 +220,55 @@ logging.basicConfig(
 
 
 class Adapters:
+
+    def load_vn30_weights_from_db(day=None):
+        db = MongoClient('ws', 27021)['weights']
+        coll = db['vn30_weights']
+        if day is None:
+            day = datetime.now().strftime("%Y_%m_%d")
+        df = list(coll.find({'day':{'$lte': day}},{'_id':0}).sort('day', -1).limit(30))
+        if len(df) == 0:
+            df = list(coll.find({'day':{'$gte': day}},{'_id':0}).sort('day', 1).limit(30))
+        df = pd.DataFrame(df)
+        return df
+
+    @staticmethod
+    def load_stock_data_from_plasma_realtime(required_stats: list = None, stocks = None):
+        def test(): 
+            required_stats = ['bu', 'sd']
+            groups_and_stocks = ['HPG', 'SSI']
+
+        df = Adapters.load_data_from_plasma(key=f"pslab_realtime_stockdata2.30S")
+
+        if required_stats is not None:
+            df = df[required_stats]
+
+        if stocks is not None:
+            stocks = [i for i in stocks if i in Globs.STOCKS]
+            if len(stocks) > 0:
+                df = df.loc[:, (slice(None), stocks)]
+
+        return df
+
+
+    @staticmethod
+    def load_data_from_plasma(key, db=None):
+        if db is None:
+            db = Globs.PLASMA_DB
+
+        from danglib.lazy_core import gen_plasma_functions
+        _, disconnect, psave, pload = gen_plasma_functions(db)
+
+        df: pd.DataFrame = pload(key)
+
+        disconnect()
+        return df
+
+    @staticmethod
+    def load_put_through_data_realtime(r: StrictRedis, day):
+        key = f"redis_tree.thoathuan.df_tt.{day}"
+        df = pd.DataFrame(json.loads(r.get(key)))
+        return df
 
     @staticmethod
     def load_thoathuan_dc_data_from_db(day):
@@ -245,7 +312,6 @@ class Adapters:
 
         db = PICKLED_WS_ADAPTERS.get_target_pickled_db()
         drop_day = ['2022_01_31', '2022_02_01', '2022_02_02', '2022_02_03', '2022_02_04', '2022_04_11', '2022_05_02', '2022_05_03', '2022_09_01', '2022_09_02', '2023_01_02']
-
         return [d for d in sorted(db.list_collection_names()) if d >= Globs.DATA_FROM_DAY and d not in drop_day]
 
     @staticmethod
@@ -471,6 +537,16 @@ class Adapters:
     
     class SaveDataToPlasma:
         @staticmethod
+        def save_data_to_plasma(key, data, db=None):
+            if db is None:
+                db = Globs.PLASMA_DB
+            from danglib.lazy_core import gen_plasma_functions
+            _, disconnect, psave, pload = gen_plasma_functions(db)
+
+            psave(key, data)
+
+
+        @staticmethod
         def save_stock_data_to_plasma(create_sample=False):
         
             from danglib.lazy_core import gen_plasma_functions
@@ -503,6 +579,13 @@ class Adapters:
             df_market_stats['F1Value'] = df_market_stats['F1Value'] * df_market_stats['F1Close'] * 100000
             df_market_stats['Vn30Volume'] = df_market_stats['Vn30Value'].copy()
             df_market_stats['VnindexVolume'] = df_market_stats['VnindexValue'].copy()
+
+            df_market_stats = df_market_stats.rename(columns={
+                'f1BuyVol': "fF1BuyVol",
+                'f1SellVol': "fF1SellVol",
+                'fBuyVol_ps': "fPsBuyVol",
+                'fSellVol_ps': "fPsSellVol"
+            })
 
             if create_sample:
                 dfs = df_market_stats[df_market_stats.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
@@ -632,11 +715,10 @@ class Adapters:
             redis_handler = RedisHandler()
             redis_handler.delete_keys_by_pattern("pslab/stockcount/*")
 
-
     @staticmethod 
     def load_groups_and_stocks_data_from_plasma(required_stats: list = None, groups_and_stocks: list = None, load_sample = False) -> pd.DataFrame:
         
-        def test():
+        def test(): 
             required_stats = ['bu', 'sd']
             groups_and_stocks = ['VN30', 'Super High Beta', 'HPG', 'SSI']
 
@@ -930,6 +1012,23 @@ class Adapters:
 
         return df
 
+    class RedisAdapters:
+        @staticmethod
+        def load_realtime_stock_data_from_redis(r: StrictRedis=None, day=None, start=0, end=-1):
+            if r is None:
+                r = StrictRedis()
+
+            if day is None:
+                day = Adapters.get_max_datatime()
+
+            key = Resources.RedisKeys.get_hose500_realtime_key(day)
+            df = pd.DataFrame(json.loads(x) for x in r.lrange(key, start, end))
+            return df
+        
+    @staticmethod
+    def get_historical_day_by_index(index):
+        df = Adapters.load_index_daily_ohlcv_from_plasma()
+        return df.iloc[index].name
 
 
 def fix_fBuySell_data():

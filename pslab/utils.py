@@ -103,6 +103,19 @@ class Utils:
         return res
     
     @staticmethod
+    def or_conditions(conditions: list[pd.DataFrame]):
+        """Calculate condition from orther conditions"""
+        res = None
+        for cond in conditions:
+            if cond is not None:
+                if res is None:
+                    res = cond
+                else:
+                    res = res | cond 
+        return res
+
+    
+    @staticmethod
     def day_to_timestamp(day: str, is_end_day = False):
         stamp = int(pd.to_datetime(day, format='%Y_%m_%d').timestamp())
         if is_end_day:
@@ -110,30 +123,45 @@ class Utils:
 
         return stamp * 1000000000
 
-    @staticmethod    
-    def convert_bool_series_to_bitwise(series: pd.Series) -> bytearray:
-        """Chuyển đổi pandas Series boolean thành dạng bitwise để tiết kiệm bộ nhớ.
+    @staticmethod
+    def compress_bool_series(series: pd.Series) -> bytearray:
+        """Nén pandas Series boolean thành dạng bytearray.
         
         Args:
-            series (pd.Series): Series boolean cần chuyển đổi
-            
+            series (pd.Series): Series boolean cần nén
+                
         Returns:
-            bytearray: Dữ liệu dạng bitwise
+            bytearray: Dữ liệu đã được nén
         """
-        # Chuyển series thành list các bit (0/1)
         bits = series.astype(int).values
+        result = bytearray((len(bits) + 7) // 8)  # Pre-allocate đúng size
         
-        # Chuyển list bit thành bytearray
-        # Mỗi byte sẽ chứa 8 bit
-        byte_array = bytearray()
-        for i in range(0, len(bits), 8):
-            byte = 0
-            for j in range(8):
-                if i + j < len(bits):
-                    byte |= bits[i + j] << j
-            byte_array.append(byte)
+        # Nén 8 bits vào 1 byte
+        for i, bit in enumerate(bits):
+            if bit:  # Chỉ set bit khi giá trị là True
+                result[i // 8] |= (1 << (i % 8))
+                
+        return result
+
+    @staticmethod
+    def decompress_to_bool_list(byte_array: bytearray, length: int) -> list:
+        """Giải nén bytearray thành list boolean.
         
-        return byte_array
+        Args:
+            byte_array (bytearray): Dữ liệu đã nén cần giải nén
+            length (int): Độ dài của series boolean gốc
+                
+        Returns:
+            list: List các giá trị boolean
+        """
+        result = []
+        
+        for i in range(length):
+            byte_index = i // 8
+            bit_index = i % 8
+            result.append(bool(byte_array[byte_index] & (1 << bit_index)))
+            
+        return result
     
     @staticmethod
     def convert_bool_series_to_integer(series: pd.Series) -> int:

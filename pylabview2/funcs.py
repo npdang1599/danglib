@@ -401,7 +401,9 @@ class Conds:
         low_range: float = 5,
         high_range: float = 10000,
         wait_bars: bool = False,
-        wbars: int = 5
+        wbars: int = 5,
+        compare_prev_peak_trough: bool = False,
+        compare_prev_peak_trough_direction: str = "Higher",
         ):
         """Check if the percentage change between `close` price with lowest(`low`) (if direction is increase) 
         or highest(`high`)(decrease) over a period of time falls within the specified range.
@@ -456,7 +458,7 @@ class Conds:
             rs_arr[(~np.isnan(fwmark_arr) & isw_arr)] = True
             rs = pd.DataFrame(rs_arr, index = close.index, columns = close.columns)
             return rs
-
+    
         return None
     
     @staticmethod
@@ -2194,6 +2196,19 @@ class Vectorized:
 
             clean_redis()
         @staticmethod
+        def compute_wr_re_nt_for_all_strats_os(n_solo_strats, folder):
+            from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_os
+            clean_redis()
+            task_dic = {}
+            print("Computing stats")
+            for i in tqdm(range(0, n_solo_strats -1)):
+                task_dic[i] = compute_multi_strategies_os.delay(i, folder)
+
+            while any(t.status!='SUCCESS' for t in task_dic.values()):
+                pass
+
+            clean_redis()
+        @staticmethod
         def compute_num_days_for_all_strats_cfm(n_solo_strats, folder):
             from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_num_days
             clean_redis()
@@ -2355,6 +2370,46 @@ class Vectorized:
 
 
     class JoinResults:
+        @staticmethod
+        def join_wr_re_nt_data_os(n, stocks_map, src_folder, des_folder):
+            fns = walk_through_files(src_folder)
+
+            def join_one_stats(name):
+
+                # df_res: pd.DataFrame = None
+                res = []
+                print(f"Join {name} stats: ")
+                for f in tqdm(fns):
+                    f: str
+                    i = int(f.split('/')[-1].split(".")[0].split("_")[1])
+                    if i < 2013:
+                        nt_raw, re_raw, wt_raw = pd.read_pickle(f)
+                        src = None
+                        if name == 'nt':
+                            src = nt_raw
+                        if name == 're':
+                            src = re_raw
+                        if name == 'wt':
+                            src = wt_raw
+
+                        tmp = pd.DataFrame(src, index=list(range(i+1, n)))
+                        tmp[-1] = i 
+                        res.append(tmp)
+                res: pd.DataFrame = pd.concat(res)
+                res = res.reset_index(names=-2)
+                cols_map = stocks_map.copy()
+                cols_map[-1] = 'i'
+                cols_map[-2] = 'j'
+
+                res = res.rename(columns = cols_map)
+                res = res.set_index(['i', 'j'])
+                dir = f"{des_folder}/df_{name}.pkl"
+                write_pickle(dir, res)
+                print(dir)
+
+            join_one_stats('nt')
+            join_one_stats('wt')
+            join_one_stats('re')
         @staticmethod
         def join_wr_re_nt_data_cfm(stocks_map, src_folder, des_folder):
             fns = walk_through_files(src_folder)
@@ -2732,6 +2787,31 @@ class Vectorized:
 
     class Runs:
         @staticmethod
+        def compute_nt_re_wr_os():
+            ## PARAMS-------------------------------------------------------------------
+            # name = 'nt_re_wr_3'
+            name = 'os_3'
+            store_folder = f"/data/Tai/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/data/Tai/pickles/{name}"
+            maybe_create_dir(result_folder)
+
+            recompute_signals = True
+            ## CALC  -------------------------------------------------------------------
+            
+            stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+                                                push_return_numpy=True, 
+                                                push_stocks_numpy=True
+                                            )
+            
+            n_strats = Vectorized.MultiProcess.compute_signals(recompute_signals)
+            # n_strats_cfm = Vectorized.MultiProcess.compute_signals_cfm(recompute_signals)
+            # n_strats = 1418
+
+            Vectorized.MultiProcess.compute_wr_re_nt_for_all_strats_os(n_strats, folder=store_folder)
+            Vectorized.JoinResults.join_wr_re_nt_data_os(n_strats, stocks_map, src_folder=store_folder, des_folder=result_folder)
+        @staticmethod
         def compute_nt_re_wr_cfm():
             ## PARAMS-------------------------------------------------------------------
             # name = 'nt_re_wr_3'
@@ -2750,8 +2830,8 @@ class Vectorized:
                                                 push_stocks_numpy=True
                                             )
             
-            n_strats = Vectorized.MultiProcess.compute_signals2(recompute_signals)
-            n_strats_cfm = Vectorized.MultiProcess.compute_signals_cfm(recompute_signals)
+            n_strats = Vectorized.MultiProcess.compute_signals(recompute_signals)
+            # n_strats_cfm = Vectorized.MultiProcess.compute_signals_cfm(recompute_signals)
 
 
             Vectorized.MultiProcess.compute_wr_re_nt_for_all_strats_cfm(n_strats, folder=store_folder)

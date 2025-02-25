@@ -1,11 +1,13 @@
+from danglib.pslab.resources import Globs
+
 class TestSets:
     LOAD_PROCESS_GROUP_DATA = [
         {
             'function': "is_in_top_bot_percentile",
             'inputs': {
                 'src': 'bu2',
-                'stocks': ['VN30', 'Super High Beta'],
-                'timeframe': '15Min',
+                'stocks': Globs.SECTOR_DIC['VN30'],
+                # 'timeframe': '15Min',
                 'rolling_window': 20,
                 'rolling_method': 'sum'
             },
@@ -18,23 +20,12 @@ class TestSets:
             }
         },
         {
-            'function': 'gap_trend',
-            'inputs': {
-                'src1': 'bid',
-                'src2': 'ask',
-                'stocks': ['HPG', 'SSI', 'NVL']
-            },
-            'params': {
-                'direction': 'above'
-            }
-        },
-        {
             'function': 'two_line_pos',
             'inputs': {
                 'src1': 'bu2',
                 'src2': 'sd2',
-                'stocks': ['VN30', 'Super High Beta'],
-                'timeframe': '15Min',
+                'stocks': ['HPG', 'SSI', 'NVL'],
+                # 'timeframe': '15Min',
                 'rolling_window': 20
             },
             'params': {
@@ -49,7 +40,7 @@ class TestSets:
             "function": "absolute_change_in_range",
             "inputs": {
             "src": "VnindexClose",
-            "timeframe": "15Min",
+            # "timeframe": "15Min",
             },
             "params": {
             "n_bars": 5,

@@ -1550,6 +1550,824 @@ class Ta:
 
         return fft_trend, upper_band, lower_band    
     
+    @staticmethod
+    def zero_lag(
+        df: pd.DataFrame,
+        length: int = 50,  # Zero Lag Length
+        volatility_mult: float = 1.5,  # Volatility Multiplier
+        loop_start: int =  1,  # Loop Start
+        loop_end: int = 70,  # Loop End
+        # threshold_up:  5  # Threshold for Uptrend
+        # threshold_down:  -5  # Threshold for Downtrend
+    ):
+        def zero_lag_ema(df, length):
+            lag = (length - 1) // 2  
+            # Adjust prices to reduce lag
+            adjusted_prices = df['close'] + (df['close'] - df['close'].shift(lag))
+            zl_basic = adjusted_prices.ewm(span=length, adjust=False).mean()
+            return zl_basic
+
+        # Function to calculate volatility
+        def calculate_volatility(df, length, volatility_mult=1.5):
+            tr = Math.max([df['high'] - df['low'], abs(df['high'] - df['close'].shift(1)), abs(df['low'] - df['close'].shift(1))], skipna=False)
+            atr = Ta.sma(tr, length)
+            volatility = atr.rolling(window=length * 3).max() * volatility_mult
+            return volatility
+
+        # For loop analysis function
+        def for_loop_analysis(basis_price, loop_start, loop_end):
+            sum_score = np.zeros(len(basis_price))  # Initialize scores
+            for i in range(loop_start, loop_end + 1):
+                # Compare basis price with shifted values
+                sum_score += np.where(basis_price > basis_price.shift(i), 1, -1)
+            return pd.Series(sum_score, index=basis_price.index)
+
+        # Calculate Zero Lag EMA
+        df['zl_basis'] = zero_lag_ema(df, length)
+
+        # Calculate Volatility
+        df['volatility'] = calculate_volatility(df, length, volatility_mult)
+
+        # Perform For Loop Analysis
+        df['score'] = for_loop_analysis(df['zl_basis'], loop_start, loop_end)
+        return df['score']
+    
+    @staticmethod
+    def fisher_transform(df_origin: pd.DataFrame, length=10):
+        df = df_origin.copy()
+
+        # Tính trung bình giá cao - thấp (hl2)
+        df['hl2'] = (df['high'] + df['low']) / 2
+
+        # Tính highest và lowest trong phạm vi length (Vector hóa)
+        df['xMaxH'] = df['hl2'].rolling(length).max()
+        df['xMinL'] = df['hl2'].rolling(length).min()
+
+        # Tránh chia cho 0 (nếu xMaxH == xMinL)
+        df['range'] = df['xMaxH'] - df['xMinL']
+        df['range'] = df['range'].replace(0, np.nan)  # Tránh lỗi chia 0
+
+        # Khởi tạo các cột trước khi dùng for loop
+        df['nValue1'] = np.nan
+        df['nFish'] = np.nan
+
+        # Dùng for loop cho nValue1 và nFish để đảm bảo tính từng bar một
+        for i in range(len(df)):
+            if i < length:  # Không đủ dữ liệu để tính
+                continue
+
+            # Chuẩn hóa giá trị trong khoảng (-1,1)
+            hl2 = df.at[df.index[i], 'hl2']
+            x_min_l = df.at[df.index[i], 'xMinL']
+            x_max_h = df.at[df.index[i], 'xMaxH']
+
+            if np.isnan(hl2) or np.isnan(x_min_l) or np.isnan(x_max_h) or x_max_h == x_min_l:
+                continue  # Bỏ qua nếu có NaN hoặc lỗi chia 0
+
+            scaled = 2 * ((hl2 - x_min_l) / (x_max_h - x_min_l) - 0.5)
+
+            # Tính nValue1 từng bar một
+            prev_nValue1 = df.at[df.index[i-1], 'nValue1'] if i > 0 else 0
+            prev_nValue1 = 0 if np.isnan(prev_nValue1) else prev_nValue1  # Xử lý NaN giống nz()
+            nValue1 = 0.33 * scaled + 0.67 * prev_nValue1
+            df.at[df.index[i], 'nValue1'] = nValue1
+
+            # Giới hạn giá trị vào khoảng (-0.999, 0.999)
+            nValue2 = min(max(nValue1, -0.999), 0.999)
+
+            # Tính Fisher Transform (log transform) từng bar một
+            prev_nFish = df.at[df.index[i-1], 'nFish'] if i > 0 else 0
+            prev_nFish = 0 if np.isnan(prev_nFish) else prev_nFish  # Xử lý NaN giống nz()
+            nFish = 0.5 * np.log((1 + nValue2) / (1 - nValue2)) + 0.5 * prev_nFish
+            df.at[df.index[i], 'nFish'] = nFish
+
+        # Trigger (nFish của phiên trước)
+        df['Trigger'] = df['nFish'].shift(1)
+        return df['nFish'], df['Trigger']
+
+    @staticmethod
+    def sinewave(df_origin: pd.DataFrame, duration=36, lowerBand=9):
+        def deg2rad(deg):
+            """ Chuyển đổi độ sang radian """
+            PI = 3.14159265358979
+            return deg * PI / 180.0
+
+        def ss_filter(price, lowerBand):
+            """ Super Smoother Filter từ Pine Script """
+            PI = 3.14159265358979
+            angle = np.sqrt(2) * PI / lowerBand
+            a1 = np.exp(-angle)
+            b1 = 2 * a1 * np.cos(angle)
+            c2 = b1
+            c3 = -a1 * a1
+            c1 = 1 - c2 - c3
+
+            filt = np.zeros_like(price)
+            for i in range(2, len(price)):
+                filt[i] = c1 * (price[i] + price[i-1]) / 2 + c2 * filt[i-1] + c3 * filt[i-2]
+
+            return filt
+
+        df = df_origin.copy()
+
+        # Chuyển đổi giá đóng cửa thành numpy array
+        price = df['close'].values
+
+        # Bước 1: HighPass filter
+        angle = deg2rad(360) / duration
+        alpha1 = (1 - np.sin(angle)) / np.cos(angle)
+
+        HP = np.zeros_like(price)
+        for i in range(1, len(price)):
+            HP[i] = 0.5 * (1 + alpha1) * (price[i] - price[i-1]) + alpha1 * HP[i-1]
+
+        # Bước 2: Làm mượt bằng Super Smoother Filter
+        Filt = ss_filter(HP, lowerBand)
+
+        # Bước 3: Tính Wave và Pwr
+        Wave = (Filt + np.roll(Filt, 1) + np.roll(Filt, 2)) / 3
+        Pwr = (Filt**2 + np.roll(Filt, 1)**2 + np.roll(Filt, 2)**2) / 3
+
+        # Bước 4: Tính sineWave (chuẩn hóa)
+        sineWave = Wave / np.sqrt(Pwr)
+        sineWave[np.isnan(sineWave)] = 0  # Tránh lỗi NaN
+
+        return df['sineWave']
+    
+    @staticmethod
+    def mama(df_origin: pd.DataFrame, fastlimit=0.5, slowlimit=0.05):
+        df = df_origin.copy()
+
+        # Tính trung bình giá hl2
+        df['hl2'] = (df['high'] + df['low']) / 2
+        prices = df['hl2']
+
+        # Khởi tạo các cột trước khi dùng for-loop
+        cols = ['smooth', 'detrender', 'q1', 'i1', 'jI', 'jq', 'i2', 'q2',
+                're', 'im', 'Period', 'SmoothPeriod', 'MAMA', 'FAMA',
+                'Phase', 'DeltaPhase1', 'DeltaPhase', 'alpha1']
+
+        for col in cols:
+            df[col] = np.nan
+
+        # Tính smooth giá
+        df['smooth'] = (4 * prices + 3 * prices.shift(1) + 2 * prices.shift(2) + prices.shift(3)) / 10
+
+        # Tính toán từng bar để đảm bảo đúng logic
+        for i in range(len(df)):
+            price = df.at[df.index[i], 'hl2']
+            # if i < 6:  # Cần ít nhất 6 giá trị trước để tính toán
+            #     continue
+
+            smooth = df.at[df.index[i], 'smooth']
+            smooth_2 = df.at[df.index[i-2], 'smooth'] if not np.isnan(df.at[df.index[i-2], 'smooth']) else 0
+            smooth_4 = df.at[df.index[i-4], 'smooth'] if not np.isnan(df.at[df.index[i-4], 'smooth']) else 0
+            smooth_6 = df.at[df.index[i-6], 'smooth'] if not np.isnan(df.at[df.index[i-6], 'smooth']) else 0
+
+            # Detrender
+            period_prev = df.at[df.index[i-1], 'Period'] if not np.isnan(df.at[df.index[i-1], 'Period']) else 0
+            detrender = (0.0962 * smooth + 0.5769 * smooth_2 - 0.5769 * smooth_4 - 0.0962 * smooth_6) * (0.075 * period_prev + 0.54)
+            df.at[df.index[i], 'detrender'] = detrender
+
+            # Bộ lọc Q1 & I1
+            detrender_2 = df.at[df.index[i-2], 'detrender'] if not np.isnan(df.at[df.index[i-2], 'detrender']) else 0
+            detrender_4 = df.at[df.index[i-4], 'detrender'] if not np.isnan(df.at[df.index[i-4], 'detrender']) else 0
+            detrender_6 = df.at[df.index[i-6], 'detrender'] if not np.isnan(df.at[df.index[i-6], 'detrender']) else 0
+
+            q1 = (0.0962 * detrender + 0.5769 * detrender_2 - 0.5769 * detrender_4 - 0.0962 * detrender_6) * (0.075 * period_prev + 0.54)
+            df.at[df.index[i], 'q1'] = q1
+            i1 = df.at[df.index[i-3], 'detrender'] if not np.isnan(df.at[df.index[i-3], 'detrender']) else 0
+            df.at[df.index[i], 'i1'] = i1
+
+            # jI và jq
+            jI = (0.0962 * i1 + 0.5769 * df.at[df.index[i-2], 'i1'] - 0.5769 * df.at[df.index[i-4], 'i1'] - 0.0962 * df.at[df.index[i-6], 'i1']) * (0.075 * period_prev + 0.54)
+            df.at[df.index[i], 'jI'] = jI
+
+            jq = (0.0962 * q1 + 0.5769 * df.at[df.index[i-2], 'q1'] - 0.5769 * df.at[df.index[i-4], 'q1'] - 0.0962 * df.at[df.index[i-6], 'q1']) * (0.075 * period_prev + 0.54)
+            df.at[df.index[i], 'jq'] = jq
+
+            # i2 và q2
+            i21 = (i1 - jq)
+            q21 = (q1 + jI)
+            i2_1 = df.at[df.index[i-1], 'i2'] if not np.isnan(df.at[df.index[i-1], 'i2']) else 0
+            q2_1 = df.at[df.index[i-1], 'q2'] if not np.isnan(df.at[df.index[i-1], 'q2']) else 0
+            i2 = 0.2 * i21 + 0.8 * i2_1
+            q2 = 0.2 * q21 + 0.8 * q2_1
+            df.at[df.index[i], 'i2'] = i2
+            df.at[df.index[i], 'q2'] = q2
+
+            # Re và Im
+            i2_1 = df.at[df.index[i-1], 'i2'] if not np.isnan(df.at[df.index[i-1], 'i2']) else 0
+            q2_1 = df.at[df.index[i-1], 'q2'] if not np.isnan(df.at[df.index[i-1], 'q2']) else 0
+            re1 = i2 * i2_1 + q2 * q2_1
+            im1 = i2 * q2_1 - q2 * i2_1
+            re_1 = df.at[df.index[i-1], 're'] if not np.isnan(df.at[df.index[i-1], 're']) else 0
+            im_1 = df.at[df.index[i-1], 'im'] if not np.isnan(df.at[df.index[i-1], 'im']) else 0
+            re = 0.2 * re1 + 0.8 * re_1
+            im = 0.2 * im1 + 0.8 * im_1
+            df.at[df.index[i], 're'] = re
+            df.at[df.index[i], 'im'] = im
+
+            # Tính Period
+            if im != 0 and re != 0:
+                p1 = 2 * 4 * np.arctan(1)/np.arctan(im/re)
+            else:
+                p1 = df.at[df.index[i-1], 'Period'] if not np.isnan(df.at[df.index[i-1], 'Period']) else 0
+            df.at[df.index[i], 'p1'] = p1
+
+            p1_1 = df.at[df.index[i-1], 'p1'] if not np.isnan(df.at[df.index[i-1], 'p1']) else 0
+            p2 = min(max(p1, 0.67 * p1_1), 1.5 * p1_1)
+            p3 = min(max(p2, 6), 50)
+            df.at[df.index[i], 'p3'] = p3
+            p3_1 = df.at[df.index[i-1], 'p3'] if not np.isnan(df.at[df.index[i-1], 'p3']) else 0
+            df.at[df.index[i], 'Period'] = 0.2 * p3 + 0.8 * p3_1
+            smooth_period_1 = df.at[df.index[i-1], 'SmoothPeriod'] if not np.isnan(df.at[df.index[i-1], 'SmoothPeriod']) else 0
+            df.at[df.index[i], 'SmoothPeriod'] = 0.33 * df.at[df.index[i], 'Period'] + 0.67 * smooth_period_1
+
+            # Tính Phase
+            df.at[df.index[i], 'Phase'] = 180 / (4 * np.arctan(1)) * np.arctan(df.at[df.index[i], 'q1'] / df.at[df.index[i], 'i1'])
+            phase_1 = df.at[df.index[i-1], 'Phase'] if not np.isnan(df.at[df.index[i-1], 'Phase']) else 0
+            df.at[df.index[i], 'DeltaPhase1'] = phase_1 - df.at[df.index[i], 'Phase']
+            df.at[df.index[i], 'DeltaPhase'] = max(1, df.at[df.index[i], 'DeltaPhase1'])
+
+            # Tính alpha
+            df.at[df.index[i], 'alpha1'] = fastlimit / df.at[df.index[i], 'DeltaPhase']
+            alpha = min(max(df.at[df.index[i], 'alpha1'], slowlimit), fastlimit)
+
+            # Tính MAMA và FAMA
+            prev_mama = df.at[df.index[i-1], 'MAMA'] if not np.isnan(df.at[df.index[i-1], 'MAMA']) else price
+            df.at[df.index[i], 'MAMA'] = alpha * price + (1 - alpha) * prev_mama
+
+            prev_fama = df.at[df.index[i-1], 'FAMA'] if not np.isnan(df.at[df.index[i-1], 'FAMA']) else df.at[df.index[i], 'MAMA']
+            df.at[df.index[i], 'FAMA'] = 0.5 * alpha * df.at[df.index[i], 'MAMA'] + (1 - 0.5 * alpha) * prev_fama
+
+        return df['MAMA'] , df['FAMA']
+
+    @staticmethod
+    
+    def calculate_rvi(df, length=10, len_smoothing=14, ma_type="SMA", bb_mult=2.0):
+        """
+        Tính toán Relative Volatility Index (RVI) với các tùy chọn smoothing MA và Bollinger Bands.
+
+        :param df: DataFrame chứa dữ liệu OHLCV.
+        :param length: Độ dài của độ lệch chuẩn (StdDev).
+        :param len_smoothing: Độ dài smoothing MA.
+        :param ma_type: Loại MA được sử dụng để làm mượt ("None", "SMA", "EMA", "WMA", "VWMA", "RMA").
+        :param bb_mult: Độ lệch chuẩn nhân cho Bollinger Bands (nếu dùng SMA + Bollinger Bands).
+        :return: DataFrame chứa giá trị RVI và các đường MA.
+        """
+
+        df["stddev"] = df["close"].rolling(length).std()
+        df["upper"] = df["stddev"].where(df["close"].diff() > 0, 0).ewm(span=len_smoothing, adjust=False).mean()
+        df["lower"] = df["stddev"].where(df["close"].diff() <= 0, 0).ewm(span=len_smoothing, adjust=False).mean()
+        df["rvi"] = df["upper"] / (df["upper"] + df["lower"]) * 100
+
+        # Hàm tính MA tùy chọn
+        def moving_average(series, length, ma_type):
+            if ma_type == "SMA":
+                return series.rolling(length).mean()
+            elif ma_type == "EMA":
+                return series.ewm(span=length, adjust=False).mean()
+            elif ma_type == "WMA":
+                weights = np.arange(1, length + 1)
+                return series.rolling(length).apply(lambda x: np.dot(x, weights) / weights.sum(), raw=True)
+            elif ma_type == "VWMA":
+                return (series * df["volume"]).rolling(length).sum() / df["volume"].rolling(length).sum()
+            elif ma_type == "RMA":
+                return series.ewm(alpha=1/length, adjust=False).mean()
+            else:
+                return None  # Không dùng MA
+
+        df["smoothing_MA"] = moving_average(df["rvi"], len_smoothing, ma_type)
+
+        # Tính Bollinger Bands nếu chọn "SMA + Bollinger Bands"
+        if ma_type == "SMA":
+            df["bb_stddev"] = df["rvi"].rolling(len_smoothing).std() * bb_mult
+            df["bb_upper"] = df["smoothing_MA"] + df["bb_stddev"]
+            df["bb_lower"] = df["smoothing_MA"] - df["bb_stddev"]
+        else:
+            df["bb_upper"], df["bb_lower"] = None, None  # Không tính BB nếu không chọn SMA
+
+        return df
+    
+    @staticmethod
+    def ehlers_instantaneous_trend(df_origin: pd.DataFrame, alpha=0.07):
+        df = df_origin.copy()
+
+        # Tính giá trung bình hl2
+        df['hl2'] = (df['high'] + df['low']) / 2
+
+        # Khởi tạo cột với NaN
+        df['it'] = np.nan
+        df['lag'] = np.nan
+
+        # Tính toán từng bar để đảm bảo đúng logic Pine Script
+        for i in range(len(df)):
+            if i < 2:  # Cần ít nhất 2 giá trị trước đó
+                continue
+
+            src = df.at[df.index[i], 'hl2']
+            src_1 = df.at[df.index[i-1], 'hl2']
+            src_2 = df.at[df.index[i-2], 'hl2']
+
+            # Giá trị khởi tạo giống Pine Script
+            init_val = (src + 2 * src_1 + src_2) / 4.0
+
+            prev_it_1 = df.at[df.index[i-1], 'it'] if not np.isnan(df.at[df.index[i-1], 'it']) else init_val
+            prev_it_2 = df.at[df.index[i-2], 'it'] if not np.isnan(df.at[df.index[i-2], 'it']) else init_val
+
+            # Tính Instantaneous Trend (it)
+            it = ((alpha - (alpha**2) / 4.0) * src +
+                0.5 * alpha**2 * src_1 -
+                (alpha - 0.75 * alpha**2) * src_2 +
+                2 * (1 - alpha) * prev_it_1 -
+                (1 - alpha)**2 * prev_it_2)
+
+            df.at[df.index[i], 'it'] = it
+
+            # Tính giá trị trễ (lag)
+            prev_it_2 = df.at[df.index[i-2], 'it'] if not np.isnan(df.at[df.index[i-2], 'it']) else it
+            lag = 2.0 * it - prev_it_2
+            df.at[df.index[i], 'lag'] = lag
+
+        # Xác định màu sắc xu hướng
+        df['trend_color'] = np.where(df['it'] > df['lag'], 'red', 'lime')
+
+        return df
+    @staticmethod
+    def calculate_rsi(df_origin, length=14, ma_type="SMA", bb_mult=2.0, calculate_divergence=False):
+        df = df_origin.copy(deep=True)
+        """
+        Tính toán Relative Strength Index (RSI) với các tùy chọn smoothing MA, Bollinger Bands, và phân kỳ.
+
+        :param df: DataFrame chứa dữ liệu OHLCV.
+        :param length: Độ dài của RSI.
+        :param ma_type: Loại MA được sử dụng để làm mượt ("None", "SMA", "SMA + Bollinger Bands", "EMA", "WMA", "VWMA", "RMA").
+        :param bb_mult: Độ lệch chuẩn nhân cho Bollinger Bands (nếu dùng SMA + Bollinger Bands).
+        :param calculate_divergence: Nếu `True`, tính toán phân kỳ RSI.
+        :return: DataFrame chứa giá trị RSI và các đường MA.
+        """
+
+        # Tính chênh lệch giá đóng cửa
+        delta = df["close"].diff()
+        df['delta'] = delta
+        # Phân loại tăng / giảm
+        df['gain'] = np.where(delta > 0, delta, 0)
+        df['loss'] = np.where(delta < 0, -delta, 0)
+
+        # Tính toán RSI với RMA (Relative Moving Average)
+        df["avg_gain"] = df['gain'].ewm(alpha=1/length, adjust=False).mean()
+        df["avg_loss"] = df['loss'].ewm(alpha=1/length, adjust=False).mean()
+
+        # Công thức RSI
+        df["rsi"] = np.where(df["avg_loss"] == 0, 100, np.where(df["avg_gain"] == 0, 0,
+            100 - (100 / (1 + df["avg_gain"] / df["avg_loss"]))
+        ))
+
+        # Hàm tính MA tùy chọn
+        def moving_average(series, length, ma_type):
+            if ma_type == "SMA":
+                return series.rolling(length).mean()
+            elif ma_type == "EMA":
+                return series.ewm(span=length, adjust=False).mean()
+            elif ma_type == "WMA":
+                weights = np.arange(1, length + 1)
+                return series.rolling(length).apply(lambda x: np.dot(x, weights) / weights.sum(), raw=True)
+            elif ma_type == "VWMA":
+                return (series * df["volume"]).rolling(length).sum() / df["volume"].rolling(length).sum()
+            elif ma_type == "RMA":
+                return series.ewm(alpha=1/length, adjust=False).mean()
+            else:
+                return None  # Không dùng MA
+
+        df["smoothing_MA"] = moving_average(df["rsi"], length, ma_type)
+
+        # Tính Bollinger Bands nếu chọn "SMA + Bollinger Bands"
+        if ma_type == "SMA":
+            df["bb_stddev"] = df["rsi"].rolling(length).std() * bb_mult
+            df["bb_upper"] = df["smoothing_MA"] + df["bb_stddev"]
+            df["bb_lower"] = df["smoothing_MA"] - df["bb_stddev"]
+        else:
+            df["bb_upper"], df["bb_lower"] = None, None  # Không tính BB nếu không chọn SMA
+
+        # Tính toán phân kỳ (Divergence)
+        if calculate_divergence:
+            lookback_right = 5
+            lookback_left = 5
+            range_upper = 60
+            range_lower = 5
+
+            df["plFound"] = df["rsi"].rolling(lookback_right).min()
+            df["phFound"] = df["rsi"].rolling(lookback_right).max()
+
+            df["rsiHL"] = df["plFound"] > df["plFound"].shift(1)
+            df["rsiLH"] = df["phFound"] < df["phFound"].shift(1)
+
+            df["priceLL"] = df["close"].rolling(lookback_right).min() < df["close"].rolling(lookback_right).min().shift(1)
+            df["priceHH"] = df["close"].rolling(lookback_right).max() > df["close"].rolling(lookback_right).max().shift(1)
+
+            df["bullCond"] = df["priceLL"] & df["rsiHL"]
+            df["bearCond"] = df["priceHH"] & df["rsiLH"]
+
+        return df
+
+    @staticmethod
+    def ehlers_smoothed_adaptive_momentum(df_origin: pd.DataFrame, alpha=0.07, cutoff=8):
+        df = df_origin.copy()
+
+        # Tính giá trung bình (hl2)
+        df['hl2'] = (df['high'] + df['low']) / 2
+
+        # Pi và góc độ
+        PI = 4 * np.arctan(1.0)
+        dtr = PI / 180.0  # Độ sang radian
+        rtd = 1 / dtr  # Radian sang độ
+
+        # Tạo mảng smooth
+        df['smooth'] = (df['hl2'] + 2 * df['hl2'].shift(1) + 2 * df['hl2'].shift(2) + df['hl2'].shift(3)) / 6.0
+
+        # Khởi tạo các cột
+        df['c'] = np.nan
+        df['q1'] = np.nan
+        df['I1'] = np.nan
+        df['dp_'] = np.nan
+        df['dp'] = np.nan
+        df['dc'] = np.nan
+        df['ip'] = np.nan
+        df['p'] = np.nan
+        df['f3'] = np.nan
+
+        for i in range(len(df)):
+            # if i < 2:  # Cần ít nhất 6 dữ liệu trước đó để tính
+            #     continue
+
+            # Tính toán C
+            smooth = df.at[df.index[i], 'smooth']
+            smooth_1 = df.at[df.index[i-1], 'smooth']
+            smooth_2 = df.at[df.index[i-2], 'smooth']
+
+            c_1 = df.at[df.index[i-1], 'c'] if not np.isnan(df.at[df.index[i-1], 'c']) else 0
+            c_2 = df.at[df.index[i-2], 'c'] if not np.isnan(df.at[df.index[i-2], 'c']) else 0
+            c = (
+                (1 - 0.5 * alpha) * (1 - 0.5 * alpha) * (smooth - 2 * smooth_1 + smooth_2) +
+                2 * (1 - alpha) * c_1 - (1 - alpha) * (1 - alpha) * c_2
+            )
+            df.at[df.index[i], 'c'] = c if not np.isnan(c) else (smooth - 2 * smooth_1 + smooth_2) / 4
+
+            # Tính Q1
+            ip_1 = df.at[df.index[i-1], 'ip'] if not np.isnan(df.at[df.index[i-1], 'ip']) else 0
+            c = df.at[df.index[i], 'c']
+            c_2 = df.at[df.index[i-2], 'c'] if not np.isnan(df.at[df.index[i-2], 'c']) else 0
+            c_4 = df.at[df.index[i-4], 'c'] if not np.isnan(df.at[df.index[i-4], 'c']) else 0
+            c_6 = df.at[df.index[i-6], 'c'] if not np.isnan(df.at[df.index[i-6], 'c']) else 0
+
+            df.at[df.index[i], 'q1'] = (
+                (0.0962 * c + 0.5769 * c_2 -
+                0.5769 * c_4 - 0.0962 * c_6)
+                * (0.5 + 0.08 * ip_1)
+            )
+
+            # Tính I1
+            df.at[df.index[i], 'I1'] = df.at[df.index[i-3], 'c'] if not np.isnan(df.at[df.index[i-3], 'c']) else 0
+
+            # Tính dp_
+            q1 = df.at[df.index[i], 'q1'] if not np.isnan(df.at[df.index[i], 'q1']) else 0
+            q1_1 = df.at[df.index[i-1], 'q1'] if not np.isnan(df.at[df.index[i-1], 'q1']) else 0
+            I1 = df.at[df.index[i], 'I1'] if not np.isnan(df.at[df.index[i], 'I1']) else 0
+            I1_1 = df.at[df.index[i-1], 'I1'] if not np.isnan(df.at[df.index[i-1], 'I1']) else 0
+
+            if q1 != 0 and q1_1 != 0:
+                df.at[df.index[i], 'dp_'] = (
+                    (I1 / q1 - I1_1 / q1_1) / (1 + I1 * I1_1 / (q1 * q1_1))
+                )
+            else:
+                df.at[df.index[i], 'dp_'] = 0
+
+            # Giới hạn dp_
+            df.at[df.index[i], 'dp'] = max(0.1, min(df.at[df.index[i], 'dp_'], 1.1))
+
+            # Tính md
+            md_values = [
+                df.at[df.index[i-2], 'dp'],
+                df.at[df.index[i-3], 'dp'],
+                df.at[df.index[i-4], 'dp']
+            ]
+            med_2_3_4 = np.median(md_values)
+            md_values = [
+                df.at[df.index[i], 'dp'],
+                df.at[df.index[i-1], 'dp'],
+                med_2_3_4
+            ]
+            df.at[df.index[i], 'md'] = np.median(md_values)
+
+            # Tính DC
+            md = df.at[df.index[i], 'md']
+            df.at[df.index[i], 'dc'] = 15 if md == 0 else 2 * PI / md + 0.5
+
+            # Tính ip
+            ip_1 = df.at[df.index[i-1], 'ip'] if not np.isnan(df.at[df.index[i-1], 'ip']) else 0
+            df.at[df.index[i], 'ip'] = 0.33 * df.at[df.index[i], 'dc'] + 0.67 * ip_1
+
+            # Tính p
+            p_1 = df.at[df.index[i-1], 'p'] if not np.isnan(df.at[df.index[i-1], 'p']) else 0
+            df.at[df.index[i], 'p'] = 0.15 * df.at[df.index[i], 'ip'] + 0.85 * p_1
+
+            # Kiểm tra NaN trước khi tính pr
+            p_value = df.at[df.index[i], 'p']
+            pr = round(abs(p_value - 1)) if not np.isnan(p_value) else 1  # Gán giá trị mặc định 1 nếu NaN
+
+            # Tính f3
+            src = df.at[df.index[i], 'hl2']
+            v1 = src - df.at[df.index[i-pr], 'hl2'] if i >= pr and not np.isnan(df.at[df.index[i-pr], 'hl2']) else 0
+
+            a1 = np.exp(-PI / cutoff)
+            b1 = 2.0 * a1 * np.cos((1.738 * 180 / cutoff) * dtr)
+            c1 = a1 ** 2
+            coef2 = b1 + c1
+            coef3 = -(c1 + b1 * c1)
+            coef4 = c1 ** 2
+            coef1 = 1 - coef2 - coef3 - coef4
+
+            f3_1 = df.at[df.index[i-1], 'f3'] if not np.isnan(df.at[df.index[i-1], 'f3']) else 0
+            f3_2 = df.at[df.index[i-2], 'f3'] if not np.isnan(df.at[df.index[i-2], 'f3']) else 0
+            f3_3 = df.at[df.index[i-3], 'f3'] if not np.isnan(df.at[df.index[i-3], 'f3']) else 0
+
+            df.at[df.index[i], 'f3'] = coef1 * v1 + coef2 * f3_1 + coef3 * f3_2 + coef4 * f3_3
+
+        return df
+
+    @staticmethod
+    def universal_oscillator(df_origin: pd.DataFrame, bandedge=20, lengthMA=9):
+        df = df_origin.copy()
+
+        # Tính white noise
+        df['whitenoise'] = (df['close'] - df['close'].shift(2)) / 2
+
+        # Tính toán các hệ số bộ lọc
+        a1 = np.exp(-1.414 * np.pi / bandedge)
+        b1 = 2.0 * a1 * np.cos(1.414 * 180 / bandedge)
+        c2 = b1
+        c3 = -a1 * a1
+        c1 = 1 - c2 - c3
+
+        # Khởi tạo các cột
+        df['filt'] = np.nan
+        df['pk'] = np.nan
+        df['euo'] = np.nan
+
+        # Áp dụng bộ lọc tín hiệu (IIR filter)
+        for i in range(len(df)):
+            if i < 2:  # Cần ít nhất 2 giá trị trước đó
+                continue
+
+            filt_prev1 = df.at[df.index[i-1], 'filt'] if not np.isnan(df.at[df.index[i-1], 'filt']) else 0
+            filt_prev2 = df.at[df.index[i-2], 'filt'] if not np.isnan(df.at[df.index[i-2], 'filt']) else 0
+            whitenoise = df.at[df.index[i], 'whitenoise']
+            whitenoise_1 = df.at[df.index[i-1], 'whitenoise'] if i > 0 else whitenoise
+
+            filt = c1 * (whitenoise + whitenoise_1) / 2 + c2 * filt_prev1 + c3 * filt_prev2
+            df.at[df.index[i], 'filt'] = filt
+
+        # Xác định `pk` (đỉnh động lượng) và `euo`
+        for i in range(len(df)):
+            if i < 2:
+                continue
+
+            filt1 = df.at[df.index[i], 'filt']
+
+            pk_prev = df.at[df.index[i-1], 'pk'] if not np.isnan(df.at[df.index[i-1], 'pk']) else 0.0000001
+            pk = max(abs(filt1), 0.991 * pk_prev) if abs(filt1) > pk_prev else 0.991 * pk_prev
+            df.at[df.index[i], 'pk'] = pk
+
+            denom = pk if pk != 0 else -1
+            euo_prev = df.at[df.index[i-1], 'euo'] if not np.isnan(df.at[df.index[i-1], 'euo']) else 0
+            euo = filt1 / pk if denom != -1 else euo_prev
+            df.at[df.index[i], 'euo'] = euo
+
+        # Tính toán EMA của `euo`
+        df['euoMA'] = df['euo'].ewm(span=lengthMA, adjust=False).mean()
+
+        return df
+    
+    @staticmethod
+    def ehlers_cyber_cycle(df_origin: pd.DataFrame, alpha=0.07):
+        df = df_origin.copy()
+
+        # Tính giá trung bình (hl2)
+        df['hl2'] = (df['high'] + df['low']) / 2
+
+        # Tạo mảng smooth
+        df['smooth'] = (df['hl2'] + 2 * df['hl2'].shift(1) + 2 * df['hl2'].shift(2) + df['hl2'].shift(3)) / 6
+
+        # Khởi tạo cột cycle_
+        df['cycle_'] = np.nan
+
+        for i in range(len(df)):
+            if i < 2:  # Không đủ dữ liệu
+                continue
+
+            smooth = df.at[df.index[i], 'smooth']
+            smooth_1 = df.at[df.index[i-1], 'smooth']
+            smooth_2 = df.at[df.index[i-2], 'smooth']
+
+            cycle_1 = df.at[df.index[i-1], 'cycle_']  if not np.isnan(df.at[df.index[i-1], 'cycle_']) else 0
+
+            df.at[df.index[i], 'cycle_'] = (
+                (1 - 0.5 * alpha) * (1 - 0.5 * alpha) * (smooth - 2 * smooth_1 + smooth_2) + 2 * (1 - alpha) * cycle_1 - (1 - alpha) ** 2 * cycle_1
+            )
+
+        # Xử lý cycle khi `n < 7`
+        df['cycle'] = np.where(df.index.to_series().factorize()[0] < 7,
+                            (df['hl2'] - 2 * df['hl2'].shift(1) + df['hl2'].shift(2)) / 4,
+                            df['cycle_'])
+
+        # Tạo đường Trigger (t)
+        df['t'] = df['cycle'].shift(1)
+
+        # Xác định màu sắc dựa vào điều kiện so sánh
+        df['color'] = np.where(df['cycle'] > df['t'], "green", "red")
+
+        return df
+    
+    @staticmethod
+    def predictive_moving_average(df_origin: pd.DataFrame):
+        def weighted_moving_average(series, weights):
+            """
+            Tính WMA bằng cách nhân trọng số với dữ liệu theo thứ tự ngược lại.
+            """
+            wma = np.full_like(series, np.nan)  # Mảng NaN cùng kích thước
+            for i in range(len(series)):
+                if i >= len(weights) - 1:
+                    wma[i] = np.dot(series[i-len(weights)+1:i+1][::-1], weights) / weights.sum()
+            return wma
+        df = df_origin.copy()
+
+        # Tính trung bình giá hl2
+        df['hl2'] = (df['high'] + df['low']) / 2
+
+        # Trọng số cho WMA7
+        wma7_weights = np.array([7, 6, 5, 4, 3, 2, 1])
+
+        # Tính `wma1` và `wma2`
+        df['wma1'] = weighted_moving_average(df['hl2'], wma7_weights)
+        df['wma2'] = weighted_moving_average(df['wma1'], wma7_weights)
+
+        # Tính `predict`
+        df['predict'] = 2 * df['wma1'] - df['wma2']
+
+        # Trọng số cho trigger WMA4
+        wma4_weights = np.array([4, 3, 2, 1])
+
+        # Tính `trigger`
+        df['trigger'] = weighted_moving_average(df['predict'], wma4_weights)
+
+        # Xác định tín hiệu
+        df['sig'] = np.where(df['predict'] > df['trigger'], 1, np.where(df['predict'] < df['trigger'], -1, 0))
+
+        return df
+    
+    @staticmethod
+    def ehlers_center_of_gravity(df_origin: pd.DataFrame, length=10):
+        df = df_origin.copy()
+
+        # Tính trung bình giá hl2
+        df['hl2'] = (df['high'] + df['low']) / 2
+
+        # Tính nm (tử số)
+        df['nm'] = df['hl2'].rolling(length).apply(lambda x: np.sum((np.arange(1, length + 1) * x[::-1])), raw=True)
+
+        # Tính dm (mẫu số)
+        df['dm'] = df['hl2'].rolling(length).sum()
+
+        # Tránh chia 0 khi dm = 0
+        df['cg'] = np.where(df['dm'] != 0, -df['nm'] / df['dm'] + (length + 1) / 2, 0)
+
+        # Đường Trigger (CG của phiên trước)
+        df['t'] = df['cg'].shift(1)
+
+        return df
+    
+    @staticmethod
+    def ehlers_decycler_oscillator(df_origin: pd.DataFrame, hp_period=125, k=1, hp_period2=100, k2=1.2):
+        df = df_origin.copy()
+        def high_pass_filter(src, hp_period, mult):
+            """ Tính toán bộ lọc High-Pass theo Ehlers """
+            pi = np.pi
+            alpha_arg = (2 * pi) / (mult * hp_period * np.sqrt(2))
+
+            # Xử lý chia 0 khi cos(alphaArg) = 0
+            alpha_init = (np.cos(alpha_arg) + np.sin(alpha_arg) - 1) / np.cos(alpha_arg) if np.cos(alpha_arg) != 0 else 0
+            alpha = np.full_like(src, alpha_init)  # Tạo mảng alpha có cùng kích thước với src
+
+            # Tạo mảng lưu kết quả hp với NaN ban đầu
+            hp = np.full_like(src, np.nan)
+
+            for i in range(len(src)):
+                if i < 2:
+                    hp[i] = 0  # Giá trị khởi tạo tránh lỗi truy cập index âm
+                else:
+                    hp[i] = (1 - alpha[i] / 2) ** 2 * (src[i] - 2 * src[i-1] + src[i-2]) + \
+                            2 * (1 - alpha[i]) * hp[i-1] - (1 - alpha[i]) ** 2 * hp[i-2]
+
+            return hp
+
+        # Tính giá trung bình (src)
+        df['src'] = df['close']
+
+        # Tính bộ lọc High-Pass lần 1
+        df['hp'] = high_pass_filter(df['src'].values, hp_period, 1)
+
+        # Tính Decycler 1
+        df['decycler'] = df['src'] - df['hp']
+
+        # Tính Decycler Oscillator 1
+        df['hp_decycler'] = high_pass_filter(df['decycler'].values, hp_period, 0.5)
+        df['decosc'] = 100 * k * df['hp_decycler'] / df['src']
+
+        # Tính bộ lọc High-Pass lần 2
+        df['hp2'] = high_pass_filter(df['src'].values, hp_period2, 1)
+
+        # Tính Decycler 2
+        df['decycler2'] = df['src'] - df['hp2']
+
+        # Tính Decycler Oscillator 2
+        df['hp_decycler2'] = high_pass_filter(df['decycler2'].values, hp_period2, 0.5)
+        df['decosc2'] = 100 * k2 * df['hp_decycler2'] / df['src']
+
+        # Xác định màu xu hướng
+        df['trend_color'] = np.where(df['decosc2'] > df['decosc'], "green", "red")
+
+        return df
+    @staticmethod
+    def kalman_step(
+        df,
+        kalman_alpha = 0.01,
+        kalman_beta = 0.1,
+        kalman_period = 21,
+    ):
+        v1 = np.nan
+        v2 = 1.0
+        v3 = alpha * period
+        v4 = 0.0
+
+        kalman_values = []
+
+        for i in range(len(data)):
+            if np.isnan(v1):
+                v1 = data[i] if not np.isnan(data[i]) else v1
+
+            v5 = v1
+            v4 = v2 / (v2 + v3)
+            v1 = v5 + v4 * (data[i] - v5)
+            v2 = (1 - v4) * v2 + beta / period
+
+            kalman_values.append(v1)
+
+        return np.array(kalman_values)
+    @staticmethod
+    def statistical_trend_analysis(
+        df,
+        z_score_length = 40,  # Length for Z-Score calculation
+        data_points = 1000,    # Number of points for scatterplot
+    ):
+        def calculate_z_score(df, length):
+            
+            mean = df['close'].rolling(window=length).mean()
+            std_dev = df['close'].rolling(window=length).std(ddof=0)
+            z_score = (df['close'] - mean) / std_dev
+            z_score = z_score.clip(lower=-4, upper=4)  # Limit Z-Score to [-4, 4]
+            return z_score
+
+        # Z-Change Calculation
+        def calculate_z_change(z_score, length):
+            z_change = z_score.diff(periods=int(length / 3))
+            z_change = z_change.clip(lower=-4, upper=4)  # Limit Z-Change to [-4, 4]
+            return z_change
+        df['z_score'] = calculate_z_score(df, z_score_length)
+        df['z_change'] = calculate_z_change(df['z_score'], z_score_length)
+
+        # Scatterplot Quadrants
+        quad1, quad2, quad3, quad4 = 0, 0, 0, 0
+        scatter_points = []
+
+        for i in range(data_points):
+            if i >= len(df):
+                break
+            
+            x = df['z_change'].iloc[-i-1]
+            y = df['z_score'].iloc[-i-1]
+            
+            scatter_points.append((x, y))
+
+            # Count quadrants
+            if x > 0 and y > 0:
+                quad1 += 1
+            elif x < 0 and y > 0:
+                quad2 += 1
+            elif x < 0 and y < 0:
+                quad3 += 1
+            elif x > 0 and y < 0:
+                quad4 += 1
 class VTa:
     """TA functions used for vector calculations"""
 

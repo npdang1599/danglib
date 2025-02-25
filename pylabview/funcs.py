@@ -52,6 +52,7 @@ class Globs:
             "bbwp2": Conds.bbwp2,
             "bbpctb": Conds.bbpctb,
             "fourier_supertrend": Conds.fourier_supertrend,
+            "mama" : Conds.mama,
             "net_income": Conds.Fa.net_income,
             "revenue": Conds.Fa.revenue,
             "inventory": Conds.Fa.inventory,
@@ -590,6 +591,7 @@ class Conds:
         wait_bars: bool = False,
         wbars: int = 5,
         compare_prev_peak_trough: bool = False,
+        compare_prev_peak_trough_direction: str = "Higher",
         *args, **kwargs
         ):
         """Check if the percentage change between `close` price with lowest(`low`) (if direction is increase) 
@@ -643,16 +645,61 @@ class Conds:
                 isw = hlofclose > fwmark
             rs.loc[(fwmark.notna() & isw)] = True
 
-            # if not compare_prev_peak_trough:
-            #     return rs
-            # else:
-            #     df['res'] = rs
-            #     if direction == 'Increase':
-            #         df['peak'] = rs.shift(-wbars)
-            #     # if di            
-            return rs
-        return None
+            if not compare_prev_peak_trough:
+                return rs
+            else:
+                df['res'] = rs
+                df['res'] = df['res'].astype(bool)
+                df['cons_res'] = df['res'].groupby((df['res'] != df['res'].shift(1)).cumsum()).cumsum()
+                df["group"] = (df["res"] != df["res"].shift()).cumsum()
 
+                if direction == 'Increase':
+                    df['peak'] = np.where(df['res'], df['high'].rolling(wbars + nbars).max(), np.nan)
+                    df['peak'] = df['peak'].groupby((df['res'] != df['res'].shift(1)).cumsum()).cummax()
+                    grouped = df[df['res']].groupby((df['res'] != df['res'].shift(1)).cumsum()).agg({'peak':'max'})
+                    grouped_shifted = grouped.shift()
+                    df = df.merge(grouped_shifted, left_on="group", right_index = True, suffixes=("", "_prev"), how = 'left')
+                    if compare_prev_peak_trough_direction == 'Higher':
+                        df['new_res'] = df['peak'] > df['peak_prev']
+                    else:
+                        df['new_res'] = df['peak'] < df['peak_prev']
+                if direction == 'Decrease':
+                    df['trough'] = np.where(df['res'], df['low'].rolling(wbars + nbars).min(), np.nan)
+                    df['trough'] = df['trough'].groupby((df['res'] != df['res'].shift(1)).cumsum()).cummin()
+                    grouped = df[df['res']].groupby((df['res'] != df['res'].shift(1)).cumsum()).agg({'trough':'min'})
+                    grouped_shifted = grouped.shift()
+                    df = df.merge(grouped_shifted, left_on="group", right_index = True, suffixes=("", "_prev"), how = 'left')
+                    if compare_prev_peak_trough_direction == 'Higher':
+                        df['new_res'] = df['trough'] > df['trough_prev']
+                    else:
+                        df['new_res'] = df['trough'] < df['trough_prev']
+                return df['new_res']  
+        return None
+    @staticmethod
+    def no_break(
+        df: pd.DataFrame,
+        direction: str = "Increase",
+        wbars: int = 5,
+        use_flag: bool = False,
+    ):
+        inrange = Utils.new_1val_series(True, df)
+        if use_flag:
+            if direction == "Increase":
+                mark = np.where(inrange, df['high'], np.nan)
+                mark = pd.Series(mark, index=df.index)
+                hlofclose = Ta.highest(df['close'], wbars)
+            else:
+                mark = np.where(inrange, df['low'], np.nan)
+                mark = pd.Series(mark, index=df.index)
+                hlofclose = Ta.lowest(df['close'], wbars)
+                
+            fwmark = mark.shift(wbars)
+            rs = Utils.new_1val_series(False, df) 
+            if direction == "Increase":
+                isw = hlofclose < fwmark
+            else:
+                isw = hlofclose > fwmark
+            rs.loc[(fwmark.notna() & isw)] = True
     @staticmethod
     def price_gap(df: pd.DataFrame, gap_dir="Use Gap Up", use_flag: bool = True, *args, **kwargs):
         """Check if this is Gap Up or Gap Down bar.
@@ -1186,6 +1233,22 @@ class Conds:
                 high_range,
             )
 
+        return res
+    @staticmethod
+    def mama(
+        df: pd.DataFrame,
+        fastlimit=0.5,
+        slowlimit=0.05,
+        use_cross: bool = False,
+        direction: str = "crossover",
+        use_flag: bool = False, 
+    ):
+        res = None
+
+        if use_flag:
+
+            mama, fama = Ta.mama(df, fastlimit, slowlimit)
+            res = Conds.Standards.two_line_pos(mama, fama, direction = direction, use_flag = use_flag)
         return res
     @staticmethod
     def general_cond(

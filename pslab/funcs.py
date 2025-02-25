@@ -1,6 +1,7 @@
 from typing import Dict, Union
 import pandas as pd
 import numpy as np
+from datetime import datetime
 
 from danglib.pslab.resources import Adapters, Globs, RedisHandler
 from danglib.pslab.utils import Utils
@@ -305,6 +306,24 @@ def function_mapping():
                 'lookback_cond_nbar': {'type': 'int', 'default': 5},
             }
         },
+        'macd_percentage': {
+            'function': Conds.Indicators.macd_percentage,
+            'title': 'MACD%',
+            'description': "MACD%",
+            'inputs': ['src', 'close'],
+            'params': {
+                'r2_period': {'type': 'int', 'default': 20},
+                'fast': {'type': 'int', 'default': 10},
+                'slow': {'type': 'int', 'default': 20},
+                'signal_length': {'type': 'int', 'default': 9},
+                'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
+                'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option src1 crossover src2, mà equal = True thì khi src1 = src2 cũng được xem là crossover, tương tự với crossunder, above, below'},
+                'macd_pct_range_lower': {'type': 'float', 'default': 30},
+                'macd_pct_range_upper': {'type': 'float', 'default': 70},
+                'use_as_lookback_cond': {'type': 'bool', 'default': False},
+                'lookback_cond_nbar': {'type': 'int', 'default': 5},
+            }
+        },
         'bbwp': {
             'function': Conds.Indicators.bbwp,
             'title': 'BBWP',
@@ -470,7 +489,11 @@ class Resampler:
 
     @staticmethod
     def get_agg_dict(names: list):
-        return {n: k for k, n in Globs.STANDARD_AGG_DIC.items() if n in names}
+        
+        if len(names[0]) == 2:
+            return {n: Globs.STANDARD_AGG_DIC[n[0]] for n in names}
+        else:
+            return {n: v for n, v in Globs.STANDARD_AGG_DIC.items() if n in names}
     
     @staticmethod
     def _calculate_candle_time_old(timestamps: pd.Series, timeframe):
@@ -554,7 +577,7 @@ class Resampler:
         seconds_in_day = ts_seconds % 86400
        
         def _resample(timestamps, timeframe):
-            ts_started = ts_seconds // 86400 * 86400 + 9 * 3600
+            ts_started = timestamps // 86400 * 86400 + 9 * 3600
             tf_seconds = Globs.TF_TO_MIN.get(timeframe) * 60
             base_candles = (timestamps - ts_started) // tf_seconds * tf_seconds + ts_started
             return base_candles
@@ -590,15 +613,16 @@ class Resampler:
 
 
     @staticmethod
-    def _validate_agg_dict(df: pd.DataFrame, agg_dict: dict):
+    def _validate_agg_dict(df: pd.DataFrame, agg_dict: dict, level=0):
         """
         Kiểm tra và chuẩn hóa agg_dict
         """
-        if not agg_dict:
-            return {col: 'last' for col in df.columns if col != 'datetime'}
+        # if not agg_dict:
+        #     return {col: 'last' for col in df.columns if col != 'datetime'}
+        assert agg_dict, "agg_dict is Empty"
         
         # Kiểm tra columns không tồn tại
-        invalid_cols = set(agg_dict.keys()) - set(df.columns)
+        invalid_cols = set(agg_dict.keys()) - set(df.columns.get_level_values(0).unique())
         if invalid_cols:
             raise ValueError(f"Columns không tồn tại trong DataFrame: {invalid_cols}")
         
@@ -631,7 +655,9 @@ class Resampler:
         #     agg_dict = {'buyImpact': 'last', 'sellImpact': 'last'}
 
         # Validate và chuẩn hóa agg_dict
-        agg_dict = cls._validate_agg_dict(df, agg_dict)
+        is_multiindex = isinstance(df.columns, pd.MultiIndex)
+        if not is_multiindex:
+            agg_dict = cls._validate_agg_dict(df, agg_dict)
         
         # Reset index để có thể xử lý candleTime
         df = df.reset_index()
@@ -1770,6 +1796,34 @@ class Conds:
             return result
 
         @staticmethod
+        def macd_percentage(
+            src: PandasObject,
+            close: PandasObject,
+            r2_period: int = 20,
+            fast: int = 10,
+            slow: int = 20,
+            signal_length: int = 9,
+            direction: str = 'crossover',
+            equal: bool = False,
+            macd_pct_range_lower: float = 30,
+            macd_pct_range_upper: float = 70,
+            use_as_lookback_cond: bool = False,
+            lookback_cond_nbar = 5,
+        ):
+            macd, signal = Indicators.macd(src, r2_period, fast, slow, signal_length)
+
+            pos_cond = Conds.two_line_pos(macd, signal, direction, equal)
+            macd_pct = (macd / close) * 100
+            range_cond = Conds.range_cond(macd_pct, macd_pct_range_lower, macd_pct_range_upper)
+
+            result = pos_cond & range_cond
+
+            if use_as_lookback_cond:
+                result = Ta.make_lookback(result, lookback_cond_nbar)
+
+            return result
+
+        @staticmethod
         def bbwp(
             src: PandasObject,
             basic_type: str = "SMA",
@@ -1851,7 +1905,7 @@ class Conds:
 
 class CombiConds:
     @staticmethod
-    def load_and_process_group_data(conditions_params: list[dict], use_sample_data: bool = False) -> tuple[dict[str, pd.Series], list[dict]]:
+    def load_and_process_group_data(conditions_params: list[dict], use_sample_data: bool = False, realtime=False, history_cutoff_stamp:int=0) -> tuple[dict[str, pd.Series], list[dict]]:
         """
         Load and process group data based on conditions parameters with optimized processing.
         
@@ -1921,7 +1975,113 @@ class CombiConds:
                 )
 
                 # Load and group data
-                data = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks, use_sample_data)
+                data: pd.DataFrame = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks, use_sample_data)
+                data = data.groupby(level=0, axis=1).sum()
+                
+                # Process each required column
+                for col, tf, sk, window, method in required_cols:
+                    if sk == stocks_key:
+                        key = f"{col}_{tf}_{sk}_{window}_{method}"
+                        data_processed: pd.Series = data[col].copy()
+                        
+                        # Apply timeframe resampling if needed
+                        if tf != Globs.BASE_TIMEFRAME:
+                            data_processed = Resampler.resample_vn_stock_data(
+                                data_processed.to_frame(), 
+                                timeframe=tf, 
+                                agg_dict=Resampler.get_agg_dict([col])
+                            )[col]  # Extract series from resampled frame
+                        
+                        # Apply rolling calculations if needed
+                        if window is not None:
+                            data_processed = Ta.apply_rolling(data_processed, window, method)
+                        
+                        required_data[key] = data_processed
+
+            return required_data, updated_conditions
+        
+        except Exception as e:
+            # Add context to any errors
+            raise type(e)(f"Error in load_and_process_group_data: {str(e)}") from e
+
+    @staticmethod
+    def load_and_process_group_data2(conditions_params: list[dict], use_sample_data: bool = False, realtime=False) -> tuple[dict[str, pd.Series], list[dict]]:
+        """
+        Load and process group data based on conditions parameters with optimized processing.
+        
+        Args:
+            conditions_params: List of condition parameters containing inputs and processing requirements
+            use_sample_data: Whether to use sample data instead of live data
+            
+        Returns:
+            Tuple containing:
+            - Dictionary mapping processed data keys to pandas Series
+            - List of updated condition parameters with resolved inputs
+            
+        Raises:
+            InputSourceEmptyError: If an input source is empty
+            ValueError: If invalid parameter combinations are provided
+        """
+        def test():
+            conditions_params = TestSets.LOAD_PROCESS_GROUP_DATA
+            use_sample_data = False
+            realtime=True
+            history_cutoff_stamp = Utils.day_to_timestamp('2025_01_01')
+        try:
+            required_data: dict[str, pd.Series] = {}
+            required_cols: set[tuple] = set()
+
+            updated_conditions = []
+            # First pass: collect all required columns and build updated conditions
+            for condition in conditions_params:
+                # Get processing parameters with defaults
+                timeframe = condition['inputs'].get('timeframe', Globs.BASE_TIMEFRAME)
+                rolling_window = condition['inputs'].get('rolling_window')
+                rolling_method = condition['inputs'].get('rolling_method', 'sum')
+                stocks = condition['inputs'].get('stocks', Globs.STOCKS)
+                stocks_key = hash('_'.join(sorted(stocks)))
+                
+                new_condition = deepcopy(condition)
+                new_condition['inputs'] = {}
+                
+                # Process each input parameter
+                for param_name, col_name in condition['inputs'].items():
+                    if param_name not in ['rolling_window', 'stocks', 'rolling_method', 'timeframe']:
+                        if not col_name:  # More robust empty check
+                            raise InputSourceEmptyError(f"Input {param_name} is empty!")
+                        
+                        # Create unique identifier for this data requirement
+                        required_cols.add((col_name, timeframe, stocks_key, rolling_window, rolling_method))
+                        new_key = f"{col_name}_{timeframe}_{stocks_key}_{rolling_window}_{rolling_method}"
+                        new_condition['inputs'][param_name] = new_key
+                    else:
+                        new_condition['inputs'][param_name] = condition['inputs'][param_name]
+                
+                updated_conditions.append(new_condition)
+
+            # Group columns by stock combinations for efficient data loading
+            all_cols_by_stocks: dict[int, set[str]] = {}
+            for col, _, stocks_key, _, _ in required_cols:
+                if stocks_key not in all_cols_by_stocks:
+                    all_cols_by_stocks[stocks_key] = set()
+                all_cols_by_stocks[stocks_key].add(col)
+
+            # Process data for each stock combination
+            for stocks_key, cols in all_cols_by_stocks.items():
+                # Find correct stock filter for this combination
+                filtered_stocks = next(
+                    (condition['inputs'].get('stocks', Globs.STOCKS) 
+                    for condition in conditions_params 
+                    if hash('_'.join(sorted(condition['inputs'].get('stocks', Globs.STOCKS)))) == stocks_key),
+                    Globs.STOCKS
+                )
+
+                if realtime:
+                    data: pd.DataFrame = Adapters.load_stock_data_from_plasma_realtime(list(cols), filtered_stocks)
+                else:
+                    # Load and group data
+                    data: pd.DataFrame = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks, use_sample_data)
+
                 data = data.groupby(level=0, axis=1).sum()
                 
                 # Process each required column
@@ -2064,6 +2224,71 @@ class CombiConds:
             ValueError: If invalid parameter combinations are provided
         """
         try:
+            def test():
+                conditions_params = [
+                        {
+                            "function": "two_line_pos",
+                            "inputs": {
+                                "src1": "bu2",
+                                "src2": "sd2",
+                                "rolling_window": 1,
+                                "rolling_method": "sum",
+                                "timeframe": "1Min"
+                            },
+                            "params": {
+                                "direction": "crossover",
+                                "equal": False,
+                                "use_as_lookback_cond": False,
+                                "lookback_cond_nbar": 5
+                            }
+                        }
+                    ]
+                stocks = [
+                    "GVR",
+                    "SSI",
+                    "DXG",
+                    "DIG",
+                    "NLG",
+                    "NVL",
+                    "KBC",
+                    "VGC",
+                    "VND",
+                    "HCM",
+                    "VCI",
+                    "BSI",
+                    "FTS",
+                    "DGW",
+                    "HSG",
+                    "NKG",
+                    "VIX",
+                    "CTS",
+                    "ORS",
+                    "AGR",
+                    "GEX",
+                    "VDS",
+                    "PDR",
+                    "CII",
+                    "HTN",
+                    "TCI",
+                    "GIL",
+                    "KSB",
+                    "FCN",
+                    "LCG",
+                    "DPG",
+                    "DBC",
+                    "TCH",
+                    "VOS",
+                    "VPG",
+                    "HDC",
+                    "ANV",
+                    "VCG",
+                    "PET",
+                    "PC1",
+                    "HAH",
+                    "ASM"
+                ]
+                use_sample_data = False
+
             required_data: dict[str, pd.Series] = {}
             required_cols: set[tuple] = set()
             
@@ -2103,15 +2328,17 @@ class CombiConds:
             # Process each required column
             for col, tf, window, method in required_cols:
                 key = f"{col}_{tf}_{window}_{method}"
-                data_processed = data[col].copy()
                 
                 # Apply timeframe resampling if needed
                 if tf != Globs.BASE_TIMEFRAME:
-                    data_processed = Resampler.resample_vn_stock_data(
-                        data_processed, 
+                    data = Resampler.resample_vn_stock_data(
+                        data, 
                         timeframe=tf,
-                        agg_dict=Resampler.get_agg_dict(list(data_processed.columns))
+                        agg_dict=Resampler.get_agg_dict(list(data.columns))
                     )
+
+                data_processed = data[col].copy()
+                
                 
                 # Apply rolling calculations if needed
                 if window is not None:
@@ -2125,7 +2352,7 @@ class CombiConds:
             raise type(e)(f"Error in load_and_process_stock_data: {str(e)}") from e
     
     @staticmethod
-    def combine_conditions(required_data: dict[str, pd.DataFrame], conditions_params: list[dict]):
+    def combine_conditions(required_data: dict[str, pd.DataFrame], conditions_params: list[dict], combine_calculator: str = 'and') -> pd.Series:
         """Combine multiple conditions with optimized data loading and rolling operations"""
         def test():
             required_data, conditions_params = CombiConds.load_and_process_group_data(TestSets.COMBINE_TEST)
@@ -2153,9 +2380,13 @@ class CombiConds:
             # Apply condition function
             signal = func(**func_inputs, **condition['params'])
 
-            # Combine with final result using AND operation
-            result = Utils.and_conditions([result, signal])
-        
+            if combine_calculator == 'or':
+                # Combine with final result using OR operation
+                result = Utils.or_conditions([result, signal])
+            else:
+                # Combine with final result using AND operation
+                result = Utils.and_conditions([result, signal])
+            
         return result
 
 
@@ -2316,7 +2547,7 @@ class QuerryData:
                 return None, None
             required_data, updated_params = CombiConds.load_and_process_group_data(group_params)
             return QuerryData.load_data(required_data, updated_params)
-        
+    
         def _process_other_data(other_params):
             if not other_params:
                 return None, None
@@ -2628,6 +2859,57 @@ class ReturnStats:
                 results['Win Rate Not 22 (%)'] = 0
                 
         return results
+    
+
+    @staticmethod
+    def get_trade_summary_new(df: pd.DataFrame, from_day: str = None, suffix = None) -> Dict[str, float]:
+        """
+        Generate a summary of trading performance metrics.
+        
+        Args:
+            df: DataFrame with calculated returns
+            from_day: Optional start date in format 'YYYY_MM_DD'
+            
+        Returns:
+            Dictionary containing key performance metrics with date suffix if from_day provided
+        """
+        df = df.copy()
+        # Filter and prepare data
+        signals = df[df['matched']]
+        if from_day:
+            signals = signals[signals['day'] >= from_day]
+        else:
+            from_day = Globs.DATA_FROM_DAY
+            
+        rets = signals['c_o'].dropna()
+        if not len(rets):
+            metric_keys = ['trades', 'days', 'winrate', 'avgret', 'avghigh', 
+                         'avglow', 'maxret', 'minret', 'pf', 'avgwin', 'avgloss']
+            return {k: 0 for k in metric_keys}
+
+        # Calculate win/loss data
+        wins = rets[rets > 0]
+        losses = rets[rets < 0]
+
+        
+        # Generate date suffix if needed
+        if suffix is None:
+            suffix = f"_{datetime.strptime(from_day, '%Y_%m_%d').strftime('%d%m%y')}" if from_day else ''
+        
+        # Return metrics with appropriate suffix
+        return {
+            f'trades{suffix}': len(rets),
+            f'days{suffix}': signals['day'].nunique(),
+            f'winrate{suffix}': (rets > 0).mean() * 100,
+            f'avgret{suffix}': rets.mean(),
+            f'avghigh{suffix}': signals['h_o'].dropna().mean(),
+            f'avglow{suffix}': signals['l_o'].dropna().mean(),
+            f'maxret{suffix}': rets.max(),
+            f'minret{suffix}': rets.min(),
+            f'pf{suffix}': abs(wins.sum() / losses.sum()) if len(losses) else float('inf'),
+            f'avgwin{suffix}': wins.mean() if len(wins) else 0,
+            f'avgloss{suffix}': losses.mean() if len(losses) else 0
+        }
         
 def remove_redis():
     redis_handler = RedisHandler()
