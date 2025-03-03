@@ -5,6 +5,8 @@ from redis import StrictRedis
 from datetime import datetime
 import time
 
+from danglib.utils import check_run_with_interactive
+from danglib.pslab.utils import Utils
 from danglib.pslab.resources import Adapters, Globs
 from danglib.lazy_core import gen_plasma_functions
 from danglib.pslab.logger_module import DataLogger
@@ -144,27 +146,14 @@ class ProcessData:
                 df.dropna(subset=[column_name], inplace=True)
                 return df
 
-            # if 'matchingValue' not in df.columns:
-            #     if 'matchingVolume' in df.columns:
-            #         df['matchingValue'] = df['matchingVolume'] * df['last']
-            #     elif 'totalMatchValue' in df.columns:
-            #         df = diff(df, 'totalMatchValue')
-            #     elif 'totalMatchVolume' in df.columns:
-            #         df = diff(df, 'totalMatchVolume')
-            #         df['matchingValue'] = df['matchingValue'] * df['last']
-            #     else:
-            #         raise ValueError("Can not calculate `matchingValue`")
-
             if 'matchingValue' not in df.columns:
-                if 'totalMatchVolume' in df.columns:
-                    df = diff(df, 'totalMatchVolume')
-                    df = df[df['matchingValue'] >= 0]
-                    df['matchingValue'] = df['matchingValue'] * df['close']
-                elif 'matchingVolume' in df.columns:
-                    df = df[df['matchingVolume'] >= 0]
-                    df['matchingValue'] = df['matchingVolume'] * df['close']
+                if 'matchingVolume' in df.columns:
+                    df['matchingValue'] = df['matchingVolume'] * df['last']
                 elif 'totalMatchValue' in df.columns:
                     df = diff(df, 'totalMatchValue')
+                elif 'totalMatchVolume' in df.columns:
+                    df = diff(df, 'totalMatchVolume')
+                    df['matchingValue'] = df['matchingValue'] * df['last']
                 else:
                     raise ValueError("Can not calculate `matchingValue`")
             
@@ -274,8 +263,8 @@ class ProcessData:
     def preprocess_realtime_stock_data(df: pd.DataFrame, day):
 
         def test():
-            day = "2025_02_20"
-            df = Adapters.RedisAdapters.load_realtime_stock_data_from_redis(r, day, 0, -1)
+            day = "2025_02_25"
+            df = Adapters.RedisAdapters.load_realtime_stock_data_from_redis(r, day, 0, 10000)
             df_columns = ['timestamp', 'code', 'best1Bid', 'best1BidVol', 'best2Bid',
                             'best2BidVol', 'best3Bid', 'best3BidVol', 'best1Offer', 'best1OfferVol',
                             'best2Offer', 'best2OfferVol', 'best3Offer', 'best3OfferVol',
@@ -309,17 +298,12 @@ class ProcessData:
             df = ProcessData.ensure_all_stocks_present(df, Globs.STOCKS)
             df = df.sort_values(['timestamp', 'totalMatchVolume'])
 
-            # if 'matchingValue' not in df.columns:
-            #     df_value = ProcessData.Libs.calculate_matching_value(df)
-            #     df = df.merge(df_value, how='left', on=['stock', 'timestamp'])
-            #     logger.log('INFO', f"Created matching value: {df_value.columns}, {df_value.shape}")
-
-            df['open'] = df['high'] = df['low'] = df['close'].copy()
-
             if 'matchingValue' not in df.columns:
                 df_value = ProcessData.Libs.calculate_matching_value(df)
                 df = df.merge(df_value, how='left', on=['stock', 'timestamp'])
                 logger.log('INFO', f"Created matching value: {df_value.columns}, {df_value.shape}")
+
+            df['open'] = df['high'] = df['low'] = df['close'].copy()
 
             # ProcessData.Libs.calculate_busd(df)
             df['price_diff'] = df.groupby('stock')['close'].diff()
@@ -382,6 +366,8 @@ class ProcessData:
             required_sources = [i for i in agg_dic.keys() if i not in ['foreignerBuyVolume', 'foreignerSellVolume']]
             required_sources.extend(['stock', 'time', 'fBuyVal', 'fSellVal'])
 
+            res = df[required_sources]
+
             return df[required_sources]
         
         except Exception as e:
@@ -390,30 +376,29 @@ class ProcessData:
     
     @staticmethod
     def postprocess_realtime_stock_data(df: pd.DataFrame):
+        """
+        Hàm xử lý sau khi resample với dữ liệu đã pivot
+        """
+        # Điền các giá trị còn thiếu
+        df['refPrice'] = df['refPrice'].ffill().bfill()
+        df['close'] = df['close'].ffill()
+        df['bid'] = df['bid'].ffill().fillna(0)
+        df['ask'] = df['ask'].ffill().fillna(0)
+        df['matchingValue'] = df['matchingValue'].fillna(0)
+        df['bu'] = df['bu'].fillna(0)
+        df['sd'] = df['sd'].fillna(0)
+        df['bu2'] = df['bu2'].fillna(0)
+        df['sd2'] = df['sd2'].fillna(0)
+        df['fBuyVal'] = df['fBuyVal'].fillna(0)
+        df['fSellVal'] = df['fSellVal'].fillna(0)
 
-        df1 = df.pivot(columns=['stock'], index='candleTime')
+        # Fill các giá trị OHLC
+        df['close'] = df['close'].fillna(df['refPrice'])
+        df['open'] = df['open'].fillna(df['close'])
+        df['high'] = df['high'].fillna(df['close'])
+        df['low'] = df['low'].fillna(df['close'])
 
-        df1['refPrice'] = df1['refPrice'].ffill().bfill()
-        df1['close'] = df1['close'].ffill()
-        df1['bid'] = df1['bid'].ffill().fillna(0)
-        df1['ask'] = df1['ask'].ffill().fillna(0)
-        df1['matchingValue'] = df1['matchingValue'].fillna(0)
-        df1['bu'] = df1['bu'].fillna(0)
-        df1['sd'] = df1['sd'].fillna(0)
-        df1['bu2'] = df1['bu2'].fillna(0)
-        df1['sd2'] = df1['sd2'].fillna(0)
-        df1['fBuyVal'] = df1['fBuyVal'].fillna(0)
-        df1['fSellVal'] = df1['fSellVal'].fillna(0)
-        
-        df1 = df1.stack(dropna=False)
-
-        df1['close'] = df1['close'].fillna(df1['refPrice'])
-        df1['open'] = df1['open'].fillna(df1['close'])
-        df1['high'] = df1['high'].fillna(df1['close'])
-        df1['low'] = df1['low'].fillna(df1['close'])
-
-        df1 = df1.reset_index()
-        return df1
+        return df
 
 
 class Resampler:
@@ -511,7 +496,7 @@ class Resampler:
         return new_candles
     
     @classmethod
-    def transform(cls, day, df: pd.DataFrame, timeframe: str, cleanup_data: bool = False, subgroups: list = None):
+    def transform(cls, day, df: pd.DataFrame, timeframe: str, cleanup_data: bool = False, subgroup=None):
         df = df.copy()
         if cleanup_data:
             df = cls.cleanup_timestamp(day, df)
@@ -520,11 +505,14 @@ class Resampler:
         df['candleTime'] = cls._calculate_candletime(df['timestamp'], timeframe)
 
         groups = ['candleTime']
-        if subgroups:
-            groups += subgroups
+        if subgroup:
+            groups.append(subgroup)
 
-        df = df.groupby(by=groups).agg(cls.get_agg_dict(list(df.columns)))
-        df = df.reset_index()
+        df = df.groupby(by=groups).agg(cls.get_agg_dict(list(df.columns))).reset_index()
+        df = df.drop('timestamp', axis=1)
+
+        if subgroup:
+            df = df.pivot(index='candleTime', columns=subgroup)
 
         return df
 
@@ -560,6 +548,23 @@ class Aggregator:
         self.resampled_df = pd.DataFrame()
         self.last_states = {}  # Dict lưu trạng thái cuối của mỗi mã
 
+    @staticmethod
+    def join_historical_data(df:pd.DataFrame, ndays:int=10):
+        from_day = Adapters.get_historical_day_by_index(-ndays)
+        logger.log('INFO', f'Starting to merge historical data from {from_day}...')
+
+        from_stamp = Utils.day_to_timestamp(from_day)
+        df_his = Adapters.load_stock_data_from_plasma()
+        
+        df_his = df_his[df_his.index >= from_stamp]
+        df_his.index = df_his.index // 1e9
+        df_his = df_his.drop(['accNetBusd', 'accNetBusd2', 'return'], axis=1, level=0)
+        df_merge = pd.concat([df_his, df])
+        df_merge = df_merge.sort_index(ascending=True)
+
+        logger.log('INFO', f'Successfully merged historical data. After merge shape: {df.shape}')
+        return df_merge
+
     def load_redis_data(self, start, end):
         try:
             df = self.data_loader(self.r, self.day, start, end)
@@ -584,20 +589,16 @@ class Aggregator:
         return current_candle - self.timeframe_seconds
 
     def _add_empty_candle(self, candlestamp, df: pd.DataFrame):
-        """Tạo nến trống với giá trị NaN và đánh dấu is_empty"""
-        # Tạo Series với index là tất cả các cột trong df và giá trị NaN
-        new_rows = []
+        """Tạo nến trống với giá trị NaN cho dữ liệu đã pivot"""
+        # Tạo một DataFrame mới với index là candlestamp và các cột giống df
+        new_df = pd.DataFrame(
+            index=[candlestamp],
+            columns=df.columns,
+            data=np.nan
+        )
         
-        # Với mỗi stock, tạo một dòng mới
-        for stock in df['stock'].unique():
-            new_row = pd.Series(np.nan, index=df.columns)
-            new_row['candleTime'] = candlestamp
-            new_row['stock'] = stock
-            new_rows.append(new_row)
-    
-        # Thêm các dòng mới vào DataFrame
-        new_df = pd.DataFrame(new_rows)
-        return pd.concat([df, new_df], ignore_index=True)
+        # Concat với DataFrame cũ
+        return pd.concat([df, new_df])
 
     def _update_last_states(self, df: pd.DataFrame):
         """Cập nhật trạng thái cuối của mỗi mã"""
@@ -626,16 +627,12 @@ class Aggregator:
     def merge_resampled_data(old_df: pd.DataFrame, new_df: pd.DataFrame, agg_dict: dict) -> pd.DataFrame:
         """
         Merge và tính toán lại các giá trị cho các candles trùng nhau
-        dựa trên agg_dict
+        dựa trên agg_dict với dữ liệu đã pivot
         """
         if old_df.empty:
             return new_df
             
-        # Set MultiIndex cho cả 2 df
-        old_df = old_df.set_index(['candleTime', 'stock'])
-        new_df = new_df.set_index(['candleTime', 'stock'])
-        
-        # Tìm các index trùng nhau
+        # Vì data đã pivot nên index sẽ là candleTime
         common_idx = old_df.index.intersection(new_df.index)
         
         if not common_idx.empty:
@@ -645,9 +642,17 @@ class Aggregator:
                 new_df.loc[common_idx]
             ])
 
-            # Tính toán lại theo agg_dict
-            recalculated = overlap_data.groupby(level=[0, 1]).agg(agg_dict)
+            # Tính toán lại theo agg_dict cho từng cột
+            # Lấy tên các cột gốc từ MultiIndex
+            columns = overlap_data.columns.get_level_values(0).unique()
             
+            recalculated = pd.DataFrame(index=common_idx)
+            for col in columns:
+                # Lấy phương thức aggregation cho cột
+                agg_method = agg_dict.get(col, 'last')  # Default to 'last' if not specified
+                col_data = overlap_data[col].groupby(level=0).agg(agg_method)
+                recalculated = pd.concat([recalculated, col_data], axis=1)
+
             # Combine all data
             result_df = pd.concat([
                 old_df.loc[old_df.index.difference(common_idx)],  # Rows only in old
@@ -658,12 +663,11 @@ class Aggregator:
             # Nếu không có overlap, đơn giản là concat
             result_df = pd.concat([old_df, new_df]).sort_index()
         
-        return result_df.reset_index()
+        return result_df
     
     def _store_resampled_data(self, df: pd.DataFrame):
         _, disconnect, psave, pload = gen_plasma_functions(db=Globs.PLASMA_DB)
         psave(self.output_key, df)
-
 
     def start_realtime_resampling(self):
         """Bắt đầu quá trình resample real-time"""
@@ -688,7 +692,7 @@ class Aggregator:
                     continue
 
                 # Load dữ liệu mới từ Redis
-                raw_data = self.load_redis_data(self.current_pos, -1)
+                raw_data = self.load_redis_data(self.current_pos, 10000)
                 logger.log('INFO', f"Processing data from position {self.current_pos}")
                 self.current_pos += len(raw_data) + 1
                 logger.log('INFO', f"Updated current_pos to {self.current_pos}")
@@ -716,13 +720,15 @@ class Aggregator:
                             new_data,
                             self.timeframe,
                             cleanup_data=True,
-                            subgroups=['stock']
+                            subgroup = 'stock'
                         )
-                        print(f"New resampled data shape: {new_resampled.shape}")
-                        logger.log('INFO', f"New resampled data columns: {new_resampled.columns}")
+                        print(f"New resampled data shape: {new_resampled.info()}")
+                        # logger.log('INFO', f"New resampled data columns: {new_resampled.columns}")
 
                         if self.resampled_df.empty:
-                            self.resampled_df = new_resampled
+                            self.resampled_df = self.join_historical_data(new_resampled, ndays=10)
+                            print(f"Init resampled df shape: {self.resampled_df.info()}")
+
                         else:
                             # Merge với dữ liệu cũ và tính toán lại theo agg_dict
                             self.resampled_df = self.merge_resampled_data(
@@ -732,11 +738,10 @@ class Aggregator:
                             )
 
                             print(f"After merge shape: {self.resampled_df.shape}")
-                            logger.log('INFO', f"After merge resampled data columns: {self.resampled_df.columns}")
 
                         self.resampled_df = self.postprocessor(self.resampled_df)
 
-                candle_stamp = max(self.resampled_df['candleTime'])
+                candle_stamp = max(self.resampled_df.index)
                 if candle_stamp == self.current_candle_stamp:
                     candle_stamp = self._get_next_candle_stamp(candle_stamp)
                     self._add_empty_candle(candle_stamp, self.resampled_df)
@@ -762,7 +767,7 @@ class Aggregator:
     @classmethod
     def run_resample_history(cls, day, timeframe = '30S', to_plasma=False):
         def test():
-            day = '2025_02_24'
+            day = '2025_02_18'
             timeframe = '30S'
             to_plasma = True
 
@@ -780,19 +785,20 @@ class Aggregator:
             output_plasma_key = f"pslab_realtime_stockdata.{timeframe}.test"
             Adapters.SaveDataToPlasma.save_data_to_plasma(output_plasma_key, df)
 
+        df = Adapters.load_data_from_plasma("pslab_realtime_stockdata2.30S")
+
 
 self = Aggregator(
-day =  datetime.now().strftime("%Y_%m_%d"),
+    day =  datetime.now().strftime("%Y_%m_%d"),
     timeframe='30S',
-    output_plasma_key="pslab_realtime_stockdata",
-    current_pos=50000
+    output_plasma_key="pslab_realtime_stockdata2",
 )             
 
-if __name__ == "__main__":
+if __name__ == "__main__" and not check_run_with_interactive():
     realtime_stock = Aggregator(
         day = datetime.now().strftime("%Y_%m_%d"),
         timeframe='30S',
-        output_plasma_key="pslab_realtime_stockdata"
+        output_plasma_key="pslab_realtime_stockdata2"
     )
 #%%
     realtime_stock.start_realtime_resampling()

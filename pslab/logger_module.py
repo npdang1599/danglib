@@ -5,14 +5,16 @@ import glob
 from logging.handlers import RotatingFileHandler
 
 class DataLogger:
-    def __init__(self, log_dir="logs"):
+    def __init__(self, log_dir="logs",file_prefix="aggregator"):
         self.log_dir = log_dir
+        self.file_prefix = file_prefix
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
             
         self.today = datetime.now().strftime('%Y_%m_%d')
         self.setup_logger()
         self.clean_old_logs()
+        
         
     def setup_logger(self):
         """Setup logging configuration"""
@@ -27,7 +29,7 @@ class DataLogger:
         
         # File handler - daily rotating
         file_handler = RotatingFileHandler(
-            filename=os.path.join(self.log_dir, f'aggregator_{self.today}.log'),
+            filename=os.path.join(self.log_dir, f'{self.file_prefix}_{self.today}.log'),
             maxBytes=10*1024*1024,  # 10MB
             backupCount=5
         )
@@ -49,9 +51,9 @@ class DataLogger:
     def clean_old_logs(self):
         """Delete logs older than 10 days"""
         cutoff_date = datetime.now() - timedelta(days=10)
-        for log_file in glob.glob(os.path.join(self.log_dir, 'aggregator_*.log*')):
+        for log_file in glob.glob(os.path.join(self.log_dir, f'{self.file_prefix}_*.log*')):
             try:
-                file_date_str = log_file.split('aggregator_')[-1].split('.')[0]
+                file_date_str = log_file.split(f'{self.file_prefix}_')[-1].split('.')[0]
                 file_date = datetime.strptime(file_date_str, '%Y_%m_%d')
                 if file_date < cutoff_date:
                     os.remove(log_file)
@@ -67,16 +69,16 @@ class DataLogger:
             self.setup_logger()
             self.clean_old_logs()
     
-    def log(self, level, message):
+    def log(self, level, message, exc_info=False):
         """Log a message with the specified level"""
         self.check_rotate()
         if level == 'DEBUG':
-            self.logger.debug(message)
+            self.logger.debug(message, exc_info=exc_info)
         elif level == 'INFO':
-            self.logger.info(message)
+            self.logger.info(message, exc_info=exc_info)
         elif level == 'WARNING':
-            self.logger.warning(message)
+            self.logger.warning(message, exc_info=exc_info)
         elif level == 'ERROR':
-            self.logger.error(message)
+            self.logger.error(message, exc_info=exc_info)
         elif level == 'CRITICAL':
-            self.logger.critical(message)
+            self.logger.critical(message, exc_info=exc_info)

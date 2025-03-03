@@ -5,7 +5,7 @@ from datetime import datetime
 import time
 from abc import ABC, abstractmethod
 
-from danglib.utils import check_run_with_interactive
+from danglib.utils import check_run_with_interactive, totime
 from danglib.pslab.utils import Utils
 from danglib.pslab.resources import Adapters, Globs
 from danglib.lazy_core import gen_plasma_functions
@@ -112,8 +112,12 @@ class ProcessStockData(ProcessData):
 
     SUBGROUP = 'stock'
 
+    @classmethod
+    def get_agg_dic(self):
+        return self.RESAMPLE_AGG_DIC
+
     @staticmethod
-    def ensure_all_stocks_present(df: pd.DataFrame, required_stocks: list) -> pd.DataFrame:
+    def ensure_all_stocks_present(df: pd.DataFrame, required_stocks: list, data_name='') -> pd.DataFrame:
         """
         Ensure all stocks are present in DataFrame. Add rows with NaN for missing stocks.
         
@@ -124,47 +128,53 @@ class ProcessStockData(ProcessData):
         Returns:
             DataFrame with all required stocks
         """
-        if df.empty:
-            logger.warning("Input DataFrame is empty in ensure_all_stocks_present")
+        try:
+            if df.empty:
+                logger.log('WARNING', "Input DataFrame is empty in ensure_all_stocks_present")
+                return df
+                
+            # Lấy timestamp lớn nhất
+            max_timestamp = df['timestamp'].max()
+            max_time = df['time'].max()
+            
+            # Kiểm tra các stocks hiện có
+            existing_stocks = set(df['stock'].unique())
+            required_stocks_set = set(required_stocks)
+            
+            # Tìm các stocks bị thiếu
+            missing_stocks = required_stocks_set - existing_stocks
+            
+            if missing_stocks:
+                logger.log('WARNING', f"Missing stocks in data {data_name}: {missing_stocks}")
+                
+                # Tạo template cho dòng dữ liệu mới
+                template_row = pd.Series(
+                    index=df.columns,
+                    data=np.nan
+                )
+                
+                # Tạo các dòng mới cho stocks bị thiếu
+                new_rows = []
+                for stock in missing_stocks:
+                    new_row = template_row.copy()
+                    new_row['stock'] = stock
+                    new_row['timestamp'] = max_timestamp
+                    new_row['time'] = max_time
+                    new_rows.append(new_row)
+                
+                # Thêm các dòng mới vào DataFrame
+                if new_rows:
+                    df_missing = pd.DataFrame(new_rows)
+                    df = pd.concat([df, df_missing], ignore_index=True)
+                    logger.log('INFO', f"Added {len(new_rows)} rows for missing stocks at {totime(max_timestamp)}")
+            
             return df
             
-        # Get max timestamp
-        max_timestamp = df['timestamp'].max()
-        max_time = df['time'].max()
-        
-        # Check existing stocks
-        existing_stocks = set(df['stock'].unique())
-        required_stocks_set = set(required_stocks)
-        
-        # Find missing stocks
-        missing_stocks = required_stocks_set - existing_stocks
-        
-        if missing_stocks:
-            logger.warning(f"Missing stocks in data: {missing_stocks}")
-            
-            # Create template for new rows
-            template_row = pd.Series(index=df.columns, data=np.nan)
-            
-            # Create new rows for missing stocks
-            new_rows = []
-            for stock in missing_stocks:
-                new_row = template_row.copy()
-                new_row['stock'] = stock
-                new_row['timestamp'] = max_timestamp
-                new_row['time'] = max_time
-                new_rows.append(new_row)
-            
-            # Add new rows to DataFrame
-            if new_rows:
-                df_missing = pd.DataFrame(new_rows)
-                df = pd.concat([df, df_missing], ignore_index=True)
-                logger.info(f"Added {len(new_rows)} rows for missing stocks")
-        
-        return df
+        except Exception as e:
+            logger.log('ERROR', f"Error in ensure_all_stocks_present: {str(e)}")
+            return df
 
     class ComputeStats:
-        """Static methods for computing statistics on stock data"""
-        
         @staticmethod
         def calculate_foreign_fubon(
             dfi: pd.DataFrame,
@@ -172,35 +182,52 @@ class ProcessStockData(ProcessData):
             tolerance: float = 0.002
         ) -> pd.DataFrame:
             """
-            Calculate foreign transactions for Fubon stocks
+            Calculate foreign transactions for Fubon stocks with optimized performance.
             
             Args:
-                dfi: Preprocessed dataframe with stock data
-                put_through_data: Put-through transaction data
-                tolerance: Tolerance for matching put-through volumes
+                dfi (pd.DataFrame): Preprocessed dataframe containing stock data with columns:
+                    - stock: stock symbol
+                    - foreignerBuyVolume: cumulative foreign buy volume
+                    - foreignerSellVolume: cumulative foreign sell volume
+                    - time: trade time in seconds from start of day
+                put_through_data (pd.DataFrame, optional): Put-through transaction data with columns:
+                    - stockSymbol: stock symbol 
+                    - vol: transaction volume
+                    - createdAt: transaction time in HH:MM:SS format
+                tolerance (float, optional): Tolerance for matching put-through volumes. Defaults to 0.002
                 
             Returns:
-                DataFrame with foreign transactions
+                pd.DataFrame: Processed data with foreign transactions, excluding put-through matches
             """
+            def test():
+                day = "2025_02_18"
+                put_through_data = Adapters.load_thoathuan_dc_data_from_db(day)
+                df_raw = ProcessStockData.load_realtime_data(r, day, 0, 100000)
+                dfi = ProcessStockData.preprocess_realtime_data(df_raw)
+
             try:
                 df = dfi.copy()
-                logger.info(f"Processing foreign transactions for {len(df)} records")
+                logger.log('INFO', f"Processing foreign transactions for {len(df)} records")
     
                 if df.empty:
-                    logger.warning("Empty input dataframe for foreign calculations")
+                    logger.log('WARNING', "Empty input dataframe for foreign calculations")
                     return pd.DataFrame()
                 
                 # Validate required columns
                 required_cols = ['stock', 'foreignerBuyVolume', 'foreignerSellVolume', 'time']
                 missing_cols = [col for col in required_cols if col not in df.columns]
                 if missing_cols:
-                    logger.error(f"Missing required columns: {missing_cols}")
+                    logger.log('ERROR', f"Missing required columns: {missing_cols}")
                     return pd.DataFrame()
                 
                 # Sort and calculate volume differences
                 df.sort_values(['stock', 'timestamp', 'foreignerBuyVolume', 'foreignerSellVolume'], inplace=True)
-                df['fBuyVol'] = df.groupby('stock')['foreignerBuyVolume'].diff().fillna(df['foreignerBuyVolume'])
-                df['fSellVol'] = df.groupby('stock')['foreignerSellVolume'].diff().fillna(df['foreignerSellVolume'])
+                df['fBuyVol'] = df.groupby('stock')['foreignerBuyVolume'].diff()
+                logger.log('INFO', f"fBuyVol has {df['fBuyVol'].isna().sum()} NaN values before fillna")
+
+                df['fSellVol'] = df.groupby('stock')['foreignerSellVolume'].diff()
+                logger.log('INFO', f"fSellVol has {df['fSellVol'].isna().sum()} NaN values before fillna")
+
                 
                 if put_through_data is not None and len(put_through_data) > 0:
                     # Convert put-through time from HH:MM:SS to seconds
@@ -220,7 +247,14 @@ class ProcessStockData(ProcessData):
                             .reset_index()
                             .query('time <= 53159'))  # 14:45:59 in seconds
                     
+                    # Log aggregated put-through data
+                    total_pt_volume = df_tt['vol'].sum()
+                    unique_stocks_pt = df_tt['stock'].nunique()
+                    logger.log('INFO', f"Total put-through volume: {total_pt_volume:,.0f} across {unique_stocks_pt} stocks")
+
+                                    
                     # Merge with main data using merge_asof
+                    before_merge_rows = len(df)
                     df = pd.merge_asof(
                         df.sort_values('time'),
                         df_tt[['stock', 'time', 'vol']].sort_values('time'),
@@ -229,43 +263,56 @@ class ProcessStockData(ProcessData):
                         tolerance=15,
                         direction='nearest'
                     )
+                    after_merge_rows = len(df)
+
+                    # Log merge results
+                    logger.log('INFO', f"After merge_asof: {after_merge_rows} rows (from {before_merge_rows})")
+                    non_null_vol = df['vol'].notnull().sum()
+                    logger.log('INFO',
+                            f"Rows with matched put-through volume: {non_null_vol} ({non_null_vol / after_merge_rows * 100:.2f}%)")
+
                 else:
+                    logger.log('INFO', "No put-through data available")
                     df['vol'] = np.nan
                 
                 df['fBuyVal'] = df['fBuyVol'] * df['close']
                 df['fSellVal'] = df['fSellVol'] * df['close']
-                
                 # Identify and filter put-through transactions
                 pt_mask = ((df['fBuyVol'].between(df['vol'] * (1 - tolerance), df['vol'] * (1 + tolerance))) |
-                          (df['fSellVol'].between(df['vol'] * (1 - tolerance), df['vol'] * (1 + tolerance))))
+                            (df['fSellVol'].between(df['vol'] * (1 - tolerance), df['vol'] * (1 + tolerance))))
                 
+                # Log put-through mask results
+                pt_count = pt_mask.sum()
+                logger.log('INFO', f"Identified {pt_count} rows as put-through transactions ({pt_count / len(df) * 100:.2f}% of data)")
+                                
                 return df[~pt_mask][['stock', 'time', 'fBuyVal','fSellVal']]
             
             except Exception as e:
-                logger.error(f"Error in calculate_foreign_fubon: {str(e)}", exc_info=True)
+                logger.log('ERROR', f"Error in calculate_foreign_fubon: {str(e)}")
                 return pd.DataFrame()
             
         @staticmethod
         def calculate_bidask(df: pd.DataFrame):
-            """Calculate bid/ask values"""
-            # Calculate Bid
+            # Calculate Bid/Ask
             df['bid'] = (
-                df['bestBid1'] * df['bestBid1Volume'] +
-                df['bestBid2'] * df['bestBid2Volume'] +
+                df['bestBid1'] * df['bestBid1Volume'] +\
+                df['bestBid2'] * df['bestBid2Volume'] +\
                 df['bestBid3'] * df['bestBid3Volume']
             ) / 1e9
 
-            # Calculate Ask
             df['ask'] = (
-                df['bestOffer1'] * df['bestOffer1Volume'] +
-                df['bestOffer2'] * df['bestOffer2Volume'] +
+                df['bestOffer1'] * df['bestOffer1Volume'] +\
+                df['bestOffer2'] * df['bestOffer2Volume'] +\
                 df['bestOffer3'] * df['bestOffer3Volume']
             ) / 1e9
 
     @classmethod
     def load_history_data(cls, from_day=None) -> pd.DataFrame:
-        """Load historical stock data"""
-        df = Adapters.load_stock_data_from_plasma()
+        def test():
+            from_day = '2025_02_18'
+            from_stamp = Utils.day_to_timestamp(from_day)
+
+        df: pd.DataFrame = Adapters.load_stock_data_from_plasma()
         
         df = df.drop(['accNetBusd', 'accNetBusd2', 'return'], axis=1, level=0)
 
@@ -274,54 +321,67 @@ class ProcessStockData(ProcessData):
             df = df[df.index >= from_stamp]
         df.index = df.index // 1e9
 
+        logger.log("INFO",f"Loaded {len(df)} history records from plasma starting from {from_day}")
+
         return df
 
     @classmethod
-    def load_realtime_data(cls, redis_client, day, start, end) -> pd.DataFrame:
-        """Load realtime stock data from Redis"""
-        logger.info(f"Loading realtime stock data for {day} from position {start} to {end}")
-        
-        df = Adapters.RedisAdapters.load_realtime_stock_data_from_redis(redis_client, day, start, end)
+    def load_realtime_data(cls, r, day, start, end) -> pd.DataFrame:
+        current_timestamp = int(time.time())
+        df = Adapters.RedisAdapters.load_realtime_stock_data_from_redis(r, day, start, end)
 
         # Validate required columns
         required_cols = list(cls.REALTIME_HOSE500_COLUMNS_MAPPING.keys())
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
-            logger.error(f"Missing columns in input data: {missing_cols}")
+            logger.log('ERROR', f"Missing columns in input data: {missing_cols}")
             return pd.DataFrame()
 
         if df.empty:
-            logger.warning("Empty realtime dataframe in load_realtime_data")
+            logger.log('WARNING', "Empty realtime dataframe in load_realtime_data")
             return pd.DataFrame()
 
         try:
             df = df.rename(columns=cls.REALTIME_HOSE500_COLUMNS_MAPPING)
-            df = cls.ensure_all_stocks_present(df, Globs.STOCKS)
-            logger.debug(f"Loaded {len(df)} rows of realtime stock data")
+
+            if 'stock' in df.columns and 'timestamp' in df.columns:
+                # Filter data with timestamp < current_timestamp
+                filtered_df = df[df['timestamp'] < current_timestamp]
+
+                # Get counts per stock
+                stock_counts = filtered_df['stock'].value_counts()
+
+                # Log counts for each stock in Globs.STOCKS that has data
+                log_data = {}
+                for stock in Globs.STOCKS:
+                    if stock in stock_counts and stock_counts[stock] > 0:
+                        log_data[stock] = stock_counts[stock]
+
+                if log_data:
+                    # Sort by number of data points (descending)
+                    sorted_data = {k: v for k, v in sorted(log_data.items(), key=lambda item: item[1], reverse=True)}
+                    logger.log('INFO', f"Stock data points with timestamp < current: {sorted_data}")
+
+            df = cls.ensure_all_stocks_present(df, Globs.STOCKS, data_name="New data")
             return df
         except Exception as e:
-            logger.error(f"Error in load_realtime_stock_data: {str(e)}", exc_info=True)
+            logger.log('ERROR', f"Error in load_realtime_stock_data: {str(e)}")
             return pd.DataFrame()
         
     @classmethod
     def preprocess_realtime_data(cls, df: pd.DataFrame, day) -> pd.DataFrame:
-        """Preprocess realtime stock data"""
         try:
             if df.empty:
-                logger.warning("Empty input dataframe in preprocessing")
+                logger.log('WARNING', "Empty input dataframe in preprocessing")
                 return pd.DataFrame()
-                
-            logger.info(f"Preprocessing {len(df)} rows of realtime stock data")
             df = df.copy()
             df = df[df['stock'].isin(Globs.STOCKS) & (df['close'] != 0)].copy()
 
-            # Adjust timestamp
             df['timestamp'] = df['timestamp'] // 1000 + 7*60*60
             df['time'] = df['timestamp'] % 86400
 
             df = df.sort_values(['stock', 'timestamp', 'totalMatchVolume'])
 
-            # Calculate matchingValue
             def diff(df: pd.DataFrame, column_name):
                 df = df.copy()
                 df = df.sort_values(['timestamp', column_name])
@@ -341,10 +401,8 @@ class ProcessStockData(ProcessData):
             
             df['matchingValue'] = np.where(df['matchingValue'] < 0, 0, df['matchingValue']) / 1e9
 
-            # Setup OHLC values
             df['open'] = df['high'] = df['low'] = df['close'].copy()
 
-            # Calculate price differences for buy/sell classification
             df['price_diff'] = df.groupby('stock')['close'].diff()
             bu_cond = (df['price_diff'] > 0)
             sd_cond = (df['price_diff'] < 0)
@@ -355,18 +413,18 @@ class ProcessStockData(ProcessData):
             if 'matchedBy' not in df.columns:   
                 df['matchedBy'] = df['matchedBy2']
 
-            # Compute buy/sell values
+            # Compute BU SD base on existed `matchedBy` column
             df['bu'] = np.where(df['matchedBy'] == 1, df['matchingValue'], 0)
             df['sd'] = np.where(df['matchedBy'] == -1, df['matchingValue'], 0)
+
+            # Compute BU SD base on re-calculated `matchedBy2` column
             df['bu2'] = np.where(df['matchedBy2'] == 1, df['matchingValue'], 0)
             df['sd2'] = np.where(df['matchedBy2'] == -1, df['matchingValue'], 0)
 
             df.drop(['matchedBy2', 'matchedBy'], axis=1, inplace=True)
 
-            # Calculate bid/ask
             cls.ComputeStats.calculate_bidask(df)
 
-            # Define aggregation dictionary
             agg_dic = {
                 'timestamp': 'last', 
                 'open': 'first', 
@@ -385,39 +443,42 @@ class ProcessStockData(ProcessData):
                 'refPrice': 'last'
             }
 
-            # Group data by stock and time (seconds)
+            # 1. Group data theo giây trước
+            # Group data by stock and time (seconds) first
             df = df.groupby(['stock', 'time'], as_index=False).agg(agg_dic).reset_index()
 
-            # Calculate foreign data
+            # 2. Tính toán foreign_fubon (vẫn có laststate)
             dftt = Adapters.load_put_through_data_realtime(rlv2, day)
             df_foreign = cls.ComputeStats.calculate_foreign_fubon(df, dftt)
             df = df.merge(df_foreign, how='left', on=['stock', 'time'])
             df['fBuyVal'] = df['fBuyVal'].fillna(0)
             df['fSellVal'] = df['fSellVal'].fillna(0)
 
-            logger.debug(f"Preprocessing complete, output shape: {df.shape}")
             return df[cls.REQUIRED_COLUMNS]
         
         except Exception as e:
-            logger.error(f"Error in preprocess_realtime_stock_data: {str(e)}", exc_info=True)
+            logger.log('ERROR', f"Error in preprocess_realtime_stock_data: {str(e)}")
             return pd.DataFrame()
 
     @classmethod
     def postprocess_resampled_data(cls, df: pd.DataFrame) -> pd.DataFrame:
-        """Post-process resampled data"""
-        logger.debug("Post-processing resampled data")
-        
-        # Fill missing values
+        """
+        Hàm xử lý sau khi resample với dữ liệu đã pivot
+        """
+        # Điền các giá trị còn thiếu
         df['refPrice'] = df['refPrice'].ffill().bfill()
         df['close'] = df['close'].ffill()
         df['bid'] = df['bid'].ffill().fillna(0)
         df['ask'] = df['ask'].ffill().fillna(0)
-        
-        # Fill numerical columns with zeros
-        for col in ['matchingValue', 'bu', 'sd', 'bu2', 'sd2', 'fBuyVal', 'fSellVal']:
-            df[col] = df[col].fillna(0)
+        df['matchingValue'] = df['matchingValue'].fillna(0)
+        df['bu'] = df['bu'].fillna(0)
+        df['sd'] = df['sd'].fillna(0)
+        df['bu2'] = df['bu2'].fillna(0)
+        df['sd2'] = df['sd2'].fillna(0)
+        df['fBuyVal'] = df['fBuyVal'].fillna(0)
+        df['fSellVal'] = df['fSellVal'].fillna(0)
 
-        # Fill OHLC values
+        # Fill các giá trị OHLC
         df['close'] = df['close'].fillna(df['refPrice'])
         df['open'] = df['open'].fillna(df['close'])
         df['high'] = df['high'].fillna(df['close'])
@@ -426,8 +487,10 @@ class ProcessStockData(ProcessData):
         return df
 
     @classmethod
-    def get_last_states(cls, df: pd.DataFrame, seconds=None, num_dps=None) -> pd.DataFrame:
-        """Get last states for each stock"""
+    def get_last_states(cls, df:pd.DataFrame, seconds=None, num_dps = None) -> pd.DataFrame:
+        """
+        Lấy last states của mỗi stock
+        """
         if seconds is not None:
             timestamp = df['timestamp'].max()
             fromstamp = timestamp - seconds*1000
@@ -435,69 +498,95 @@ class ProcessStockData(ProcessData):
 
             missing_stocks = [s for s in Globs.STOCKS if s not in laststates['stock'].unique()]
             if missing_stocks:
-                logger.warning(f"Missing stocks in last states: {missing_stocks}")
+                logger.log('WARNING', f"Missing stocks in last states: {missing_stocks}")
                 df_miss = df[df['stock'].isin(missing_stocks)].copy()
                 laststates = pd.concat([laststates, df_miss.groupby('stock').tail(1)])
 
         if num_dps is not None:
             laststates = df.groupby('stock').tail(num_dps)
-            
         return laststates
-
-    @classmethod
-    def get_agg_dic(cls) -> dict:
-        """Get aggregation dictionary for resampling"""
-        return cls.RESAMPLE_AGG_DIC
 
 
 class ProcessPsData(ProcessData):
-    """Process PS (Futures) market data"""
-    
+
     NAME = 'PS'
+
     SUBGROUP = None
-    
-    REQUIRED_RAW_COLLS = ['id', 'time', 'lastPrice', 'lastVol', 'buyForeignQtty', 'sellForeignQtty', 
-                           'totalMatchValue', 'totalMatchVol']
+    """
+        old_cols = Index(['id', 'time', 'last', 'totalValue', 'day', 'foreignerBuyVolume',
+        'foreignerBuyValue', 'foreignerSellVolume', 'foreignerSellValue',
+        'totalBidVolume', 'totalAskVolume'],
+        dtype='object')
+    """
+
+    """
+    new_cols = Index(['code', 'best1Bid', 'best1BidVol', 'best2Bid', 'best2BidVol',
+    'best3Bid', 'best3BidVol', 'best1Offer', 'best1OfferVol', 'best2Offer',
+    'best2OfferVol', 'best3Offer', 'best3OfferVol', 'lastPrice', 'lastVol',
+    'highestPrice', 'exchange', 'lowestPrice', 'avgPrice', 'buyForeignQtty',
+    'sellForeignQtty', 'priceChange', 'priceChangePercent', 'totalMatchVol',
+    'totalMatchValue', 'ceilingPrice', 'floorPrice', 'refPrice', 'session',
+    'openPrice', 'closePrice', 'timestamp', 'time', 'symbol', 'matchedBy',
+    'best4Bid', 'best4BidVol', 'best5Bid', 'best5BidVol', 'best6Bid',
+    'best6BidVol', 'best7Bid', 'best7BidVol', 'best8Bid', 'best8BidVol',
+    'best9Bid', 'best9BidVol', 'best10Bid', 'best10BidVol', 'best4Offer',
+    'best4OfferVol', 'best5Offer', 'best5OfferVol', 'best6Offer',
+    'best6OfferVol', 'best7Offer', 'best7OfferVol', 'best8Offer',
+    'best8OfferVol', 'best9Offer', 'best9OfferVol', 'best10Offer',
+    'best10OfferVol', 'source']
+    """
+    REQUIRED_RAW_COLLS = ['id', 'time', 'lastPrice', 'lastVol', 'buyForeignQtty', 'sellForeignQtty', 'totalMatchValue', 'totalMatchVol']
     REQUIRED_OUT_COLLS = [
         'canldleTime', 'F1Open', 'F1High', 'F1Low', 'F1Close', 'F1Volume', 'F1Value', 
-        'fF1BuyVol', 'fF1SellVol', 'fPsBuyVol', 'fPsSellVol', 'outstandingFPos'
-    ]
+        'fF1BuyVol', 'fF1SellVol', 'fPsBuyVol', 'fPsSellVol', 'outstandingFPos']
 
     REALTIME_F1_COLUMNS_MAPPING = {
         'lastPrice': 'last',
         'totalMatchValue': 'totalValue',
         'totalMatchVol': 'totalVolume',
-        'buyForeignQtty': 'foreignerBuyVolume',
-        'sellForeignQtty': 'foreignerSellVolume',
+        'buyForeignQtty':'foreignerBuyVolume',
+        'sellForeignQtty':'foreignerSellVolume',
     }
 
     @classmethod
     def load_history_data(cls, from_stamp) -> pd.DataFrame:
-        """Load historical PS data"""
-        df = Adapters.load_market_stats_from_plasma()
+        df: pd.DataFrame = Adapters.load_market_stats_from_plasma()
         df.index = df.index // 1e9
 
         if from_stamp is not None:
             df = df[df.index >= from_stamp]
-        
-        return df[['F1Value', 'F1Volume', 'outstandingFPos', 'fF1BuyVol', 'fF1SellVol', 
-                   'fPsBuyVol', 'fPsSellVol', 'F1Open', 'F1High', 'F1Low', 'F1Close']]
+        df.index = df.index // 1e9
+
+        """
+        df.columns:
+        'buyImpact', 'sellImpact', 'Arbit', 'Unwind', 'premiumDiscount',
+       'f1Bid', 'f1Ask', 'fF1BuyVol', 'fF1SellVol', 'outstandingFPos',
+       'fPsBuyVol', 'fPsSellVol', 'F1Open', 'Vn30Open', 'VnindexOpen',
+       'F1High', 'Vn30High', 'VnindexHigh', 'F1Low', 'Vn30Low', 'VnindexLow',
+       'F1Close', 'Vn30Close', 'VnindexClose', 'F1Value', 'Vn30Value',
+       'VnindexValue', 'F1Volume', 'Vn30Volume', 'VnindexVolume']
+        """
+        return df[['F1Value', 'F1Volume', 'outstandingFPos', 'fF1BuyVol', 'fF1SellVol', 'fPsBuyVol',
+                    'fPsSellVol', 'F1Open', 'F1High', 'F1Low', 'F1Close']]
     
     @classmethod
-    def load_realtime_data(cls, redis_client, day, start, end) -> pd.DataFrame:
-        """Load realtime PS data from Redis"""
-        logger.info(f"Loading realtime {cls.NAME} data for {day} from position {start} to {end}")
-        
-        df = Adapters.RedisAdapters.load_realtime_PS_data_from_redis(redis_client, day, start, end)
+    def load_realtime_data(cls, r, day, start, end) -> pd.DataFrame:
+        def test():
+            day = "2025_02_26"
+            start = 0
+            end = 100000
+            r = StrictRedis(decode_responses=True)
+            cls = ProcessPsData
+
+        df = Adapters.RedisAdapters.load_realtime_PS_data_from_redis(r, day, start, end)
         df = df[cls.REQUIRED_RAW_COLLS].copy()
-        
         missing_cols = [col for col in cls.REQUIRED_RAW_COLLS if col not in df.columns]
         if missing_cols:
-            logger.error(f"Missing columns in input {cls.NAME} data: {missing_cols}")
+            logger.log('ERROR', f"Missing columns in input {cls.NAME} data: {missing_cols}")
             return pd.DataFrame()
 
         if df.empty:
-            logger.warning(f"Empty realtime dataframe in {cls.NAME} load_realtime_data")
+            logger.log('WARNING', f"Empty realtime dataframe in {cls.NAME} load_realtime_data")
             return pd.DataFrame()
 
         try:
@@ -506,26 +595,28 @@ class ProcessPsData(ProcessData):
             df['time'] = df['time'].astype(str).str[-6:]
             df['timestamp'] = pd.to_datetime(day + ' ' + df['time'], format='%Y_%m_%d %H%M%S').astype(int) // 1e9
             df['time'] = df['timestamp'] % 86400
-            
-            logger.debug(f"Loaded {len(df)} rows of realtime {cls.NAME} data")
             return df
         except Exception as e:
-            logger.error(f"Error in load_realtime_{cls.NAME}_data: {str(e)}", exc_info=True)
+            logger.log('ERROR', f"Error in load_realtime_stock_data: {str(e)}")
             return pd.DataFrame()
+
     
     @classmethod
     def preprocess_realtime_data(cls, df: pd.DataFrame, day) -> pd.DataFrame:
-        """Preprocess realtime PS data"""
+        def test():
+            cls = ProcessPsData
+            day = "2025_02_26"
+            df = cls.load_realtime_data(r, day, 0, 100000)
         try:
             if df.empty:
-                logger.warning(f"Empty input dataframe in {cls.NAME} preprocessing")
+                logger.log('WARNING', f"Empty input dataframe in {cls.NAME} preprocessing")
                 return pd.DataFrame()
-                
-            logger.info(f"Preprocessing {len(df)} rows of realtime {cls.NAME} data")
             df = df.copy()
-            df.sort_values(['foreignerBuyVolume', 'foreignerSellVolume', 'time', 'day'], inplace=True)
+            df.sort_values(['foreignerBuyVolume', 'foreignerSellVolume', 'time','day'], inplace=True)
+
             
-            # Process F1 data
+            # process F1
+
             dff1 = df[df['id'] == 'f1'].copy()
             dff1 = dff1.sort_values('totalVolume')
 
@@ -538,27 +629,28 @@ class ProcessPsData(ProcessData):
 
             dff1['totalBidVolume'] = 0
             dff1['totalAskVolume'] = 0
+
             dff1['fPsBuyVol'] = dff1['fPsSellVol'] = dff1['outstandingFPos'] = 0
 
-            required_cols = ['time', 'timestamp', 'F1Open', 'F1High', 'F1Low', 'F1Close', 'F1Volume', 
-                            'F1Value', 'fF1BuyVol', 'fF1SellVol', 'fPsBuyVol', 'fPsSellVol', 'outstandingFPos']
-            
-            logger.debug(f"Preprocessing complete, output shape: {dff1[required_cols].shape}")
+            required_cols = ['time', 'timestamp', 'F1Open', 'F1High', 'F1Low', 'F1Close', 'F1Volume', 'F1Value', 
+                            'fF1BuyVol', 'fF1SellVol', 'fPsBuyVol', 'fPsSellVol', 'outstandingFPos']
             return dff1[required_cols]
 
         except Exception as e:
-            logger.error(f"Error in {cls.NAME} preprocess_realtime_data: {str(e)}", exc_info=True)
+            logger.log('ERROR', f"Error in {cls.NAME} preprocess_realtime_data: {str(e)}")
             return pd.DataFrame()
         
     @classmethod
-    def postprocess_resampled_data(cls, df: pd.DataFrame) -> pd.DataFrame:
-        """Post-process resampled data"""
+    def postprocess_resampled_data(cls, df: pd.DataFrame):
+        # df[['totalBidVolume', 'totalAskVolume']] = df[['totalBidVolume', 'totalAskVolume']].ffill.fillna(0)
         df[['fF1BuyVol', 'fF1SellVol']] = df[['fF1BuyVol', 'fF1SellVol']].fillna(0)
         return df
     
     @classmethod
-    def get_last_states(cls, df: pd.DataFrame, seconds=None, num_dps=None) -> pd.DataFrame:
-        """Get last states"""
+    def get_last_states(cls, df:pd.DataFrame, seconds=None, num_dps = None) -> pd.DataFrame:
+        """
+        Lấy last states của mỗi stock
+        """
         if seconds is not None:
             timestamp = df['timestamp'].max()
             fromstamp = timestamp - seconds
@@ -568,10 +660,9 @@ class ProcessPsData(ProcessData):
         return laststates
 
     @classmethod
-    def get_agg_dic(cls, stats=None) -> dict:
-        """Get aggregation dictionary for resampling"""
+    def get_agg_dic(self, stats: list =None):
         if stats is None:
-            stats = cls.REQUIRED_OUT_COLLS
+            stats = self.REQUIRED_OUT_COLLS
 
         return {
             'F1Value': 'sum',
@@ -587,11 +678,8 @@ class ProcessPsData(ProcessData):
             'F1Close': 'last'
         }
 
-
 class Resampler:
-    """Class for resampling time series data"""
-    
-    # Constants for trading time calculations
+    # Constants for time calculations
     TIME_CONSTANTS = {
         'MORNING': {
             'START': 9 * 3600 + 15 * 60,    # 9:15
@@ -610,10 +698,7 @@ class Resampler:
         return (df['time'] >= time_range['START']) & (df['time'] < time_range.get('END', float('inf')))
 
     @classmethod
-    def cleanup_timestamp(cls, day: str, df: pd.DataFrame) -> pd.DataFrame:
-        """Clean up timestamp data for proper trading session handling"""
-        logger.debug(f"Cleaning up timestamps for {len(df)} rows of data")
-        
+    def cleanup_timestamp(cls, day, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         tc = cls.TIME_CONSTANTS
         
@@ -632,12 +717,10 @@ class Resampler:
         atc_stamp = int(pd.to_datetime(day + ' 14:45:00', format='%Y_%m_%d %H:%M:%S').timestamp())
         df.loc[filters['atc'], 'timestamp'] = atc_stamp
         
-        logger.debug(f"After timestamp cleanup: {len(df)} rows")
         return df
 
     @classmethod
     def _calculate_candletime(cls, timestamps: pd.Series, timeframe: str) -> pd.Series:
-        """Calculate candle time based on timestamps and timeframe"""
         tc = cls.TIME_CONSTANTS
         
         # Calculate base timestamps
@@ -682,24 +765,7 @@ class Resampler:
         return new_candles
     
     @classmethod
-    def transform(cls, day: str, df: pd.DataFrame, timeframe: str, agg_dic: dict, 
-                  cleanup_data: bool = False, subgroup=None) -> pd.DataFrame:
-        """
-        Transform data by resampling to specified timeframe
-        
-        Args:
-            day: Trading day
-            df: DataFrame to transform
-            timeframe: Target timeframe
-            agg_dic: Aggregation dictionary
-            cleanup_data: Whether to clean up timestamps
-            subgroup: Column to use for subgrouping
-            
-        Returns:
-            Resampled DataFrame
-        """
-        logger.info(f"Resampling data to {timeframe} timeframe")
-        
+    def transform(cls, day, df: pd.DataFrame, timeframe: str, agg_dic: dict, cleanup_data: bool = False, subgroup=None):
         df = df.copy()
         if cleanup_data:
             df = cls.cleanup_timestamp(day, df)
@@ -707,29 +773,23 @@ class Resampler:
         # Calculate new candle times
         df['candleTime'] = cls._calculate_candletime(df['timestamp'], timeframe)
 
-        # Define grouping columns
         groups = ['candleTime']
         if subgroup:
             groups.append(subgroup)
 
-        # Perform aggregation
         df = df.groupby(by=groups).agg(agg_dic).reset_index()
         if 'timestamp' in df.columns:
             df = df.drop('timestamp', axis=1)
 
-        # Pivot if subgroup is specified
         if subgroup:
             df = df.pivot(index='candleTime', columns=subgroup)
         else:
             df = df.set_index('candleTime')
 
-        logger.debug(f"After resampling: {df.shape} shape")
         return df
 
 
 class Aggregator:
-    """Class for aggregating and managing real-time data processing"""
-    
     # Trading time constants
     TRADING_HOURS = {
         'MORNING_START': datetime.strptime('09:15', '%H:%M').time(),
@@ -745,16 +805,7 @@ class Aggregator:
         'ERROR': 1
     }
 
-    def __init__(self, day: str, timeframe: str, output_plasma_key: str, data_processor: ProcessData):
-        """
-        Initialize the Aggregator
-        
-        Args:
-            day: Trading day
-            timeframe: Target timeframe
-            output_plasma_key: Key for storing results in plasma
-            data_processor: Data processor class
-        """
+    def __init__(self, day:str, timeframe:str, output_plasma_key:str, data_processor: ProcessData):
         self.day = day
         self.timeframe = timeframe
         self.timeframe_seconds = Globs.TF_TO_MIN.get(timeframe) * 60
@@ -766,101 +817,72 @@ class Aggregator:
         self.current_candle_stamp = 0
         self.resampled_df = pd.DataFrame()
         self.last_states = pd.DataFrame()
-        
-        logger.info(f"Initialized Aggregator for {day} with timeframe {timeframe}")
 
-    def join_historical_data(self, df: pd.DataFrame, ndays: int = 10) -> pd.DataFrame:
-        """
-        Join new data with historical data
-        
-        Args:
-            df: New data
-            ndays: Number of historical days to include
-            
-        Returns:
-            Merged DataFrame
-        """
+    def join_historical_data(self, df:pd.DataFrame, ndays:int=10):
         from_day = Adapters.get_historical_day_by_index(-ndays)
-        logger.info(f'Merging with historical data from {from_day}...')
+        logger.log('INFO', f'Starting to merge historical data from {from_day}...')
 
-        # Load historical data
-        df_his = self.data_processor.load_history_data(from_day)
+        df_his: pd.DataFrame = self.data_processor.load_history_data(from_day)
         
-        # Merge and sort data
         df_merge = pd.concat([df_his, df])
         df_merge = df_merge.sort_index(ascending=True)
 
-        logger.info(f'Historical data merged. Combined shape: {df_merge.shape}')
+        logger.log('INFO', f'Successfully merged historical data. After merge shape: {df_merge.shape}')
         return df_merge
     
-    def _get_next_candle_stamp(self, current_timestamp: int) -> int:
-        """Calculate timestamp for the next candle"""
+    def _get_next_candle_stamp(self, current_timestamp):
+        """Tính thời điểm bắt đầu của nến tiếp theo"""
         current_candle = self._get_candle_stamp(current_timestamp)
         return current_candle + self.timeframe_seconds
     
-    def _get_candle_stamp(self, timestamp: int) -> int:
-        """Calculate timestamp for the current candle"""
+    def _get_candle_stamp(self, timestamp):
+        """Tính thời điểm bắt đầu của nến hiện tại"""
         return (timestamp // self.timeframe_seconds) * self.timeframe_seconds
 
-    def _add_empty_candle(self, candlestamp: int, df: pd.DataFrame) -> pd.DataFrame:
-        """Add an empty candle with NaN values to the DataFrame"""
-        # Create new DataFrame with empty row
+    def _add_empty_candle(self, candlestamp, df: pd.DataFrame):
+        """Tạo nến trống với giá trị NaN cho dữ liệu"""
+        # Tạo một DataFrame mới với index là candlestamp và các cột giống df
         new_df = pd.DataFrame(
             index=[candlestamp],
             columns=df.columns,
             data=np.nan
         )
         
-        # Concat with existing DataFrame
+        # Concat với DataFrame cũ
         return pd.concat([df, new_df])
     
-    def _update_last_states(self, df: pd.DataFrame, seconds: int = 30) -> None:
-        """Update last states from DataFrame"""
-        logger.debug(f"Updating last states from {len(df)} rows")
+    def _update_last_states(self, df: pd.DataFrame, seconds=30):
+        """Cập nhật last states"""
+        # Lấy last states từ DataFrame mới
         last_states = self.data_processor.get_last_states(df, seconds=seconds)
         self.last_states = last_states
-        logger.debug(f"Updated last states with {len(last_states)} rows")
 
     def _append_last_states(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Append last states to DataFrame for accurate diff calculation"""
-        if not self.last_states.empty:
-            logger.debug(f"Appending {len(self.last_states)} last states to {len(df)} new rows")
+        """Thêm last states vào đầu DataFrame mới để tính diff chính xác"""
+        if len(self.last_states) !=0:
             return pd.concat([self.last_states, df])
         return df
     
     @staticmethod
     def merge_resampled_data(old_df: pd.DataFrame, new_df: pd.DataFrame, agg_dict: dict) -> pd.DataFrame:
         """
-        Merge and recalculate values for overlapping candles based on aggregation dictionary
-        
-        Args:
-            old_df: Existing DataFrame
-            new_df: New DataFrame
-            agg_dict: Aggregation dictionary
-            
-        Returns:
-            Merged DataFrame
+        Merge và tính toán lại các giá trị cho các candles trùng nhau
+        dựa trên agg_dict với dữ liệu đã pivot
         """
         if old_df.empty:
             return new_df
             
-        # Find common indices (candleTimes)
+        # Vì data đã pivot nên index sẽ là candleTime
         common_idx = old_df.index.intersection(new_df.index)
-        
-        # Ensure columns are properly named
         old_df.columns.names = ['stats', 'stock']
         new_df.columns.names = ['stats', 'stock']
-        
         if not common_idx.empty:
-            logger.info(f"Merging data with {len(common_idx)} overlapping candles")
-            
-            # Combine data for overlapping candles
+            # Gộp data cho các candles trùng nhau
             overlap_data = pd.concat([
                 old_df.loc[common_idx],
                 new_df.loc[common_idx]
             ])
 
-            # Recalculate values using aggregation dictionary
             recalculated = overlap_data.stack()
             recalculated = recalculated.groupby(level=[0, 1]).agg(agg_dict).pivot_table(index='candleTime', columns='stock')
 
@@ -870,132 +892,127 @@ class Aggregator:
                 recalculated,                                     # Recalculated rows
                 new_df.loc[new_df.index.difference(common_idx)]   # Rows only in new
             ]).sort_index()
-            
-            logger.debug(f"After merge: {result_df.shape} shape")
         else:
-            # If no overlap, simply concat
+            # Nếu không có overlap, đơn giản là concat
             result_df = pd.concat([old_df, new_df]).sort_index()
-            logger.debug(f"No overlap, simple concat: {result_df.shape} shape")
         
         return result_df
     
-    def _store_resampled_data(self, df: pd.DataFrame) -> None:
-        """Store resampled data to plasma database"""
-        logger.info(f"Storing resampled data to plasma key: {self.output_key}")
+    def _store_resampled_data(self, df: pd.DataFrame):
         _, disconnect, psave, pload = gen_plasma_functions(db=Globs.PLASMA_DB)
         psave(self.output_key, df)
-        logger.debug("Data stored successfully")
     
-    def start_realtime_resampling(self) -> None:
-        """Start real-time data resampling process"""
-        logger.info(f"Starting realtime resampling with timeframe: {self.timeframe}")
+    def start_realtime_resampling(self):
+        """Bắt đầu quá trình resample real-time"""
+        logger.log('INFO', f"Starting realtime resampling with timeframe: {self.timeframe}")
 
         while True:
             try:
-                current_datetime = datetime.now()
-                time_str = current_datetime.strftime('%H:%M:%S')
-                current_time = current_datetime.time()
+                current_time = datetime.now()
+                time_str = current_time.strftime('%H:%M:%S')
+                current_time = current_time.time()
 
-                # Skip if outside trading hours
+                # Skip nếu ngoài giờ giao dịch
                 if not (self.TRADING_HOURS['MORNING_START'] <= current_time <= self.TRADING_HOURS['AFTERNOON_END']):
-                    logger.info(f"Outside trading hours ({time_str}), sleeping")
+                    logger.log('INFO', f"Outside trading hours ({current_time})")
                     time.sleep(self.SLEEP_DURATION['OUTSIDE_TRADING'])
                     continue
 
-                # Skip during lunch break
+                # Skip trong giờ nghỉ trưa
                 if self.TRADING_HOURS['LUNCH_START'] <= current_time <= self.TRADING_HOURS['LUNCH_END']:
-                    logger.info(f"Lunch break ({time_str}), sleeping")
+                    print(f"[{time_str}] Lunch break ({current_time})")
                     time.sleep(self.SLEEP_DURATION['OUTSIDE_TRADING'])
                     continue
 
-                # Load new data from Redis
-                logger.info(f"Processing data from position {self.current_pos}")
-                raw_data = self.data_processor.load_realtime_data(self.r, self.day, self.current_pos, -1)
+                raw_data: pd.DataFrame = self.data_processor.load_realtime_data(self.r, self.day, self.current_pos, -1)
+                logger.log('INFO', f"Processing data from position {self.current_pos}")
                 self.current_pos += len(raw_data) + 1
-                logger.debug(f"Updated current_pos to {self.current_pos}")
+                logger.log('INFO', f"Updated current_pos to {self.current_pos}")
 
                 if not raw_data.empty:
-                    # Combine with last states for accurate calculations
                     raw_data_with_last_states = self._append_last_states(raw_data)
 
-                    # Preprocess data
-                    new_data = self.data_processor.preprocess_realtime_data(raw_data_with_last_states, self.day)
+                    new_data: pd.DataFrame = self.data_processor.preprocess_realtime_data(raw_data_with_last_states, self.day)
                     new_data = new_data[new_data['timestamp'] >= self.current_candle_stamp]
-                    
-                    if hasattr(new_data, 'stock'):
-                        logger.info(f"New data contains {len(new_data['stock'].unique())} unique stocks")
+                    print(f"New data num stocks:  {len(new_data['stock'].unique())}")
 
-                    # Update last states for future processing
+                    # Cập nhật last states cho lần sau
                     self._update_last_states(raw_data_with_last_states, seconds=30)
 
                     if not new_data.empty:
-                        # Resample preprocessed data
+                        # Resample dữ liệu đã preprocess
                         new_resampled = Resampler.transform(
-                            day=self.day,
-                            df=new_data,
+                            day = self.day,
+                            df = new_data,
                             timeframe=self.timeframe,
                             agg_dic=self.data_processor.get_agg_dic(),
                             cleanup_data=True,
-                            subgroup=self.data_processor.SUBGROUP
+                            subgroup = self.data_processor.SUBGROUP
                         )
-                        logger.info(f"Resampled {len(new_data)} rows into {len(new_resampled)} candles")
+                        print(f"New resampled data shape: {new_resampled.info()}")
 
-                        # Initialize or update resampled DataFrame
                         if self.resampled_df.empty:
                             self.resampled_df = self.join_historical_data(new_resampled, ndays=1)
-                            logger.info(f"Initialized resampled dataframe with shape: {self.resampled_df.shape}")
+                            print(f"Init resampled df shape: {self.resampled_df.info()}")
                         else:
-                            # Merge with existing data
                             self.resampled_df = self.merge_resampled_data(
-                                old_df=self.resampled_df, 
+                                old_df = self.resampled_df, 
                                 new_df=new_resampled,
-                                agg_dict=self.data_processor.get_agg_dic()
+                                agg_dict = self.data_processor.get_agg_dic()
                             )
-                            logger.info(f"Updated resampled dataframe, new shape: {self.resampled_df.shape}")
+
+                            print(f"Updated resampled df shape: {self.resampled_df.info()}")
                         
-                        # Post-process the merged data
                         self.resampled_df = self.data_processor.postprocess_resampled_data(self.resampled_df)
 
-                        # Update candle timestamp
                         current_candle_stamp = self._get_candle_stamp(new_data['timestamp'].max())
                         if current_candle_stamp > self.current_candle_stamp:
                             self.current_candle_stamp = current_candle_stamp
-                            logger.info(f"Updated current_candle_stamp to {self.current_candle_stamp}")
                         else:
-                            # Add empty candle for next timeframe
-                            next_candle = self._get_next_candle_stamp(self.current_candle_stamp)
-                            self.current_candle_stamp = next_candle
-                            self.resampled_df = self._add_empty_candle(self.current_candle_stamp, self.resampled_df)
-                            logger.info(f"Added empty candle at {self.current_candle_stamp}")
+                            self.current_candle_stamp = self._get_next_candle_stamp(self.current_candle_stamp)
+                            self._add_empty_candle(self.current_candle_stamp, self.resampled_df)
+                            logger.log('INFO', f"Added empty candle at {self.current_candle_stamp}")
 
-                        # Store processed data
+                        logger.log('INFO', f"Updated current_candle_stamp to {self.current_candle_stamp}")
+                        
                         self._store_resampled_data(self.resampled_df)
-                else:
-                    logger.warning("No new data received")
-                    time.sleep(self.SLEEP_DURATION['EMPTY_DATA'])
-                    continue
+                        logger.log('INFO', f"Stored resampled data to Plasma key: {self.output_key}")
 
-                # Calculate next candle time and sleep until then
                 current_stamp = time.time() + 7*3600
                 next_candle_time = self._get_next_candle_stamp(current_stamp)
                 sleep_duration = next_candle_time - current_stamp
 
+                logger.log('INFO', f"Completed processing cycle, next candle at {next_candle_time}")
+                
                 if sleep_duration > 0:
-                    logger.info(f"Sleeping for {sleep_duration:.2f} seconds until next candle")
                     time.sleep(sleep_duration)
 
-                logger.info(f"Completed processing cycle, next candle at {datetime.fromtimestamp(next_candle_time).strftime('%H:%M:%S')}")
+                
 
             except Exception as e:
-                logger.error(f"Error in realtime resampling: {str(e)}", exc_info=True)
-                time.sleep(self.SLEEP_DURATION['ERROR'])
+                logger.log('ERROR', f"Error in realtime resampling: {str(e)}", exc_info=True)
+                time.sleep(1)
+
+class args:
+    timeframe = '30S'
+    type = 'stock'
+
+current_day = datetime.now().strftime("%Y_%m_%d")
+output_key = 'pslab_realtime_psdata2'
+processor = ProcessStockData
+
+self = Aggregator(
+    day=current_day,
+    timeframe='30S',
+    output_plasma_key='pslab_realtime_psdata2',
+    data_processor=processor
+)
+
+import argparse
 
 
-def main():
-    """Main function to run the data processing"""
-    import argparse
-
-    # Parse command line arguments
+if __name__ == "__main__" and not check_run_with_interactive():
+    # Create argument parser
     parser = argparse.ArgumentParser(description='Real-time data processing')
     parser.add_argument(
         '--type', 
@@ -1014,7 +1031,7 @@ def main():
     args = parser.parse_args()
     
     # Get current day
-    current_day = datetime.now().strftime("%Y_%m_%d")
+    
     
     # Configure processor based on type argument
     if args.type == 'stock':
@@ -1023,9 +1040,6 @@ def main():
     else:  # ps
         processor = ProcessPsData
         output_key = 'pslab_realtime_psdata2'
-    
-    # Log start of process
-    logger.info(f"Starting {args.type} data processing with {args.timeframe} timeframe")
     
     # Create and start aggregator
     aggregator = Aggregator(
@@ -1036,7 +1050,3 @@ def main():
     )
     
     aggregator.start_realtime_resampling()
-
-
-if __name__ == "__main__" and not check_run_with_interactive():
-    main()

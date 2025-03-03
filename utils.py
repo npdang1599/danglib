@@ -638,3 +638,6 @@ def check_run_with_interactive():
         arg in sys.argv[0] for arg in 
         ['ipykernel_launcher', 'ipykernel', '-c', 'jupyter', 'vscode']
     )
+
+def totime(stamp, unit='s'):
+    return pd.to_datetime(stamp, unit=unit)

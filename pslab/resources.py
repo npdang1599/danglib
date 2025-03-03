@@ -15,6 +15,7 @@ from datetime import datetime
 from danglib.Adapters.pickle_adapter_ssi_ws import PICKLED_WS_ADAPTERS
 from danglib.Adapters.adapters import MongoDBs
 from danglib.pslab.utils import day_to_timestamp, FileHandler, unflatten_columns, RedisHandler
+from danglib.utils import get_ps_ticker
 
 r = StrictRedis()
 
@@ -28,7 +29,7 @@ class Globs:
     STOCKS_I2S = {i: s for i, s in enumerate(STOCKS)}
     DATA_FROM_DAY = '2022_05_30'
     DATA_FROM_TIMESTAMP = day_to_timestamp(DATA_FROM_DAY)
-    SAMPLE_DATA_FROM_TIMESTAMP = day_to_timestamp('2024_12_05')
+    
     BASE_TIMEFRAME = '30S'
     
     MAKETSTATS_SRC = ['buyImpact', 'sellImpact', 'Arbit', 'Unwind', 'premiumDiscount',
@@ -146,6 +147,14 @@ class Globs:
     @classmethod
     def load_vn30_weight(cls):
         cls.VN30_WEIGHT = Adapters.load_vn30_weights_from_db()
+    
+    @staticmethod
+    def get_sample_from_day():
+        day = Adapters.get_historical_day_by_index(-5)
+        stamp = day_to_timestamp(day)
+        return stamp
+
+
 
 class Resources:
     CACHED_FOLDER = "/data/dang"
@@ -206,6 +215,14 @@ class Resources:
         @staticmethod
         def get_hose500_realtime_key(day):
             return f"pylabview_hose_{day}"
+        
+        @staticmethod
+        def get_PS_realtime_key(day):
+            return f"pylabview_future_{day}"
+        
+        @staticmethod
+        def get_index_realtime_key(day):
+            return f"pylabview_index_{day}"
         
 
 # Add logging configuration near the top after imports
@@ -561,7 +578,7 @@ class Adapters:
             df = Adapters.load_stock_data_from_parquet()
 
             if create_sample:
-                dfs = df[df.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
+                dfs = df[df.index > Globs.get_sample_from_day()]
                 FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet", dfs)
 
             psave(key, df)
@@ -588,7 +605,7 @@ class Adapters:
             })
 
             if create_sample:
-                dfs = df_market_stats[df_market_stats.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
+                dfs = df_market_stats[df_market_stats.index > Globs.get_sample_from_day()]
                 FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet", dfs)
 
             psave(key, df_market_stats)
@@ -610,7 +627,7 @@ class Adapters:
             df['VNINDEX_volume'] = df['VNINDEX_value'].copy()
 
             if create_sample:
-                dfs = df[df.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
+                dfs = df[df.index > Globs.get_sample_from_day()]
                 FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet", dfs)
 
             psave(f"{key}", df)
@@ -639,7 +656,7 @@ class Adapters:
             df = df.rename(columns={'fBuyVol': 'fBuyVal', 'fSellVol': 'fSellVal'})
 
             if create_sample:
-                dfs = df[df.index > Globs.SAMPLE_DATA_FROM_TIMESTAMP]
+                dfs = df[df.index > Globs.get_sample_from_day()]
                 FileHandler.write_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet", dfs)
 
             psave(f"{key}", df)
@@ -1016,7 +1033,7 @@ class Adapters:
         @staticmethod
         def load_realtime_stock_data_from_redis(r: StrictRedis=None, day=None, start=0, end=-1):
             if r is None:
-                r = StrictRedis()
+                r = StrictRedis(decode_responses=True)
 
             if day is None:
                 day = Adapters.get_max_datatime()
@@ -1024,6 +1041,22 @@ class Adapters:
             key = Resources.RedisKeys.get_hose500_realtime_key(day)
             df = pd.DataFrame(json.loads(x) for x in r.lrange(key, start, end))
             return df
+        
+        @staticmethod
+        def load_realtime_PS_data_from_redis(r: StrictRedis=None, day=None, start=0, end=-1):
+            if r is None:
+                r = StrictRedis(decode_responses=True)
+
+            if day is None:
+                day = datetime.now().strftime("%Y_%m_%d")
+
+            key = Resources.RedisKeys.get_PS_realtime_key(day)
+            map_code = {k:v for v, k in get_ps_ticker(day).items()}
+            df = pd.DataFrame(json.loads(x) for x in r.lrange(key, start, end))
+            df['id'] = df['code'].map(map_code)
+            return df
+            
+            
         
     @staticmethod
     def get_historical_day_by_index(index):

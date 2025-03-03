@@ -366,6 +366,18 @@ def function_mapping():
                 'use_as_lookback_cond': {'type': 'bool', 'default': False},
                 'lookback_cond_nbar': {'type': 'int', 'default': 5},
             }
+        },
+        'cross_threshold': {
+            'function': Conds.cross_threshold,
+            'title': 'Cross Threshold',
+            'description': "Kiểm tra đường vượt qua ngưỡng xác định",
+            'inputs': ['src'],
+            'params': {
+                'threshold': {'type': 'float', 'default': 0},
+                'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder']},
+                'use_as_lookback_cond': {'type': 'bool', 'default': False},
+                'lookback_cond_nbar': {'type': 'int', 'default': 5},
+            }
         }
     }
 
@@ -481,6 +493,18 @@ def input_source_functions():
             },
             'outputs': {
                 'output': {'type': 'line', 'mapping': 'percentile', 'value': 'percentile', 'color': Utils.random_color()}
+            }
+        },
+        'constant_line':{
+            'function': Indicators.constant_line,
+            'title': 'Constant Line',
+            'description': "Constant value",
+            'inputs': [],
+            'params': {
+                'value': {'type': 'float', 'default': 0}
+            },
+            'outputs': {
+                'output': {'type': 'line', 'mapping': 'const', 'value': 'const', 'color': Utils.random_color()}
             }
         }
     }
@@ -1274,7 +1298,14 @@ class Indicators:
             
         return result
 
-   
+    @staticmethod
+    def constant_line(value: float):
+        """Create a constant line with specified value"""
+        src = Adapters.load_index_ohlcv_from_plasma('F1')['close']
+        result: PandasObject = pd.Series(value, index=src.index)
+        result.name = 'const'
+            
+        return result
 
 class Conds:
     """Market condition analysis functions with vectorized operations"""
@@ -1710,6 +1741,24 @@ class Conds:
             result = Ta.make_lookback(result, lookback_cond_nbar)
         return result
         
+    @staticmethod
+    def cross_threshold(
+        src: pd.Series,
+        threshold: float,
+        direction: str = "crossover",
+        use_as_lookback_cond: bool = False,
+        lookback_cond_nbar = 5
+        ):
+        """Check if a single line crosses over or under a fixed threshold."""
+        threshold_line = Utils.new_1val_series(threshold, src)
+        if direction == "crossover":
+            result = Ta.crossover(src, threshold_line)
+        elif direction == "crossunder":
+            result = Ta.crossunder(src, threshold_line)
+        if use_as_lookback_cond:
+            result = Ta.make_lookback(result, lookback_cond_nbar)
+        return result 
+
     class Indicators:
         @staticmethod
         def consecutive_squeezes(
@@ -2379,6 +2428,7 @@ class CombiConds:
 
             # Apply condition function
             signal = func(**func_inputs, **condition['params'])
+
 
             if combine_calculator == 'or':
                 # Combine with final result using OR operation

@@ -665,7 +665,7 @@ class Adapters:
         dfbs1 = dfbs1.drop('mapYQ', axis=1)
         dfres = pd.merge(dfres, dfbs1, how='left', on=['stock', 'day'])
         dfres[['marketCap','inventory','CAPEX','inventoryDay']] = dfres.groupby('stock')[['marketCap','inventory','CAPEX','inventoryDay']].ffill()
-        
+        ###
         dfres = pd.merge(dfres, dfbs2, how='left', on=['stock', 'mapYQ'])
         
         df_indexs = Adapters.get_index_data(start_day=start_day)
