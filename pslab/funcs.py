@@ -79,8 +79,8 @@ def function_mapping():
     return {
         'absolute_change_in_range': {   
             'function': Conds.absolute_change_in_range,
-            'title': 'Absolute Change in Range',
-            'description': "sự thay đổi giá trị tuyệt đối trong một khoảng thời gian",
+            'title': '[1_Src] Abs Change',
+            'description': "Thay đổi giá trị tuyệt đối trong một khoảng thời gian",
             'inputs': ['src'],
             'params': {
                 'n_bars': {'type': 'int', 'default': 1},
@@ -92,8 +92,8 @@ def function_mapping():
         },
         'consecutive_above_below': {
             'function': Conds.consecutive_above_below,
-            'title': 'Consecutive Above/Below',
-            'description': "một đường nằm trên/dưới đường khác liên tiếp",
+            'title': '[2_Src] Cons Above/Below',
+            'description': "1 đường nằm trên/dưới 1 đường khác liên tiếp trong n bar",
             'inputs': ['src1', 'src2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'above', 'values': ['above', 'below']},
@@ -104,8 +104,8 @@ def function_mapping():
         },
         'cross_no_reverse': {
             'function': Conds.cross_no_reverse,
-            'title': 'Cross Without Reversal',
-            'description': "Xác định giao cắt mà không đảo chiều sau đó",
+            'title': '[2_Src] Cross No Reverse',
+            'description': "2 đường giao cắt nhau và không đảo chiều trong n bar",
             'inputs': ['src1', 'src2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder']},
@@ -116,8 +116,8 @@ def function_mapping():
         },
         'percentile_in_range': {
             'function': Conds.percentile_in_range,
-            'title': 'Percentile in Range',
-            'description': "Kiểm tra percentile của source trong khi lookback n bars có nằm trong range giá trị",
+            'title': '[1_Src] Percentile',
+            'description': "Percentile của source trong khi lookback n bars có nằm trong range giá trị",
             'inputs': ['src'],
             'params': {
                 'lookback_period': {'type': 'int', 'default': 20},
@@ -129,8 +129,8 @@ def function_mapping():
         },
         'gap_percentile': {
             'function': Conds.gap_percentile,
-            'title': 'Gap Percentile',
-            'description': "Kiểm tra khoảng cách giữa hai đường thuộc nhóm phần trăm cao nhất",
+            'title': '[2_Src] Diff Percentile',
+            'description': "Khoảng cách giữa hai đường thuộc nhóm phần trăm cao nhất",
             'inputs': ['src1', 'src2'],
             'params': {
                 'lookback_period': {'type': 'int', 'default': 20},
@@ -141,7 +141,7 @@ def function_mapping():
         },
         'gap_trend': {
             'function': Conds.gap_trend,
-            'title': 'Gap Trend Analysis',
+            'title': '[2_Src] Diff Trend',
             'description': "Phân tích xu hướng tăng/giảm của gap giữa hai đường",
             'inputs': ['src1', 'src2'],
             'params': {
@@ -154,8 +154,8 @@ def function_mapping():
         },
         'gap_range':{
             'function': Conds.gap_range,
-            'title': 'Gap Range',
-            'description': "Kiểm tra khoảng cách giữa hai đường nằm trong một khoảng xác định",
+            'title': '[2_Src] Diff Abs',
+            'description': "Khoảng cách giữa hai đường nằm trong một khoảng xác định",
             'inputs': ['src1', 'src2'],
             'params': {
                 'lower_thres': {'type': 'float', 'default': -999},
@@ -179,7 +179,7 @@ def function_mapping():
         },
         'min_inc_dec_bars': {
             'function': Conds.min_inc_dec_bars,
-            'title': 'Minimum Increasing/Decreasing Bars',
+            'title': '[1_Src] Up/Down Count',
             'description': "Đếm số thanh nến tăng/giảm tối thiểu",
             'inputs': ['src'],
             'params': {
@@ -192,7 +192,7 @@ def function_mapping():
         },
         'percent_change_in_range': {
             'function': Conds.percent_change_in_range,
-            'title': 'Percent Change in Range',
+            'title': '[1_Src] % Change',
             'description': "Phân tích phần trăm thay đổi giá trị trong khoảng thời gian",
             'inputs': ['src'],
             'params': {
@@ -205,8 +205,8 @@ def function_mapping():
         },
         'range_nbars': {
             'function': Conds.range_nbars,
-            'title': 'Total value over n bars in Range',
-            'description': " Kiểm tra tổng giá trị của n bars có nằm trong một khoảng xác định",
+            'title': '[1_Src] Rolling Sum',
+            'description': " Tổng giá trị của n bars có nằm trong một khoảng xác định",
             'inputs': ['src'],
             'params': {
                 'lower_thres': {'type': 'float', 'default': -999},
@@ -218,8 +218,8 @@ def function_mapping():
         },
         'range_cond': {
             'function': Conds.range_cond,
-            'title': 'Value in Range',
-            'description': "Kiểm tra giá trị có nằm trong một khoảng xác định",
+            'title': '[1_Src] Range',
+            'description': "Giá trị có nằm trong một khoảng xác định",
             'inputs': ['src'],
             'params': {
                 'lower_thres': {'type': 'float', 'default': -999},
@@ -230,7 +230,7 @@ def function_mapping():
         },
         'two_line_pos': {
             'function': Conds.two_line_pos,
-            'title': 'Two Line Position',
+            'title': '[2_Src] Position',
             'description': "Kiểm tra vị trí giữa hai đường",
             'inputs': ['src1', 'src2'],
             'params': {
@@ -257,7 +257,7 @@ def function_mapping():
         },
         'two_MA_pos': {
             'function': Conds.Indicators.two_MA_pos,
-            'title': 'Two MA Line Position',
+            'title': '[1_Src] 2MAs',
             'description': "Kiểm tra vị trí giữa hai moving averages",
             'inputs': ['src'],
             'params': {
@@ -357,7 +357,7 @@ def function_mapping():
         },
         'compare_two_sources': {
             'function': Conds.compare_two_sources,
-            'title': 'Compare Two Sources',
+            'title': '[2_Src] Ratio',
             'description': "So sánh tỉ số (%) giữa nguồn dữ liệu src1 với src2 có nằm trong một khoảng xác định hay không",
             'inputs': ['src1', 'src2'],
             'params': {
@@ -369,7 +369,7 @@ def function_mapping():
         },
         'cross_threshold': {
             'function': Conds.cross_threshold,
-            'title': 'Cross Threshold',
+            'title': '[1_Src] Cross Threshold',
             'description': "Kiểm tra đường vượt qua ngưỡng xác định",
             'inputs': ['src'],
             'params': {
@@ -921,31 +921,78 @@ class Ta:
             index=df_ls[0].index
         )
     
-    @staticmethod
-    def apply_rolling(data: PandasObject, window: int, method: str = 'sum'):
-        """Apply rolling operation based on specified method
+    # @staticmethod
+    # def apply_rolling(data: PandasObject, window: int, method: str = 'sum'):
+    #     """Apply rolling operation based on specified method
         
+    #     Args:
+    #         data: Input series/dataframe
+    #         window: Rolling window size
+    #         method: Rolling method - 'sum', 'median', 'mean', 'last', 'rank'
+            
+    #     Returns:
+    #         Rolled data with specified method
+    #     """
+    #     window = int(window)
+    #     rolling = data.rolling(window)
+        
+    #     if method == 'sum':
+    #         return rolling.sum()
+    #     elif method == 'median':
+    #         return rolling.median() 
+    #     elif method == 'mean':
+    #         return rolling.mean()
+    #     elif method == 'rank':
+    #         return (rolling.rank() - 1) / (window - 1) * 100
+    #     else:
+    #         raise ValueError(f"Invalid rolling method: {method}. Must be one of: sum, median, mean, rank")
+
+    @staticmethod
+    def apply_rolling(data: PandasObject, window: int, method: str = 'sum', daily_rolling: bool = True):
+        """Apply rolling operation based on specified method
         Args:
             data: Input series/dataframe
             window: Rolling window size
             method: Rolling method - 'sum', 'median', 'mean', 'last', 'rank'
-            
         Returns:
             Rolled data with specified method
         """
-        window = int(window)
-        rolling = data.rolling(window)
+        def rolling_data(data_input, window_size, method_name):
+            window_size = int(window_size)
+            rolling = data_input.rolling(window_size)
+            if method_name == 'sum':
+                return rolling.sum()
+            elif method_name == 'median':
+                return rolling.median()
+            elif method_name == 'mean':
+                return rolling.mean()
+            elif method_name == 'rank':
+                return (rolling.rank() - 1) / (window_size - 1) * 100
+            else:
+                raise ValueError(f"Invalid rolling method: {method_name}. Must be one of: sum, median, mean, rank")
         
-        if method == 'sum':
-            return rolling.sum()
-        elif method == 'median':
-            return rolling.median() 
-        elif method == 'mean':
-            return rolling.mean()
-        elif method == 'rank':
-            return (rolling.rank() - 1) / (window - 1) * 100
-        else:
-            raise ValueError(f"Invalid rolling method: {method}. Must be one of: sum, median, mean, rank")
+        if daily_rolling:
+            return rolling_data(data, window, method)
+        
+        timestamp = data.index
+        datetime_index = pd.to_datetime(timestamp, unit='ns')
+        
+        # Tạo DataFrame tạm để nhóm dữ liệu
+        temp_df = pd.DataFrame(index=timestamp)
+        temp_df['date'] = datetime_index.date
+        temp_df['data'] = data.values  # Lưu giá trị của data vào temp_df
+        
+        # Định nghĩa function cho apply
+        def apply_rolling_to_group(group):
+            group_data = pd.Series(group['data'].values, index=group.index)
+            return rolling_data(group_data, window, method)
+        
+        # Nhóm các index theo ngày và áp dụng rolling
+        result = temp_df.groupby('date').apply(apply_rolling_to_group)
+        
+        
+        # Hoặc sắp xếp lại kết quả theo timestamp gốc
+        return pd.Series(result.values.tolist(), index=timestamp).sort_index()
 
 
 class Indicators:
@@ -1911,7 +1958,7 @@ class CombiConds:
             ValueError: If invalid parameter combinations are provided
         """
         def test():
-            conditions_params = TestSets.LOAD_PROCESS_GROUP_DATA
+            conditions_params = TestSets.COMBINE_TEST
             use_sample_data = False
         try:
             required_data: dict[str, pd.Series] = {}
@@ -1924,6 +1971,7 @@ class CombiConds:
                 timeframe = condition['inputs'].get('timeframe', Globs.BASE_TIMEFRAME)
                 rolling_window = condition['inputs'].get('rolling_window')
                 rolling_method = condition['inputs'].get('rolling_method', 'sum')
+                daily_rolling = condition['inputs'].get('daily_rolling', True)
                 stocks = condition['inputs'].get('stocks', Globs.STOCKS)
                 stocks_key = hash('_'.join(sorted(stocks)))
                 
@@ -1937,8 +1985,8 @@ class CombiConds:
                             raise InputSourceEmptyError(f"Input {param_name} is empty!")
                         
                         # Create unique identifier for this data requirement
-                        required_cols.add((col_name, timeframe, stocks_key, rolling_window, rolling_method))
-                        new_key = f"{col_name}_{timeframe}_{stocks_key}_{rolling_window}_{rolling_method}"
+                        required_cols.add((col_name, timeframe, stocks_key, rolling_window, rolling_method, daily_rolling))
+                        new_key = f"{col_name}_{timeframe}_{stocks_key}_{rolling_window}_{rolling_method}_{daily_rolling}"
                         new_condition['inputs'][param_name] = new_key
                     else:
                         new_condition['inputs'][param_name] = condition['inputs'][param_name]
@@ -1947,7 +1995,7 @@ class CombiConds:
 
             # Group columns by stock combinations for efficient data loading
             all_cols_by_stocks: dict[int, set[str]] = {}
-            for col, _, stocks_key, _, _ in required_cols:
+            for col, _, stocks_key, _, _, _ in required_cols:
                 if stocks_key not in all_cols_by_stocks:
                     all_cols_by_stocks[stocks_key] = set()
                 all_cols_by_stocks[stocks_key].add(col)
@@ -1967,9 +2015,9 @@ class CombiConds:
                 data = data.groupby(level=0, axis=1).sum()
                 
                 # Process each required column
-                for col, tf, sk, window, method in required_cols:
+                for col, tf, sk, window, method, daily_rolling in required_cols:
                     if sk == stocks_key:
-                        key = f"{col}_{tf}_{sk}_{window}_{method}"
+                        key = f"{col}_{tf}_{sk}_{window}_{method}_{daily_rolling}"
                         data_processed: pd.Series = data[col].copy()
                         
                         # Apply timeframe resampling if needed
@@ -1982,7 +2030,7 @@ class CombiConds:
                         
                         # Apply rolling calculations if needed
                         if window is not None:
-                            data_processed = Ta.apply_rolling(data_processed, window, method)
+                            data_processed = Ta.apply_rolling(data_processed, window, method, daily_rolling)
                         
                         required_data[key] = data_processed
 
@@ -2026,6 +2074,8 @@ class CombiConds:
                 timeframe = condition['inputs'].get('timeframe', Globs.BASE_TIMEFRAME)
                 rolling_window = condition['inputs'].get('rolling_window')
                 rolling_method = condition['inputs'].get('rolling_method', 'sum')
+                daily_rolling = condition['inputs'].get('daily_rolling', True)
+
                 stocks = condition['inputs'].get('stocks', Globs.STOCKS)
                 stocks_key = hash('_'.join(sorted(stocks)))
                 
@@ -2039,8 +2089,8 @@ class CombiConds:
                             raise InputSourceEmptyError(f"Input {param_name} is empty!")
                         
                         # Create unique identifier for this data requirement
-                        required_cols.add((col_name, timeframe, stocks_key, rolling_window, rolling_method))
-                        new_key = f"{col_name}_{timeframe}_{stocks_key}_{rolling_window}_{rolling_method}"
+                        required_cols.add((col_name, timeframe, stocks_key, rolling_window, rolling_method, daily_rolling))
+                        new_key = f"{col_name}_{timeframe}_{stocks_key}_{rolling_window}_{rolling_method}_{daily_rolling}"
                         new_condition['inputs'][param_name] = new_key
                     else:
                         new_condition['inputs'][param_name] = condition['inputs'][param_name]
@@ -2049,7 +2099,7 @@ class CombiConds:
 
             # Group columns by stock combinations for efficient data loading
             all_cols_by_stocks: dict[int, set[str]] = {}
-            for col, _, stocks_key, _, _ in required_cols:
+            for col, _, stocks_key, _, _, _ in required_cols:
                 if stocks_key not in all_cols_by_stocks:
                     all_cols_by_stocks[stocks_key] = set()
                 all_cols_by_stocks[stocks_key].add(col)
@@ -2075,7 +2125,7 @@ class CombiConds:
                 # Process each required column
                 for col, tf, sk, window, method in required_cols:
                     if sk == stocks_key:
-                        key = f"{col}_{tf}_{sk}_{window}_{method}"
+                        key = f"{col}_{tf}_{sk}_{window}_{method}_{daily_rolling}"
                         data_processed: pd.Series = data[col].copy()
                         
                         # Apply timeframe resampling if needed
@@ -2088,7 +2138,7 @@ class CombiConds:
                         
                         # Apply rolling calculations if needed
                         if window is not None:
-                            data_processed = Ta.apply_rolling(data_processed, window, method)
+                            data_processed = Ta.apply_rolling(data_processed, window, method, daily_rolling)
                         
                         required_data[key] = data_processed
 
@@ -2138,6 +2188,7 @@ class CombiConds:
                 timeframe = condition['inputs'].get('timeframe', Globs.BASE_TIMEFRAME)
                 rolling_window = condition['inputs'].get('rolling_window')
                 rolling_method = condition['inputs'].get('rolling_method', 'sum')
+                daily_rolling = condition['inputs'].get('daily_rolling', True)
 
                 new_condition = deepcopy(condition)
                 new_condition['inputs'] = {}
@@ -2147,8 +2198,8 @@ class CombiConds:
                         if not col_name:
                             raise InputSourceEmptyError(f"Input {param_name} is empty!")
                         
-                        required_cols.add((col_name, timeframe, rolling_window, rolling_method))
-                        new_key = f"{col_name}_{timeframe}_{rolling_window}_{rolling_method}"
+                        required_cols.add((col_name, timeframe, rolling_window, rolling_method, daily_rolling))
+                        new_key = f"{col_name}_{timeframe}_{rolling_window}_{rolling_method}_{daily_rolling}"
                         new_condition['inputs'][param_name] = new_key
                     else:
                         new_condition['inputs'][param_name] = condition['inputs'][param_name]
@@ -2164,8 +2215,8 @@ class CombiConds:
                     else Adapters.load_index_daily_ohlcv_from_plasma(list(unique_cols), use_sample_data))
             
             # Process each required column
-            for col, tf, window, method in required_cols:
-                key = f"{col}_{tf}_{window}_{method}"
+            for col, tf, window, method, daily_rolling in required_cols:
+                key = f"{col}_{tf}_{window}_{method}_{daily_rolling}"
                 data_processed: pd.Series = data[col].copy()
                 
                 # Apply timeframe resampling if needed
@@ -2179,7 +2230,7 @@ class CombiConds:
                     print(window)
                 # Apply rolling calculations if needed
                 if window is not None:
-                    data_processed = Ta.apply_rolling(data_processed, window, method)
+                    data_processed = Ta.apply_rolling(data_processed, window, method, daily_rolling)
                 
                 required_data[key] = data_processed
 
@@ -2286,6 +2337,7 @@ class CombiConds:
                 timeframe = condition['inputs'].get('timeframe', Globs.BASE_TIMEFRAME)
                 rolling_window = condition['inputs'].get('rolling_window')
                 rolling_method = condition['inputs'].get('rolling_method', 'sum')
+                daily_rolling = condition['inputs'].get('daily_rolling', True)
                 
                 new_condition = deepcopy(condition)
                 new_condition['inputs'] = {}
@@ -2295,8 +2347,8 @@ class CombiConds:
                         if not col_name:
                             raise InputSourceEmptyError(f"Input {param_name} is empty!")
                         
-                        required_cols.add((col_name, timeframe, rolling_window, rolling_method))
-                        new_key = f"{col_name}_{timeframe}_{rolling_window}_{rolling_method}"
+                        required_cols.add((col_name, timeframe, rolling_window, rolling_method, daily_rolling))
+                        new_key = f"{col_name}_{timeframe}_{rolling_window}_{rolling_method}_{daily_rolling}"
                         new_condition['inputs'][param_name] = new_key
                     else:
                         new_condition['inputs'][param_name] = condition['inputs'][param_name]
@@ -2314,8 +2366,8 @@ class CombiConds:
             )
             
             # Process each required column
-            for col, tf, window, method in required_cols:
-                key = f"{col}_{tf}_{window}_{method}"
+            for col, tf, window, method, daily_rolling in required_cols:
+                key = f"{col}_{tf}_{window}_{method}_{daily_rolling}"
                 
                 # Apply timeframe resampling if needed
                 if tf != Globs.BASE_TIMEFRAME:

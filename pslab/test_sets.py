@@ -40,6 +40,7 @@ class TestSets:
             "function": "absolute_change_in_range",
             "inputs": {
             "src": "VnindexClose",
+            "daily_rolling": False
             # "timeframe": "15Min",
             },
             "params": {
@@ -60,7 +61,8 @@ class TestSets:
                 "src2": "sd2",
                 "timeframe": "15Min", 
                 "rolling_window": 3,
-                "rolling_method": "sum"
+                "rolling_method": "sum",
+                "daily_rolling": False
             },
             "params": {
                 "direction", "crossover"
@@ -76,7 +78,8 @@ class TestSets:
                 'src': 'bu2',
                 'stocks': ['VN30', 'Super High Beta'],
                 'rolling_window': 20,
-                'rolling_method': 'sum'
+                'rolling_method': 'sum',
+                'daily_rolling': False
             },
             'params': {
                 'lookback_period': 50,
@@ -104,7 +107,8 @@ class TestSets:
                 'src1': 'bu2',
                 'src2': 'sd2',
                 'stocks': ['VN30', 'Super High Beta'],
-                'rolling_window': 20
+                'rolling_window': 20,
+                'daily_rolling': False
             },
             'params': {
                 'direction': 'crossover'
