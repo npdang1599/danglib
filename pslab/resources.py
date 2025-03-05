@@ -15,7 +15,7 @@ from datetime import datetime
 from danglib.Adapters.pickle_adapter_ssi_ws import PICKLED_WS_ADAPTERS
 from danglib.Adapters.adapters import MongoDBs
 from danglib.pslab.utils import day_to_timestamp, FileHandler, unflatten_columns, RedisHandler
-from danglib.utils import get_ps_ticker
+
 
 r = StrictRedis()
 
@@ -1051,9 +1051,7 @@ class Adapters:
                 day = datetime.now().strftime("%Y_%m_%d")
 
             key = Resources.RedisKeys.get_PS_realtime_key(day)
-            map_code = {k:v for v, k in get_ps_ticker(day).items()}
             df = pd.DataFrame(json.loads(x) for x in r.lrange(key, start, end))
-            df['id'] = df['code'].map(map_code)
             return df
             
             

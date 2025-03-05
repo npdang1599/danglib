@@ -193,7 +193,10 @@ def scan_one_stock_v3(
         print(f"scan error: {e}")
 
     return bt
-    
+
+import logging
+logging.basicConfig()
+
 @app.task(name=TaskName.SCAN_STOCK_V4)
 def scan_one_stock_v4(
     params, 
@@ -230,7 +233,7 @@ def scan_one_stock_v4(
             holding_periods=holding_periods
         )
     except Exception as e:
-        print(f"scan error: {e}")
+        logging.ERROR(f"scan error: {e}", exc_info=True)
 
     return bt
 

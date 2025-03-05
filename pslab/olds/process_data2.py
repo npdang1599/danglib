@@ -802,3 +802,143 @@ if __name__ == "__main__" and not check_run_with_interactive():
     )
 #%%
     realtime_stock.start_realtime_resampling()
+
+#%%
+def test():
+    if True:
+    # Tính toán thời điểm vào và ATC tương tự _compute_enter_exit_signals
+    df_signals = df['matched'].copy()
+    df_signals.name = 'entry'
+    signals_df = df_signals.to_frame().reset_index()
+    
+    # Chỉ giữ lại các hàng có tín hiệu
+    signals_df = signals_df[signals_df['entry']]
+    
+    # Tính thời gian exit cho mỗi entry (giống trong _compute_enter_exit_signals)
+    signals_df['entry_time'] = signals_df['candleTime']
+    signals_df['entry_date'] = pd.to_datetime(signals_df['candleTime'] // 1e9, unit='s')
+    
+    # Map ATC time cho mỗi entry date
+    # Tạo cột ngày để map với ATC
+    df['datetime'] = pd.to_datetime(df.index // 1e9, unit='s')
+    df['date_only'] = df['datetime'].dt.date
+    
+    # Tìm ATC candle cho mỗi ngày (14:45)
+    atc_df = df.copy()
+    atc_df['is_atc'] = atc_df['datetime'].dt.hour == 14
+    atc_df['is_atc'] &= atc_df['datetime'].dt.minute == 45
+    
+    # Tạo mapping từ ngày -> ATC candle
+    atc_mapping = {}
+    for date, group in atc_df.groupby('date_only'):
+        atc_candles = group[group['is_atc']]
+        if not atc_candles.empty:
+            atc_mapping[date] = {
+                'index': atc_candles.index[0],
+                'close': atc_candles['close'].iloc[0]
+            }
+    
+    # Map thông tin ATC vào signals_df
+    signals_df['entry_date_only'] = signals_df['entry_date'].dt.date
+    signals_df['atc_index'] = signals_df['entry_date_only'].apply(
+        lambda date: atc_mapping.get(date, {}).get('index', None)
+    )
+    signals_df['atc_close'] = signals_df['entry_date_only'].apply(
+        lambda date: atc_mapping.get(date, {}).get('close', None)
+    )
+    
+    # Tính h_o và l_o trong khoảng từ entry đến ATC
+    # Tạo map từ entry_index tới atc_index
+    entry_to_atc = dict(zip(signals_df['candleTime'], signals_df['atc_index']))
+    
+    # Tính toán high/low từ sau entry đến ATC cho mỗi entry
+    results = []
+    for entry_time, atc_time in entry_to_atc.items():
+        if atc_time is None:
+            continue
+            
+        # Tìm các candle giữa entry và ATC
+        mask = (df.index > entry_time) & (df.index <= atc_time)
+        subset = df[mask]
+        
+        if not subset.empty:
+            max_high = subset['high'].max()
+            min_low = subset['low'].min()
+            results.append({
+                'entry_time': entry_time,
+                'max_high': max_high,
+                'min_low': min_low
+            })
+    
+    # Chuyển results thành DataFrame và map về signals_df
+    if results:
+        results_df = pd.DataFrame(results)
+        results_df.set_index('entry_time', inplace=True)
+        
+        # Map h_o và l_o từ results_df về signals_df
+        signals_df['highest_till_atc'] = signals_df['candleTime'].map(
+            results_df['max_high'] if not results_df.empty else {}
+        )
+        signals_df['lowest_till_atc'] = signals_df['candleTime'].map(
+            results_df['min_low'] if not results_df.empty else {}
+        )
+    else:
+        signals_df['highest_till_atc'] = np.nan
+        signals_df['lowest_till_atc'] = np.nan
+    
+    # Map các kết quả từ signals_df vào df gốc
+    entry_map = {
+        'atc_close': {},
+        'highest_till_atc': {},
+        'lowest_till_atc': {}
+    }
+    
+    for _, row in signals_df.iterrows():
+        entry_map['atc_close'][row['candleTime']] = row['atc_close']
+        entry_map['highest_till_atc'][row['candleTime']] = row['highest_till_atc']
+        entry_map['lowest_till_atc'][row['candleTime']] = row['lowest_till_atc']
+    
+    # Map vào df gốc
+    map_indices = df.index[df['matched']]
+    df.loc[map_indices, 'atc_close'] = [entry_map['atc_close'].get(idx, np.nan) for idx in map_indices]
+    df.loc[map_indices, 'highest_till_atc'] = [entry_map['highest_till_atc'].get(idx, np.nan) for idx in map_indices]
+    df.loc[map_indices, 'lowest_till_atc'] = [entry_map['lowest_till_atc'].get(idx, np.nan) for idx in map_indices]
+    
+    # Calculate returns for ATC case
+    df['c_o'] = ReturnStats._compute_return(
+        df['atc_close'],
+        df['enter_price'],
+        config.use_pct
+    )
+    
+    df['h_o'] = ReturnStats._compute_return(
+        df['highest_till_atc'],
+        df['enter_price'],
+        config.use_pct
+    )
+    
+    df['l_o'] = ReturnStats._compute_return(
+        df['lowest_till_atc'],
+        df['enter_price'],
+        config.use_pct
+    )
+
+else:
+    # Original calculation for non-ATC case
+    df['c_o'] = ReturnStats._compute_return(
+        df['close'].shift(-(config.holding_periods)),
+        df['enter_price'],
+        config.use_pct
+    )
+    
+    df['h_o'] = ReturnStats._compute_return(
+        df['high'].rolling(config.holding_periods, closed='right').max().shift(-config.holding_periods),
+        df['enter_price'],
+        config.use_pct
+    )
+    
+    df['l_o'] = ReturnStats._compute_return(
+        df['low'].rolling(config.holding_periods, closed='right').min().shift(-config.holding_periods),
+        df['enter_price'],
+        config.use_pct
+    )

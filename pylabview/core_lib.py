@@ -422,6 +422,41 @@ class Adapters:
         return stocks, stocks_groups_map
     
     @staticmethod
+    def get_hrp_group():
+        with open('/home/ubuntu/Tai/Production/pickle/cluster_hrp.pkl', 'rb') as f:
+            hrp_group = pickle.load(f)
+        hrp_group_renamed = {k: f"cluster_{v}" for k, v in hrp_group.items()}
+        return hrp_group_renamed
+    @staticmethod
+    def load_busd_data_from_db():
+        db = MongoClient(HOST, 27022)["stockdata"]
+        col = db['hose_bu']
+        df_bu = pd.DataFrame(list(col.find({}, {'_id': 0})))
+        col = db['hose_sd']
+        df_sd = pd.DataFrame(list(col.find({}, {'_id': 0})))
+        df_bu = df_bu.fillna(0)
+        if 'day' not in df_bu.columns:
+            raise ValueError("DataFrame must contain a 'day' column.")
+
+        # Get the stock column names (excluding 'day')
+        stock_columns = [col for col in df_bu.columns if col != 'day']
+
+        # Melt the DataFrame to reshape it
+        melted_df_bu = pd.melt(df_bu, id_vars=['day'], value_vars=stock_columns,
+                            var_name='stock', value_name='bu')
+        melted_df_sd = pd.melt(df_sd, id_vars=['day'], value_vars=stock_columns,
+                            var_name='stock', value_name='sd')
+        
+        df_busd = melted_df_bu.merge(melted_df_sd, on = ['day','stock'], how = 'outer')
+        return df_busd
+    @staticmethod
+    def load_prop_data_from_db(stocks: list):
+        db = MongoClient(HOST, 27022)["stockdata"]
+        col = db['prop_data']
+        df = pd.DataFrame(list(col.find({'stock': {"$in": stocks}}, {'_id': 0})))
+        df = df.drop_duplicates(subset=['stock', 'day'], keep='last')
+        return df
+    @staticmethod
     def load_quarter_netincome_from_db_VCI(symbols: list):
         db = MongoClient(HOST, 27022)["stockdata"]
         col = db['VCI_income_statement_quarter']
@@ -479,6 +514,7 @@ class Adapters:
         )
         df.columns = ['stock', 'day', 'PE', 'PB']
         df['day'] = df['day'].str.replace('-', '_')
+        df = df.drop_duplicates(subset=['stock', 'day'], keep='last')
         return df
         
     @staticmethod
@@ -593,8 +629,57 @@ class Adapters:
         df2 = df2[['stock','gross', 'cash', 'debt']].copy()
         
         return df, df2
-        
     
+
+    @staticmethod
+    def calculate_relative_feature(
+        df: pd.DataFrame,
+        df_vnindex: pd.DataFrame,
+        dic_group: dict,
+        dic_group_hrp: dict
+    ) :
+        # dic_group = glob_obj.dic_groups
+        # dic_group_hrp = glob_obj.dic_groups_hrp      
+
+        # df_vnindex = glob_obj.get_one_stock_data('VNINDEX')
+        df_vnindex['return'] = df_vnindex['close'].pct_change() * 100
+        #Relative Price
+        df['index_return'] = df['day'].map(df_vnindex.set_index('day')['return'])
+        df['relative_return_index'] = df['return'] - df['index_return']
+
+        df['beta_group'] = df['stock'].map(dic_group)
+        df['hrp_group'] = df['stock'].map(dic_group_hrp)
+
+        df['beta_group_return'] = df.groupby(['beta_group','day'])['return'].transform('mean')
+        df['hrp_group_return'] = df.groupby(['hrp_group','day'])['return'].transform('mean')
+
+        df['beta_group_relative_return'] = df['return'] - df['beta_group_return']
+        df['hrp_group_relative_return'] = df['return'] - df['hrp_group_return']
+
+        #Group URSI
+        def apply_ursi(stock_df):
+            arsi, _ = Ta.ursi(stock_df['close'], 14)
+            stock_df['arsi'] = arsi
+            return stock_df
+        df = df.groupby('stock').apply(apply_ursi)
+        df = df.reset_index(drop=True) #reset index after groupby apply
+        
+        df['beta_group_ursi'] = df.groupby(['beta_group','day'])['arsi'].transform('mean')
+        df['hrp_group_ursi'] = df.groupby(['hrp_group','day'])['arsi'].transform('mean')
+
+        # volume
+        df['index_volume'] = df['day'].map(df_vnindex.set_index('day')['volume'])
+        df['relative_volume_index'] = df['volume'] / df['index_volume']
+
+        df['beta_group_volume'] = df.groupby(['beta_group','day'])['volume'].transform('sum')
+        df['hrp_group_volume'] = df.groupby(['hrp_group','day'])['volume'].transform('sum')
+
+        df['beta_group_relative_volume'] = df['volume'] / df['beta_group_volume']
+        df['hrp_group_relative_volume'] = df['volume'] / df['hrp_group_volume']
+
+        df['beta_group_relative_volume_index'] = df['beta_group_relative_volume'] / df['relative_volume_index']
+        df['hrp_group_relative_volume_index'] = df['hrp_group_relative_volume'] / df['relative_volume_index']
+        return df
     @staticmethod
     def prepare_stocks_data(
             stocks,
@@ -606,7 +691,7 @@ class Adapters:
             to_plasma=False,
         ):
         def example_params():
-            stocks = ['SSI', 'HPG']
+            stocks = ['ADS', 'AGR']
             start_day = '2019_07_11'
         
         # df_stocks: pd.DataFrame = Adapters.get_stocks_data_from_db_fiinpro(stocks=stocks, from_day=start_day)
@@ -626,7 +711,10 @@ class Adapters:
                 'close': 1,
                 'high':1,
                 'low':1,
-                'value':1
+                'value':1,
+                'fBuyVal':1,
+                'fSellVal':1,
+                'VWAP':1
             }
         )))
         
@@ -668,13 +756,30 @@ class Adapters:
         ###
         dfres = pd.merge(dfres, dfbs2, how='left', on=['stock', 'mapYQ'])
         
+        # BUSD
+        df_busd = Adapters.load_busd_data_from_db()
+        df_busd = df_busd[df_busd['stock'].isin(stocks)]
+        dfres = pd.merge(dfres, df_busd, how='left', on=['stock', 'day'])
+        # Tu doanh
+        df_prop = Adapters.load_prop_data_from_db(stocks)
+        df_prop = df_prop.rename(columns = {'totalBuyValue':'propBuyVal', 'totalSellValue':'propSellVal'})
+        dfres = pd.merge(dfres, df_prop, how='left', on=['stock', 'day'])
+
         df_indexs = Adapters.get_index_data(start_day=start_day)
+
+        # df_vnindex = df_indexs[df_indexs['stock']=='VNINDEX']
+        # dic_group = Adapters.get_stocks_beta_group()[1]
+        # dic_group_hrp = Adapters.get_hrp_group()
+
+        # dfres = Adapters.calculate_relative_feature(dfres, df_vnindex, dic_group, dic_group_hrp)
+
         dfres = pd.concat([dfres, df_indexs]).reset_index(drop=True)
         
         stocks_i2s = {i: s for i , s in enumerate(dfres['stock'].unique())}
         stocks_s2i = {s: i for i, s in stocks_i2s.items()}
         columns = dfres.columns.tolist()
         dfres = dfres.drop_duplicates()
+        dfres = dfres.drop_duplicates(subset=['stock', 'day'], keep='last')
         r.set("pylabview_stocks_i2s", pickle.dumps(stocks_i2s))
         r.set("pylabview_stocks_data_columns", pickle.dumps(columns))
         

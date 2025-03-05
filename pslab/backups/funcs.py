@@ -521,6 +521,69 @@ class Resampler:
             return {n: v for n, v in Globs.STANDARD_AGG_DIC.items() if n in names}
     
     @staticmethod
+    def _calculate_candle_time_old(timestamps: pd.Series, timeframe):
+        """
+        Tính toán candleTime mới dựa trên timestamps và timeframe
+        
+        Parameters:
+        -----------
+        timestamps : int
+            Timestamp gốc (nanoseconds)
+        timeframe : str
+            Timeframe mới ('1min', '5min', '10min', '30min', '1H', '2H', 'D')
+        """
+        def test():
+            df_ohlc = Adapters.load_index_ohlcv_from_plasma('F1')
+            df_ohlc['date'] = pd.to_datetime(df_ohlc.index)
+            timestamps = pd.Series(df_ohlc.index)
+            timeframe = '1H'
+
+            # t = pd.to_datetime(ts_seconds, unit='s')
+            # t = t[t>'2024-12-05 11:00:00']
+            # t.head(50)
+
+        # Chuyển timestamps từ nanoseconds sang seconds
+        ts_seconds = timestamps // 1_000_000_000
+        ts_915 = ts_seconds // 86400 * 86400 + 9 * 3600 + 15 * 60
+        ts_1130 = ts_seconds // 86400 * 86400 + 11 * 3600 + 30 * 60
+        ts_1300 = ts_seconds // 86400 * 86400 + 13 * 3600 
+
+        ts_seconds2 = ts_seconds - ts_915
+
+        tf_minutes = Globs.TF_TO_MIN.get(timeframe) * 60
+
+        # base_candles = (ts_seconds // tf_minutes) * tf_minutes÷
+        base_candles = (ts_seconds2 // tf_minutes) * tf_minutes
+        base_candles1 = base_candles + ts_915
+        base_candles_1130 = base_candles + ts_1130
+        base_candles_1300 = base_candles + ts_1300
+
+        base_candles1 = np.where(base_candles1.between(base_candles_1130, base_candles_1300), base_candles_1300, base_candles1)
+
+        base_candles1_dt = pd.to_datetime(base_candles1, unit = 's')
+        base_candles1_dt.value_counts().sort_index().head(20)
+        if timeframe == 'D':
+            new_candles = base_candles + 9*60*60 + 15*60
+        else:
+            seconds_in_day = ts_seconds % 86400
+            
+            # Thời điểm ATC (14:45:00)
+            atc_seconds = 14 * 3600 + 45 * 60  # = 53100
+            
+            new_candles = pd.Series(
+                np.where(seconds_in_day == atc_seconds, ts_seconds, base_candles),
+                index = timestamps.index
+            )
+            new_candles = pd.Series(
+                np.where(seconds_in_day == atc_seconds, ts_seconds, base_candles1),
+                index = timestamps.index
+            )
+
+            new_candles_dt = pd.to_datetime(new_candles, unit = 's')
+            new_candles_dt.value_counts().sort_index().head(20)
+        return new_candles * 1_000_000_000 
+
+    @staticmethod
     def _calculate_candle_time(timestamps: pd.Series, timeframe: str):
         def test():
             df_ohlc = Adapters.load_index_ohlcv_from_plasma('F1')
@@ -629,6 +692,9 @@ class Resampler:
                 timestamps=df['candleTime'],
                 timeframe=timeframe
             )
+
+        df['test'] = pd.to_datetime(df.index)
+        df['test2'] = pd.to_datetime(df['candleTime'])
         
         # Group theo candleTime mới và áp dụng aggregation
         grouped = df.groupby('candleTime').agg(agg_dict)
@@ -1890,8 +1956,6 @@ class Conds:
 
 
 class CombiConds:
-    INPUTS_SIDE_PARAMS =  ['rolling_window', 'stocks', 'rolling_method', 'timeframe', 'daily_rolling']
-
     @staticmethod
     def load_and_process_group_data(conditions_params: list[dict], use_sample_data: bool = False, realtime=False, history_cutoff_stamp:int=0) -> tuple[dict[str, pd.Series], list[dict]]:
         """
@@ -1932,7 +1996,7 @@ class CombiConds:
                 
                 # Process each input parameter
                 for param_name, col_name in condition['inputs'].items():
-                    if param_name not in CombiConds.INPUTS_SIDE_PARAMS:
+                    if param_name not in ['rolling_window', 'stocks', 'rolling_method', 'timeframe', 'intraday']:
                         if not col_name:  # More robust empty check
                             raise InputSourceEmptyError(f"Input {param_name} is empty!")
                         
@@ -2034,7 +2098,7 @@ class CombiConds:
                 
                 # Process each input parameter
                 for param_name, col_name in condition['inputs'].items():
-                    if param_name not in CombiConds.INPUTS_SIDE_PARAMS:
+                    if param_name not in ['rolling_window', 'stocks', 'rolling_method', 'timeframe']:
                         if not col_name:  # More robust empty check
                             raise InputSourceEmptyError(f"Input {param_name} is empty!")
                         
@@ -2143,7 +2207,7 @@ class CombiConds:
                 new_condition['inputs'] = {}
                 
                 for param_name, col_name in condition['inputs'].items():
-                    if param_name not in CombiConds.INPUTS_SIDE_PARAMS:
+                    if param_name not in ['rolling_window', 'rolling_method', 'timeframe']:
                         if not col_name:
                             raise InputSourceEmptyError(f"Input {param_name} is empty!")
                         
@@ -2291,7 +2355,7 @@ class CombiConds:
                 new_condition['inputs'] = {}
                 
                 for param_name, col_name in condition['inputs'].items():
-                    if param_name not in CombiConds.INPUTS_SIDE_PARAMS:
+                    if param_name not in ['rolling_window', 'rolling_method', 'timeframe']:
                         if not col_name:
                             raise InputSourceEmptyError(f"Input {param_name} is empty!")
                         
@@ -2363,10 +2427,10 @@ class CombiConds:
             func_inputs = {
                 param_name: required_data[col_name]
                 for param_name, col_name in condition['inputs'].items()
-                if param_name not in CombiConds.INPUTS_SIDE_PARAMS
+                if param_name not in ['timeframe', 'rolling_method', 'rolling_window', 'stocks', 'intraday']
             }
 
-            if condition['inputs'].get('daily_rolling', False):
+            if condition['inputs'].get('intraday', False):
 
                 # Chuyển timestamp sang datetime và nhóm theo ngày
                 sample_series = next(iter(func_inputs.values()))
@@ -2497,7 +2561,7 @@ class QuerryData:
             func_inputs = {
                 param_name: required_data[col_name]
                 for param_name, col_name in condition['inputs'].items()
-                if param_name not in CombiConds.INPUTS_SIDE_PARAMS
+                if param_name not in ['timeframe', 'rolling_method', 'rolling_window', 'stocks']
             }
 
             def _redis_cache(func_inputs, condition):
@@ -2729,123 +2793,14 @@ class ReturnStats:
         
         return df[df['matched'] == True]
     
-    
-    @staticmethod
-    def calculate_returns2(
-        df_ohlc: pd.DataFrame,
-        signals: pd.Series,
-        config: ReturnStatsConfig
-    ) -> pd.DataFrame:
-        """
-        Calculate various return metrics for trading signals.
-        
-        Args:
-            df_ohlc: DataFrame with OHLC data and 'day' column
-            signals: Boolean Series with trading signals
-            config: Configuration parameters
-            
-        Returns:
-            DataFrame with calculated returns and metrics
-        """
-        def test():
-            df_ohlc = Adapters.load_index_ohlcv_from_plasma(name='F1', load_sample=False)
-            required_data, conditions_params = CombiConds.load_and_process_group_data(TestSets.COMBINE_TEST)
-            combine_calculator: str = 'or'
-            signals = CombiConds.combine_conditions(required_data, conditions_params, combine_calculator)
-            config = ReturnStatsConfig(close_ATC=True, holding_periods=20)
-
-        # Ensure index alignment
-        
-        df = df_ohlc[['open', 'high', 'low', 'close', 'day']].copy()
-        df = df[df['day'] >= config.start_day]
-
-        if config.timeframe != Globs.BASE_TIMEFRAME:
-            df = Resampler.resample_vn_stock_data(
-                df,
-                timeframe=config.timeframe,
-                agg_dict=Resampler.get_agg_dict(['open', 'high', 'low', 'close', 'day'])
-            )
-
-        df['matched'] = df.index.map(signals)
-        df['matched_nan'] = np.where(df['matched'].notna(), 1, np.NaN)
-        
-        # Calculate entry price (next bar's open)
-        df['enter_price'] = df['open'].shift(-1)
-
-        HOLDING_PERIODS = config.holding_periods
-        
-        if config.close_ATC:
-            df['ATCPrice'] = df.groupby('day')['close'].transform('last')
-
-            df['upsideTowardATC'] = df.groupby('day')['high'].transform(
-                lambda x: x[::-1].expanding().max()[::-1].shift(-1)
-            )
-            df['upsideTowardATC'] = df['upsideTowardATC'].fillna(df['ATCPrice'])
-                
-            df['downsideTowardATC'] = df.groupby('day')['low'].transform(
-                lambda x: x[::-1].expanding().min()[::-1].shift(-1)
-            )
-            df['downsideTowardATC'] = df['downsideTowardATC'].fillna(df['ATCPrice'])
-
-            df['exitDay'] = df['day'].shift(-(HOLDING_PERIODS+1))
-            df['exit_price'] = np.where(df['exitDay'] == df['day'], df['open'].shift(-HOLDING_PERIODS-1), df['ATCPrice'])
-
-            df['upside'] = np.where(
-                df['exitDay'] == df['day'],
-                df.rolling(HOLDING_PERIODS)['high'].max().shift(-HOLDING_PERIODS-1),
-                df['upsideTowardATC']
-            )
-
-            df['downside'] = np.where(
-                df['exitDay'] == df['day'],
-                df.rolling(HOLDING_PERIODS)['low'].min().shift(-HOLDING_PERIODS-1),
-                df['downsideTowardATC']
-            )
-            df.drop(['upsideTowardATC', 'downsideTowardATC', 'exitDay'], axis=1, inplace=True)
-        else:
-            df['exit_price'] = df['open'].shift(-(HOLDING_PERIODS+1))
-            df['upside'] = df['high'].rolling(HOLDING_PERIODS, closed='right').max().shift(-HOLDING_PERIODS)
-            df['downside'] = df['low'].rolling(HOLDING_PERIODS, closed='right').min().shift(-HOLDING_PERIODS)
-
-        # Calculate returns
-        df['c_o'] = ReturnStats._compute_return(
-            df['exit_price'],
-            df['enter_price'],
-            config.use_pct
-        )
-        
-        df['h_o'] = ReturnStats._compute_return(
-            df['upside'],
-            df['enter_price'],
-            config.use_pct
-        )
-        
-        df['l_o'] = ReturnStats._compute_return(
-            df['downside'],
-            df['enter_price'],
-            config.use_pct
-        )
-
-        # Calculate matched returns
-        df['matched_c_o'] = df['matched_nan'] * df['c_o']
-        df['matched_h_o'] = df['matched_nan'] * df['h_o']
-        df['matched_l_o'] = df['matched_nan'] * df['l_o']
-        
-        # Calculate win/loss metrics
-        df['wintrade'] = np.where(df['matched_c_o'] > 0, 1, 0)
-        df['losstrade'] = np.where(df['matched_c_o'] <= 0, 1, 0)
-        df['return_fill'] = df['matched_nan'] * df['c_o']
-        
-        return df[df['matched'] == True]
-
     @staticmethod
     def _compute_enter_exit_signals(signals: pd.Series, config: ReturnStatsConfig) -> tuple[pd.Series, pd.Series]:
 
         def test():
             required_data, conditions_params = CombiConds.load_and_process_group_data(TestSets.COMBINE_TEST)
-            combine_calculator: str = 'or'
+            combine_calculator: str = 'and'
             signals = CombiConds.combine_conditions(required_data, conditions_params, combine_calculator)
-            config = ReturnStatsConfig(close_ATC=True, holding_periods=20)
+            config = ReturnStatsConfig(close_ATC=True, holding_periods=100)
 
         if config.close_ATC:
             signals.name = 'entry'

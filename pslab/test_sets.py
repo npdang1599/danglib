@@ -75,7 +75,6 @@ class TestSets:
             'inputs': {
                 'src': 'bu2',
                 'stocks': ['VN30', 'Super High Beta'],
-                'timeframe': '15Min',
                 'rolling_window': 20,
                 'rolling_method': 'sum'
             },
@@ -105,7 +104,6 @@ class TestSets:
                 'src1': 'bu2',
                 'src2': 'sd2',
                 'stocks': ['VN30', 'Super High Beta'],
-                'timeframe': '15Min',
                 'rolling_window': 20
             },
             'params': {

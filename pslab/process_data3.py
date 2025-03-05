@@ -10,10 +10,11 @@ from danglib.pslab.utils import Utils
 from danglib.pslab.resources import Adapters, Globs
 from danglib.lazy_core import gen_plasma_functions
 from danglib.pslab.logger_module import DataLogger
-logger = DataLogger("/home/ubuntu/Dang/project_ps/logs", file_prefix="processdata")
+from danglib.utils import get_ps_ticker
+
 
 # Redis clients
-r = StrictRedis(decode_responses=True)
+r = StrictRedis('ws2', decode_responses=True)
 rlv2 = StrictRedis(host='lv2', decode_responses=True)
 
 
@@ -56,6 +57,10 @@ class ProcessData(ABC):
     @abstractmethod
     def get_last_states(cls, df: pd.DataFrame, seconds=None, num_dps=None) -> pd.DataFrame:
         """Get last states of data"""
+        pass
+
+    @classmethod
+    def process_signals(cls):
         pass
 
 
@@ -112,9 +117,25 @@ class ProcessStockData(ProcessData):
 
     SUBGROUP = 'stock'
 
+    NAME = 'STOCK'
+
+    @staticmethod
+    def load_strategies():
+        import json
+        path = '/home/ubuntu/Dang/pslab_strategies.json'
+        with open(path, 'r') as f:
+            strategies = json.load(f)
+        return strategies
+    
+    STRATEGIES = load_strategies()
+
     @classmethod
     def get_agg_dic(self):
         return self.RESAMPLE_AGG_DIC
+    
+    @classmethod
+    def msg(cls, msg):
+        return f"{cls.NAME}: {msg}"
 
     @staticmethod
     def ensure_all_stocks_present(df: pd.DataFrame, required_stocks: list, data_name='') -> pd.DataFrame:
@@ -128,6 +149,9 @@ class ProcessStockData(ProcessData):
         Returns:
             DataFrame with all required stocks
         """
+        def test():
+            required_stocks = Globs.STOCKS
+            data_name = "New data"
         try:
             if df.empty:
                 logger.log('WARNING', "Input DataFrame is empty in ensure_all_stocks_present")
@@ -166,7 +190,7 @@ class ProcessStockData(ProcessData):
                 if new_rows:
                     df_missing = pd.DataFrame(new_rows)
                     df = pd.concat([df, df_missing], ignore_index=True)
-                    logger.log('INFO', f"Added {len(new_rows)} rows for missing stocks at {totime(max_timestamp)}")
+                    logger.log('INFO', f"Added {len(new_rows)} rows for missing stocks at {totime(max_timestamp, unit='ms')}")
             
             return df
             
@@ -309,7 +333,7 @@ class ProcessStockData(ProcessData):
     @classmethod
     def load_history_data(cls, from_day=None) -> pd.DataFrame:
         def test():
-            from_day = '2025_02_18'
+            from_day = '2025_02_28'
             from_stamp = Utils.day_to_timestamp(from_day)
 
         df: pd.DataFrame = Adapters.load_stock_data_from_plasma()
@@ -327,6 +351,12 @@ class ProcessStockData(ProcessData):
 
     @classmethod
     def load_realtime_data(cls, r, day, start, end) -> pd.DataFrame:
+        def test():
+            r = StrictRedis('ws2', decode_responses=True)
+            day = datetime.now().strftime('%Y_%m_%d')
+            start = 0 
+            end = -1
+            cls = ProcessStockData
         current_timestamp = int(time.time())
         df = Adapters.RedisAdapters.load_realtime_stock_data_from_redis(r, day, start, end)
 
@@ -506,6 +536,76 @@ class ProcessStockData(ProcessData):
             laststates = df.groupby('stock').tail(num_dps)
         return laststates
 
+    @classmethod
+    def process_signals(cls):
+        from danglib.pslab.pslab_worker import compute_signals, clean_redis
+        from tqdm import tqdm 
+        import time
+
+        class CeleryTaskError(Exception):
+            pass
+
+        task_ls = []
+        active_tasks = set()
+        conditions = cls.STRATEGIES
+
+        with tqdm(total=len(conditions),
+                desc=f"Submitting and processing tasks") as pbar:
+            conditions_iter = iter(conditions)
+            submitted_count = 0
+
+            while submitted_count < len(conditions):
+                active_tasks = {task for task in active_tasks 
+                            if task.status not in ['SUCCESS', 'FAILURE']}
+                
+                while len(active_tasks) < 5 and submitted_count < len(conditions):
+                    try:
+                        condition = next(conditions_iter)
+                        task = compute_signals.delay(
+                            strategy=condition
+                        )
+                        task_ls.append(task)
+                        active_tasks.add(task)
+                        submitted_count += 1
+                        pbar.update(1)
+                    except StopIteration:
+                        break
+                
+                time.sleep(0.1)
+
+        with tqdm(total=len(task_ls),
+                desc=f"Processing tasks") as pbar:
+            completed_tasks = set()
+            while len(completed_tasks) < len(task_ls):
+                for i, task in enumerate(task_ls):
+                    if i not in completed_tasks and task.status in ['SUCCESS', 'FAILURE']:
+                        if task.status == 'FAILURE':
+                            raise CeleryTaskError(f"Task failed: {task.id}")
+                        completed_tasks.add(i)
+                        pbar.update(1)
+                time.sleep(0.1)
+
+        chunk_results = []
+        with tqdm(total=len(task_ls), desc=f"Collecting results") as pbar:
+            for task in task_ls:
+                try:
+                    result = task.result
+                    if result is not None:
+                        chunk_results.append(result)
+                except Exception as e:
+                    print(f"Error collecting results for strategy {task}: {str(e)}")
+                pbar.update(1)
+
+        import pandas as pd
+
+        df = pd.concat(chunk_results)
+
+        from danglib.lazy_core import gen_plasma_functions
+        _, disconnect, psave, pload = gen_plasma_functions(db=Globs.PLASMA_DB)
+        psave('pslab_strategies_realtime_signals', df)
+                    
+        clean_redis()
+
 
 class ProcessPsData(ProcessData):
 
@@ -549,14 +649,15 @@ class ProcessPsData(ProcessData):
     }
 
     @classmethod
-    def load_history_data(cls, from_stamp) -> pd.DataFrame:
+    def load_history_data(cls, from_day=None) -> pd.DataFrame:
         df: pd.DataFrame = Adapters.load_market_stats_from_plasma()
-        df.index = df.index // 1e9
 
-        if from_stamp is not None:
+        if from_day is not None:
+            from_stamp = Utils.day_to_timestamp(from_day)
             df = df[df.index >= from_stamp]
         df.index = df.index // 1e9
 
+        logger.log("INFO",f"Loaded {len(df)} history records from plasma starting from {from_day}")
         """
         df.columns:
         'buyImpact', 'sellImpact', 'Arbit', 'Unwind', 'premiumDiscount',
@@ -566,19 +667,29 @@ class ProcessPsData(ProcessData):
        'F1Close', 'Vn30Close', 'VnindexClose', 'F1Value', 'Vn30Value',
        'VnindexValue', 'F1Volume', 'Vn30Volume', 'VnindexVolume']
         """
+
         return df[['F1Value', 'F1Volume', 'outstandingFPos', 'fF1BuyVol', 'fF1SellVol', 'fPsBuyVol',
                     'fPsSellVol', 'F1Open', 'F1High', 'F1Low', 'F1Close']]
+    
+    
     
     @classmethod
     def load_realtime_data(cls, r, day, start, end) -> pd.DataFrame:
         def test():
-            day = "2025_02_26"
+            day = "2025_03_03"
             start = 0
             end = 100000
-            r = StrictRedis(decode_responses=True)
+            r = StrictRedis('ws2', decode_responses=True)
             cls = ProcessPsData
 
         df = Adapters.RedisAdapters.load_realtime_PS_data_from_redis(r, day, start, end)
+        if df.empty:
+            logger.log('WARNING', f"Empty realtime dataframe in {cls.NAME} load_realtime_data")
+            return pd.DataFrame()
+        
+        map_code = {k:v for v, k in get_ps_ticker(day).items()}
+        df['id'] = df['code'].map(map_code)
+
         df = df[cls.REQUIRED_RAW_COLLS].copy()
         missing_cols = [col for col in cls.REQUIRED_RAW_COLLS if col not in df.columns]
         if missing_cols:
@@ -597,7 +708,7 @@ class ProcessPsData(ProcessData):
             df['time'] = df['timestamp'] % 86400
             return df
         except Exception as e:
-            logger.log('ERROR', f"Error in load_realtime_stock_data: {str(e)}")
+            logger.log('ERROR', f"Error in load_realtime_data: {str(e)}")
             return pd.DataFrame()
 
     
@@ -644,6 +755,16 @@ class ProcessPsData(ProcessData):
     def postprocess_resampled_data(cls, df: pd.DataFrame):
         # df[['totalBidVolume', 'totalAskVolume']] = df[['totalBidVolume', 'totalAskVolume']].ffill.fillna(0)
         df[['fF1BuyVol', 'fF1SellVol']] = df[['fF1BuyVol', 'fF1SellVol']].fillna(0)
+        df['F1Close'] = df['F1Close'].ffill().bfill()
+        df['F1Open'] = df['F1Open'].fillna(df['F1Close'])
+        df['F1High'] = df['F1High'].fillna(df['F1Close'])
+        df['F1Low'] = df['F1Low'].fillna(df['F1Close'])
+        df['F1Volume'] = df['F1Volume'].fillna(0)
+        df['F1Value'] = df['F1Value'].fillna(0)
+        df['fPsBuyVol'] = df['fPsBuyVol'].fillna(0)
+        df['fPsSellVol'] = df['fPsSellVol'].fillna(0)
+        df['outstandingFPos'] = df['outstandingFPos'].fillna(0)
+
         return df
     
     @classmethod
@@ -675,7 +796,8 @@ class ProcessPsData(ProcessData):
             'F1Open': 'first',
             'F1High': 'max',
             'F1Low': 'min',
-            'F1Close': 'last'
+            'F1Close': 'last',
+            'time': 'last'
         }
 
 class Resampler:
@@ -696,6 +818,17 @@ class Resampler:
     def _create_time_filter(df: pd.DataFrame, time_range: dict) -> pd.Series:
         """Create time filter for a specific trading session"""
         return (df['time'] >= time_range['START']) & (df['time'] < time_range.get('END', float('inf')))
+    
+    @staticmethod
+    def calculate_current_candletime(timestamps: float, timeframe: str, unit='s') -> float:
+        """Calculate base candle times"""
+        tf_seconds = Globs.TF_TO_MIN.get(timeframe) * 60
+        return (timestamps // tf_seconds) * tf_seconds
+    
+    @staticmethod
+    def calculate_finished_candletime(timestamps:float,  timeframe: str, unit='s'):
+        """Calculate finished candle times"""
+        return Resampler.calculate_current_candletime(timestamps, timeframe) - Globs.TF_TO_MIN.get(timeframe) * 60
 
     @classmethod
     def cleanup_timestamp(cls, day, df: pd.DataFrame) -> pd.DataFrame:
@@ -809,7 +942,6 @@ class Aggregator:
         self.day = day
         self.timeframe = timeframe
         self.timeframe_seconds = Globs.TF_TO_MIN.get(timeframe) * 60
-        self.r = StrictRedis(decode_responses=True)
         self.output_key = f"{output_plasma_key}.{timeframe}"
         self.data_processor = data_processor
 
@@ -819,6 +951,8 @@ class Aggregator:
         self.last_states = pd.DataFrame()
 
     def join_historical_data(self, df:pd.DataFrame, ndays:int=10):
+        def test():
+            ndays = 1
         from_day = Adapters.get_historical_day_by_index(-ndays)
         logger.log('INFO', f'Starting to merge historical data from {from_day}...')
 
@@ -863,8 +997,14 @@ class Aggregator:
             return pd.concat([self.last_states, df])
         return df
     
+    def load_realtime_resampled_data(self):
+        _, disconnect, psave, pload = gen_plasma_functions(db=Globs.PLASMA_DB)
+        df = pload(self.output_key)
+        return df
+
+    
     @staticmethod
-    def merge_resampled_data(old_df: pd.DataFrame, new_df: pd.DataFrame, agg_dict: dict) -> pd.DataFrame:
+    def merge_resampled_data(old_df: pd.DataFrame, new_df: pd.DataFrame, agg_dict: dict, subgroup=None) -> pd.DataFrame:
         """
         Merge và tính toán lại các giá trị cho các candles trùng nhau
         dựa trên agg_dict với dữ liệu đã pivot
@@ -874,17 +1014,20 @@ class Aggregator:
             
         # Vì data đã pivot nên index sẽ là candleTime
         common_idx = old_df.index.intersection(new_df.index)
-        old_df.columns.names = ['stats', 'stock']
-        new_df.columns.names = ['stats', 'stock']
+        if subgroup:
+            old_df.columns.names = ['stats', subgroup]
+            new_df.columns.names = ['stats', subgroup]
         if not common_idx.empty:
             # Gộp data cho các candles trùng nhau
             overlap_data = pd.concat([
                 old_df.loc[common_idx],
                 new_df.loc[common_idx]
             ])
-
-            recalculated = overlap_data.stack()
-            recalculated = recalculated.groupby(level=[0, 1]).agg(agg_dict).pivot_table(index='candleTime', columns='stock')
+            if subgroup:
+                recalculated = overlap_data.stack()
+                recalculated = recalculated.groupby(level=[0, 1]).agg(agg_dict).pivot_table(index='candleTime', columns=subgroup)
+            else:
+                recalculated = overlap_data.groupby(level=0).agg(agg_dict)
 
             # Combine all data
             result_df = pd.concat([
@@ -924,7 +1067,7 @@ class Aggregator:
                     time.sleep(self.SLEEP_DURATION['OUTSIDE_TRADING'])
                     continue
 
-                raw_data: pd.DataFrame = self.data_processor.load_realtime_data(self.r, self.day, self.current_pos, -1)
+                raw_data: pd.DataFrame = self.data_processor.load_realtime_data(r, self.day, self.current_pos, -1)
                 logger.log('INFO', f"Processing data from position {self.current_pos}")
                 self.current_pos += len(raw_data) + 1
                 logger.log('INFO', f"Updated current_pos to {self.current_pos}")
@@ -934,7 +1077,6 @@ class Aggregator:
 
                     new_data: pd.DataFrame = self.data_processor.preprocess_realtime_data(raw_data_with_last_states, self.day)
                     new_data = new_data[new_data['timestamp'] >= self.current_candle_stamp]
-                    print(f"New data num stocks:  {len(new_data['stock'].unique())}")
 
                     # Cập nhật last states cho lần sau
                     self._update_last_states(raw_data_with_last_states, seconds=30)
@@ -958,7 +1100,8 @@ class Aggregator:
                             self.resampled_df = self.merge_resampled_data(
                                 old_df = self.resampled_df, 
                                 new_df=new_resampled,
-                                agg_dict = self.data_processor.get_agg_dic()
+                                agg_dict = self.data_processor.get_agg_dic(),
+                                subgroup=self.data_processor.SUBGROUP
                             )
 
                             print(f"Updated resampled df shape: {self.resampled_df.info()}")
@@ -977,6 +1120,9 @@ class Aggregator:
                         
                         self._store_resampled_data(self.resampled_df)
                         logger.log('INFO', f"Stored resampled data to Plasma key: {self.output_key}")
+
+                        time.sleep(0.1)
+                        self.data_processor.process_signals()
 
                 current_stamp = time.time() + 7*3600
                 next_candle_time = self._get_next_candle_stamp(current_stamp)
@@ -999,19 +1145,23 @@ class args:
 
 current_day = datetime.now().strftime("%Y_%m_%d")
 output_key = 'pslab_realtime_psdata2'
-processor = ProcessStockData
+processor = ProcessPsData
 
 self = Aggregator(
     day=current_day,
     timeframe='30S',
-    output_plasma_key='pslab_realtime_psdata2',
+    output_plasma_key=output_key,
     data_processor=processor
 )
+cls = ProcessStockData
+
 
 import argparse
+logger = DataLogger("/home/ubuntu/Dang/project_ps/logs", file_prefix="processdata")
 
 
 if __name__ == "__main__" and not check_run_with_interactive():
+
     # Create argument parser
     parser = argparse.ArgumentParser(description='Real-time data processing')
     parser.add_argument(
@@ -1030,8 +1180,6 @@ if __name__ == "__main__" and not check_run_with_interactive():
     
     args = parser.parse_args()
     
-    # Get current day
-    
     
     # Configure processor based on type argument
     if args.type == 'stock':
@@ -1041,6 +1189,8 @@ if __name__ == "__main__" and not check_run_with_interactive():
         processor = ProcessPsData
         output_key = 'pslab_realtime_psdata2'
     
+    logger = DataLogger("/home/ubuntu/Dang/project_ps/logs", file_prefix="processdata", prefix=str.upper(args.type))
+
     # Create and start aggregator
     aggregator = Aggregator(
         day=current_day,

@@ -33,6 +33,7 @@ class Globs:
         self.strategies_dic = {}
         self.strategies = []
         self.stocks, self.dic_groups = Adapters.get_stocks_beta_group()
+        self.dic_groups_hrp = Adapters.get_hrp_group()
         self.df_stocks = pd.DataFrame()
         self._df_stocks = None
         self.function_map = {
@@ -53,6 +54,10 @@ class Globs:
             "bbpctb": Conds.bbpctb,
             "fourier_supertrend": Conds.fourier_supertrend,
             "mama" : Conds.mama,
+            "vwap" : Conds.vwap,
+            "busd" : Conds.Flows.busd,
+            "foreign" : Conds.Flows.foreign,
+            "prop_trade" : Conds.Flows.prop_trade,
             "net_income": Conds.Fa.net_income,
             "revenue": Conds.Fa.revenue,
             "inventory": Conds.Fa.inventory,
@@ -541,6 +546,7 @@ class Conds:
     @staticmethod
     def price_comp_ma(
         df: pd.DataFrame,
+        src_name: str = "close",
         ma_len1=5,
         ma_len2=15,
         ma_type="EMA",
@@ -562,7 +568,7 @@ class Conds:
              pd.Series[bool]: True or False if use_flag is True else None
         """
         if use_flag:
-            src = df["close"]
+            src = df[src_name]
             ma1 = Ta.ma(src, ma_len1, ma_type)
             ma2 = Ta.ma(src, ma_len2, ma_type)
 
@@ -1353,7 +1359,126 @@ class Conds:
             cond = cond.rolling(lookback_n_bars, closed = 'left').max().fillna(False).astype(bool)
 
         return cond
-
+    @staticmethod
+    def vwap(
+        df: pd.DataFrame,
+        use_flag: bool = False,
+        direction: str = 'above',
+        counting_days: int = 1,
+    ):
+        if use_flag:
+            cond = Conds.Standards.two_line_pos(df['VWAP'], df['close'], direction = direction, use_flag = use_flag)
+            cond = Utils.count_consecutive(cond) >= counting_days
+            return cond
+    class Flows:
+        """Flow conditions"""
+        @staticmethod
+        def busd(
+            df: pd.DataFrame,
+            use_ma: bool = False,
+            ma_len1: int = 5,
+            ma_len2: int = 15,
+            ma_pos: str = 'above',
+            use_ranking: bool = False,
+            ranking_len: int = 128,
+            ranking_lower_thres: float = 0,
+            ranking_upper_thres: float = 100,            
+            use_ratio: bool = False,
+            use_flag: bool = False,
+        ):
+            if use_flag:
+                if not use_ratio:
+                    net_busd = df['bu'] - df['sd']
+                else:
+                    net_busd = (df['bu'] - df['sd'] ) / (df['bu'] + df['sd'])
+                ma1 = Ta.ma(net_busd, ma_len1, ma_type= 'SMA')
+                ma2 = Ta.ma(net_busd, ma_len2, ma_type= 'SMA')
+                ma_cond = Conds.Standards.two_line_pos(ma1, ma2, direction = ma_pos, use_flag= use_ma)
+                ranking = Ta.rolling_rank(net_busd, ranking_len)
+                ranking_cond = Conds.Standards.range_cond(ranking, ranking_lower_thres, ranking_upper_thres, use_ranking)
+                return Utils.combine_conditions([ma_cond, ranking_cond])
+            return None
+        @staticmethod
+        def foreign(
+            df: pd.DataFrame,
+            use_ma: bool = False,
+            ma_len1: int = 5,   
+            ma_len2: int =15,
+            ma_pos: str = 'above',
+            use_ranking: bool = False,
+            ranking_len: int = 128,
+            ranking_lower_thres: float = 0,
+            ranking_upper_thres: float = 100,            
+            use_ratio: bool = False,
+            use_counting: bool = False,
+            counting_num_days: int = 5,
+            use_flag: bool = False
+        ):
+            if use_flag:
+                if not use_ratio:
+                    net_foreign = df['fBuyVal'] - df['fSellVal']
+                else:
+                    net_foreign = (df['fBuyVal'] - df['fSellVal']) / (df['fBuyVal'] + df['fSellVal'])
+                ma1 = Ta.ma(net_foreign, ma_len1, ma_type= 'SMA')
+                ma2 = Ta.ma(net_foreign, ma_len2, ma_type= 'SMA')
+                ma_cond = Conds.Standards.two_line_pos(ma1, ma2, direction= ma_pos, use_flag = use_ma)
+                ranking = Ta.rolling_rank(net_foreign, ranking_len)
+                ranking_cond = Conds.Standards.range_cond(ranking, ranking_lower_thres, ranking_upper_thres, use_ranking)
+                if use_counting:
+                    ma_cond = Utils.count_consecutive(ma_cond) >= counting_num_days
+                    ranking_cond = Utils.count_consecutive(ranking_cond) >= counting_num_days
+                return Utils.combine_conditions([ma_cond, ranking_cond])
+            return None
+        @staticmethod
+        def prop_trade(
+            df: pd.DataFrame,
+            use_ma: bool = False,
+            ma_len1: int = 5,   
+            ma_len2: int =15,
+            ma_pos: str = 'above',
+            use_ranking: bool = False,
+            ranking_len: int = 128,
+            ranking_lower_thres: float = 0,
+            ranking_upper_thres: float = 100,            
+            use_ratio: bool = False,
+            use_counting: bool = False,
+            counting_num_days: int = 5,
+            use_flag: bool = False
+        ):
+            if use_flag:
+                if not use_ratio:
+                    net_foreign = df['propBuyVal'] - df['propSellVal']
+                else:
+                    net_foreign = (df['propBuyVal'] - df['propSellVal']) / (df['propBuyVal'] + df['propSellVal'])
+                ma1 = Ta.ma(net_foreign, ma_len1, ma_type= 'SMA')
+                ma2 = Ta.ma(net_foreign, ma_len2, ma_type= 'SMA')
+                ma_cond = Conds.Standards.two_line_pos(ma1, ma2, direction= ma_pos, use_flag= use_ma)
+                ranking = Ta.rolling_rank(net_foreign, ranking_len)
+                ranking_cond = Conds.Standards.range_cond(ranking, ranking_lower_thres, ranking_upper_thres, use_ranking)
+                if use_counting:
+                    ma_cond = Utils.count_consecutive(ma_cond) >= counting_num_days
+                    ranking_cond = Utils.count_consecutive(ranking_cond) >= counting_num_days
+                return Utils.combine_conditions([ma_cond, ranking_cond])
+            return None    
+    class Relative:
+        @staticmethod
+        def price_relative(
+            df: pd.DataFrame,
+            group_type: str = 'beta',
+            n_bars: int = 1,
+            use_vs_index: bool = False,
+            vs_index_lowrange: float = 0,
+            vs_index_highrange: float = 1,
+            use_vs_sector: bool = False,
+            vs_sector_lowrange: float = 0,
+            vs_sector_highrange: float = 1,
+            use_sector_vs_index: bool = False,
+            sector_vs_index_lowrange: float = 0,
+            sector_vs_index_highrange: float = 1,            
+            use_flag: bool = False
+        ):  
+            
+            pass
     class Fa:
         """FA conditions"""
         
@@ -3891,8 +4016,10 @@ class Simulator:
         name = self.name
         
         def test():
+            trade_direction="Long"
             stock = 'HPG'
             df_stock: pd.DataFrame = Adapters.load_stocks_data_from_plasma()
+            holding_periods=8
             df = df_stock.pivot(index = 'day', columns = 'stock')\
                 .xs(stock, axis=1, level='stock')\
                 .reset_index(drop=False)
@@ -3903,6 +4030,8 @@ class Simulator:
                 holding_periods=holding_periods,
             )
             func = Conds.compute_any_conds
+            compute_start_time="2018_01_01"
+            
 
         """
         Backtest ko có params: chốt lời/cắt lỗ, tính toán trực tiếp trên Dataframe
@@ -4731,7 +4860,7 @@ glob_obj = Globs()
 
 glob_obj.load_all_data2()
 try:
-    glob_obj.get_one_stock_data("HPG")
+    glob_obj.get_one_stock_data("ADS")
 except:
     glob_obj.gen_stocks_data()
 

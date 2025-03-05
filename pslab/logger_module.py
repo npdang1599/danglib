@@ -5,7 +5,7 @@ import glob
 from logging.handlers import RotatingFileHandler
 
 class DataLogger:
-    def __init__(self, log_dir="logs",file_prefix="aggregator"):
+    def __init__(self, log_dir="logs",file_prefix="aggregator", prefix=None):
         self.log_dir = log_dir
         self.file_prefix = file_prefix
         if not os.path.exists(log_dir):
@@ -14,6 +14,7 @@ class DataLogger:
         self.today = datetime.now().strftime('%Y_%m_%d')
         self.setup_logger()
         self.clean_old_logs()
+        self.prefix = prefix
         
         
     def setup_logger(self):
@@ -72,6 +73,8 @@ class DataLogger:
     def log(self, level, message, exc_info=False):
         """Log a message with the specified level"""
         self.check_rotate()
+        if self.prefix:
+            message = f"{self.prefix}: {message}"
         if level == 'DEBUG':
             self.logger.debug(message, exc_info=exc_info)
         elif level == 'INFO':
