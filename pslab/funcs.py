@@ -2418,7 +2418,7 @@ class CombiConds:
                 if param_name not in CombiConds.INPUTS_SIDE_PARAMS
             }
 
-            if condition['inputs'].get('daily_rolling', False):
+            if not condition['inputs'].get('daily_rolling', True):
 
                 # Chuyển timestamp sang datetime và nhóm theo ngày
                 sample_series = next(iter(func_inputs.values()))
@@ -2576,7 +2576,41 @@ class QuerryData:
                 if redis_handler.check_exist(key):
                     df_data = redis_handler.get_key(key, pickle_data=True)
                 else:
-                    data = func(**func_inputs, **condition['params'])
+                    
+                    if not condition['inputs'].get('daily_rolling', True):
+
+                        # Chuyển timestamp sang datetime và nhóm theo ngày
+                        sample_series = next(iter(func_inputs.values()))
+                        datetime_index = pd.to_datetime(sample_series.index, unit='ns')
+
+                        # Tạo DataFrame tạm để nhóm dữ liệu
+                        temp_df = pd.DataFrame(index=sample_series.index)
+                        temp_df['date'] = datetime_index.date
+
+                        # Nhóm các index theo ngày
+                        day_groups = temp_df.groupby('date').groups
+
+                        # Xử lý từng nhóm
+                        datas = []
+                        
+                        for day, indices in day_groups.items():
+                            # Lấy dữ liệu cho từng ngày
+                            day_inputs = {k: v.loc[indices] for k, v in func_inputs.items()}
+                            
+                            # Áp dụng hàm
+                            try:
+                                day_data = func(**day_inputs, **condition['params'])
+                                datas.append(day_data)
+                            except Exception as e:
+                                print(f"Lỗi khi xử lý ngày {day}: {str(e)}")
+                                continue
+                        data: pd.Series = pd.concat(datas)
+                        data = data.sort_index(ascending=True)
+
+                    else:
+                        # Apply condition function
+                        data = func(**func_inputs, **condition['params'])
+
                     if isinstance(data, pd.Series):
                         df_data = pd.DataFrame(data)
                     else:
