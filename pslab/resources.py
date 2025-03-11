@@ -16,7 +16,6 @@ from danglib.Adapters.pickle_adapter_ssi_ws import PICKLED_WS_ADAPTERS
 from danglib.Adapters.adapters import MongoDBs
 from danglib.pslab.utils import day_to_timestamp, FileHandler, unflatten_columns, RedisHandler
 
-
 r = StrictRedis()
 
 pd.options.mode.chained_assignment = None
@@ -254,16 +253,25 @@ class Adapters:
         def test(): 
             required_stats = ['bu', 'sd']
             groups_and_stocks = ['HPG', 'SSI']
+            stocks = ['All']
 
         df = Adapters.load_data_from_plasma(key=f"pslab_realtime_stockdata2.30S", db=11)
 
         if required_stats is not None:
             df = df[required_stats]
 
+        true_stocks = []
         if stocks is not None:
-            stocks = [i for i in stocks if i in Globs.STOCKS]
-            if len(stocks) > 0:
-                df = df.loc[:, (slice(None), stocks)]
+            for s in stocks:
+                if s in Globs.SECTOR_DIC.keys():
+                    true_stocks += Globs.SECTOR_DIC[s]
+                elif s in Globs.STOCKS:
+                    true_stocks.append(s)
+
+        true_stocks = [i for i in true_stocks if i in Globs.STOCKS]
+
+        if len(true_stocks) > 0:
+            df = df.loc[:, (slice(None), true_stocks)]
 
         return df
     
