@@ -12,7 +12,7 @@ import logging
 
 class CELERY_RESOURCES:
     HOST = 'localhost'
-    CELERY_INPUT_REDIS = 12
+    CELERY_INPUT_REDIS = 1
 
 def clean_redis():
     """Xóa tất cả dữ liệu trong Redis để chuẩn bị tài nguyên cho các tác vụ Celery mới.
@@ -60,6 +60,22 @@ class TaskName:
     COMPUTE_SIGNALS = 'compute_signals'
 
 
+def fix_conditions_params(conditions_params):
+    map = {
+        'F1': 'F1',
+        'VN30': 'Vn30',
+        'VNINDEX': 'Vnindex'
+    }
+
+    for condition in conditions_params:
+        for key, value in condition["inputs"].items():
+            if isinstance(value, str): 
+                for old, new in map.items():
+                    if old in value: 
+                        condition["inputs"][key] = value.replace(old, new)
+
+
+
 def group_conditions(conditions_params: dict):
     """
         Process strategies that use stock data.
@@ -97,6 +113,29 @@ def group_conditions(conditions_params: dict):
 
     return signals
 
+def other_conditions(conditions_params: dict):
+    """
+        Process strategies that use one series data.
+        
+        Args:
+            conditions_params: List of strategies without stocks
+            
+        Returns:
+            pd.Series of boolean signals
+    """
+    if not conditions_params:
+        return None
+    
+    fix_conditions_params(conditions_params)
+        
+    # Load one series data
+    required_data, updated_params = CombiConds.load_and_process_one_series_data(conditions_params, use_sample_data=False, realtime=True)
+    
+    # Generate signals
+    signals = CombiConds.combine_conditions(required_data, updated_params)
+    
+    return signals
+
 
 def calculate_current_candletime(timestamps: float, timeframe: str, unit='s') -> float:
     """Calculate base candle times"""
@@ -111,6 +150,10 @@ def calculate_finished_candletime(timestamps:float,  timeframe: str, unit='s'):
 def calculate_next_candletime(timestamps: float, timeframe: str, unit='s'):
     """Calculate next candle times"""
     return calculate_current_candletime(timestamps, timeframe) + Globs.TF_TO_MIN.get(timeframe) * 60
+
+group_conds = ['BidAskCS', 'BUSD', 'FBuySell', ]
+other_conds = ['F1', 'VN30', 'VNINDEX', 'BidAskF1', 'ArbitUnwind', 'PremiumDiscount']
+
 import json
 @app.task(name=TaskName.COMPUTE_SIGNALS)
 def compute_signals(
@@ -122,7 +165,7 @@ def compute_signals(
         data (Dict[str, Any]): Dữ liệu đầu vào.
         conditions (List[Dict[str, Any]]): Danh sách các điều kiện giao dịch.
         group (int): Nhóm giao dịch.
-        direction (str): Hướng giao dịch.
+        direction (str): Hướng giao dịch
         ftype (str): Loại giao dịch.
         holding_periods (int): Số lượng thanh khoản.
 
@@ -130,23 +173,34 @@ def compute_signals(
         Dict[str, Any]: Kết quả tính toán.
     """
     try:
-        cond = strategy['conditions']
-        signals = group_conditions(cond)
+        group = strategy['group']
+        if group in group_conds:
+            signals = group_conditions(strategy['conditions'])
+        else:
+            signals = other_conditions(strategy['conditions'])
+        
         signals.name = 'signals'
         df = signals.to_frame().reset_index()
-        df = df[df['candleTime'] < calculate_current_candletime(df['candleTime'].max(), '30S')]
-        df['exit_stamp'] = df['candleTime'].shift(-strategy['holding_periods'])
-        df = df[df['signals']]
+        df['exit_stamp'] = df['candleTime'].shift(-strategy['holding_periods']-1)
         df = df.rename(columns={'candleTime': 'entry_stamp'})
+        df['entry_stamp'] = df['entry_stamp'].shift(-1)
+        df = df[df['signals']].copy()
         df = df.drop(columns=['signals'])
 
         df['name'] = strategy['name']
         df['group'] = strategy['group']
         df['type'] = strategy['type']
         df['ftype'] = strategy['ftype']
+        df['Winrate'] = strategy['Win Rate']
+        df['num_trades'] = strategy['Number of Trades']
+        df['num_entry_days'] = strategy['Number Entry Days']
+        df['avg_return'] = strategy['Average Return']
+        df['holding_periods'] = strategy['holding_periods']
 
         return df
     except Exception as e:
         logging.error(f"Error in compute_signals: {e}")
         logging.error(traceback.format_exc())
         return {}
+    
+# celery -A pslab_worker worker --concurrency=20 --loglevel=INFO -n celery_worker@pslab

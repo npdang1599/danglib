@@ -39,13 +39,13 @@ class Globs:
                     'F1Close', 'Vn30Close', 'VnindexClose', 'F1Value', 'Vn30Value',
                     'VnindexValue', 'F1Volume', 'Vn30Volume', 'VnindexVolume']
     
-    STOCKSTATS_SRC = ['open', 'high', 'low', 'close', 'matchingValue', 'bu', 'sd', 'bu2', 'sd2', 'bid', 'ask', 'refPrice', 'fBuyVal', 'fSellVal', 'return', 'accNetBusd', 'accNetBusd2']
+    STOCKSTATS_SRC = ['open', 'high', 'low', 'close', 'value', 'bu', 'sd', 'bu2', 'sd2', 'bid', 'ask', 'refPrice', 'fBuyVal', 'fSellVal', 'return', 'accNetBusd', 'accNetBusd2']
     
     DAILYINDEX_SRC = ['F1Open', 'Vn30Open', 'VnindexOpen', 'F1High', 'Vn30High', 'VnindexHigh', 'F1Low', 'Vn30Low', 'VnindexLow', 'F1Close', 'Vn30Close', 'VnindexClose', 'F1Value', 'Vn30Value', 'VnindexValue']
     
-    STOCKS_SRC = ['bu', 'sd', 'bu2', 'sd2', 'bid', 'ask', 'fBuyVal', 'fSellVal']
+    STOCKS_SRC = ['bu', 'sd', 'bu2', 'sd2', 'bid', 'ask', 'fBuyVal', 'fSellVal', 'value']
 
-    GROUP_SRC = ['ask', 'bid', 'bu', 'bu2', 'fBuyVal', 'fSellVal','sd', 'sd2']
+    GROUP_SRC = ['ask', 'bid', 'bu', 'bu2', 'fBuyVal', 'fSellVal','sd', 'sd2', 'value']
 
     STANDARD_AGG_DIC = {
         'buyImpact': 'last',
@@ -106,15 +106,15 @@ class Globs:
         'Medium': ['VRE', 'EIB', 'STB', 'DSC', 'TCB', 'KDH', 'MSB', 'VHM', 'TV2', 'CTR', 'LDG', 'VGT', 'CTI', 'BSR', 'SHB', 'MSH', 'CTG', 'ELC', 'PHR', 'VIB', 'VIC', 'PSH', 'TTF', 'BFC', 'TPB', 'MSR', 'LHG', 'VCS', 'SIP', 'OCB', 'SKG', 'DPR', 'GMD', 'VPB', 'MBB', 'BID', 'APH'], 
         'Low': ['HAG', 'PLX', 'AGG', 'HAX', 'SBT', 'LPB', 'BMP', 'BCM', 'GEG', 'FPT', 'POW', 'HVN', 'PVP', 'TNH', 'DHC', 'NT2', 'OIL', 'DRC', 'BVH', 'REE', 'FRT', 'ABB', 'ACB', 'HNG', 'CMG', 'GAS', 'GSP', 'VIP', 'HDB', 'DHA', 'SAB', 'VTO', 'PNJ', 'BAF', 'QNS', 'NAF', 'YEG', 'VJC', 'VNM', 'NAB', 'PTB', 'VCB', 'ITD', 'TCM', 'VPI', 'VEA', 'SJS', 'MCH', 'SSB', 'FOX', 'ACV', 'SCS', 'BWE', 'NCT', 'KDC'],
         "VN30": ['ACB', 'BCM', 'BID', 'BVH', 'CTG', 'FPT', 'GAS', 'GVR', 'HDB', 'HPG', 'MBB', 'MSN', 'MWG', 'PLX', 'POW', 'SAB', 'SHB', 'SSB', 'SSI', 'STB', 'TCB', 'TPB', 'VCB', 'VHM', 'VIB', 'VIC', 'VJC', 'VNM', 'VPB', 'VRE'],
-        "RE1":[ 'DXG', 'DIG', 'KDH', 'CEO', 'NLG'],
-        "RE2":[ 'DXG', 'DIG', 'KDH', 'CEO', 'NLG', 'NVL', 'VHM'],
-        "IP":[ 'KBC' ,'IDC' ,'VGC'],
-        "SEC1":[ 'SSI' , 'VND' , 'HCM' , 'VCI'],
-        "SEC2":[ 'SHS', 'BSI', 'FTS'],
-        "Retail":[ 'MWG'  , 'DGW', 'FRT'],
-        "Steel":[ 'HPG' , 'HSG' , 'NKG'],
-        "SOBank":[ 'VCB' , 'BID' , 'CTG'],
-        "POBank":[ 'TCB' , 'SHB' , 'VPB' , 'STB' , 'MBB'],
+        # "RE1":[ 'DXG', 'DIG', 'KDH', 'CEO', 'NLG'],
+        # "RE2":[ 'DXG', 'DIG', 'KDH', 'CEO', 'NLG', 'NVL', 'VHM'],
+        # "IP":[ 'KBC' ,'IDC' ,'VGC'],
+        # "SEC1":[ 'SSI' , 'VND' , 'HCM' , 'VCI'],
+        # "SEC2":[ 'SHS', 'BSI', 'FTS'],
+        # "Retail":[ 'MWG'  , 'DGW', 'FRT'],
+        # "Steel":[ 'HPG' , 'HSG' , 'NKG'],
+        # "SOBank":[ 'VCB' , 'BID' , 'CTG'],
+        # "POBank":[ 'TCB' , 'SHB' , 'VPB' , 'STB' , 'MBB'],
         "All": STOCKS,
     }
 
@@ -255,7 +255,7 @@ class Adapters:
             required_stats = ['bu', 'sd']
             groups_and_stocks = ['HPG', 'SSI']
 
-        df = Adapters.load_data_from_plasma(key=f"pslab_realtime_stockdata2.30S")
+        df = Adapters.load_data_from_plasma(key=f"pslab_realtime_stockdata2.30S", db=11)
 
         if required_stats is not None:
             df = df[required_stats]
@@ -264,6 +264,18 @@ class Adapters:
             stocks = [i for i in stocks if i in Globs.STOCKS]
             if len(stocks) > 0:
                 df = df.loc[:, (slice(None), stocks)]
+
+        return df
+    
+    @staticmethod
+    def load_market_stats_from_plasma_realtime(required_stats: list = None):
+        def test(): 
+            required_stats = ['buyImpact', 'sellImpact']
+
+        df = Adapters.load_data_from_plasma(key=f"pslab_market_stats_realtime", db=11)
+
+        if required_stats is not None:
+            df = df[required_stats]
 
         return df
 
@@ -280,6 +292,20 @@ class Adapters:
 
         disconnect()
         return df
+    
+    @staticmethod
+    def save_data_to_plasma(key, data, db=None):
+        if db is None:
+            db = Globs.PLASMA_DB
+
+        from danglib.lazy_core import gen_plasma_functions
+        _, disconnect, psave, pload = gen_plasma_functions(db)
+
+        df: pd.DataFrame = psave(key, data)
+
+        disconnect()
+        return df
+
 
     @staticmethod
     def load_put_through_data_realtime(r: StrictRedis, day):
@@ -653,7 +679,7 @@ class Adapters:
 
             df = unflatten_columns(df)
             df = df.sort_index(axis=1)
-            df = df.rename(columns={'fBuyVol': 'fBuyVal', 'fSellVol': 'fSellVal'})
+            df = df.rename(columns={'fBuyVol': 'fBuyVal', 'fSellVol': 'fSellVal', 'matchingValue': 'value'})
 
             if create_sample:
                 dfs = df[df.index > Globs.get_sample_from_day()]
@@ -912,6 +938,16 @@ class Adapters:
         return df
     
     @staticmethod
+    def load_sector_stocks_data_from_db():
+
+        db = MongoClient(port=27022)['stockdata']
+        collection = db["symbols_by_industries"] 
+        df_raw = pd.DataFrame(list(collection.find({}, {'_id': 0})))
+        sector_dic = df_raw.groupby('en_icb_name2')['symbol'].apply(list).to_dict()
+
+        return sector_dic
+    
+    @staticmethod
     def get_marketcap_stocks(symbol):
 
         import requests
@@ -1053,6 +1089,18 @@ class Adapters:
             key = Resources.RedisKeys.get_PS_realtime_key(day)
             df = pd.DataFrame(json.loads(x) for x in r.lrange(key, start, end))
             return df
+        
+        @staticmethod
+        def load_realtime_Index_data_from_redis(r: StrictRedis=None, day=None, start=0, end=-1):
+            if r is None:
+                r = StrictRedis(decode_responses=True)
+
+            if day is None:
+                day = datetime.now().strftime("%Y_%m_%d")
+
+            key = Resources.RedisKeys.get_index_realtime_key(day)
+            df = pd.DataFrame(json.loads(x) for x in r.lrange(key, start, end))
+            return df
             
             
         
@@ -1084,6 +1132,7 @@ def fix_fBuySell_data():
     redis_handler.delete_keys_by_pattern("pslab/stockcount/*")
 
 
+Globs.SECTOR_DIC.update(Adapters.load_sector_stocks_data_from_db())
 
 
        

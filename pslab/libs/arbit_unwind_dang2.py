@@ -1,5 +1,5 @@
 from danglib.pslab.resources import Adapters, Globs
-from danglib.pslab.process_data2 import ProcessData, Resampler
+from danglib.pslab.process_data3 import ProcessStockData as ProcessData, Resampler
 import pandas as pd
 import numpy as np
 from redis import StrictRedis
@@ -63,7 +63,7 @@ def data_adapter(day: Optional[str] = None) -> pd.DataFrame:
         day = dt.now().strftime('%Y_%m_%d')
         
     # Lấy dữ liệu từ Redis
-    df = Adapters.RedisAdapters.load_realtime_stock_data_from_redis(day=day, start=0, end=300000)
+    df = Adapters.RedisAdapters.load_realtime_stock_data_from_redis(day=day, start=0, end=-1)
 
     # Lọc dữ liệu
     df = df[df['code'].isin(VN30_LS) & (df['lastPrice'] != 0)].copy()
@@ -117,7 +117,6 @@ def compute_df_cut(
         DataFrame đã lọc
     """
     bid_or_offer = bid_or_offer.lower().capitalize()
-    lookup = {'Bid': 1, 'Offer': -1}
 
     # Tạo bản sao dữ liệu
     df_cut: pd.DataFrame = df.copy()    
@@ -495,47 +494,6 @@ def total_arbit_unwind(
     return result_df
 
 
-def get_arbit_unwind_timeseries(
-    df: Optional[pd.DataFrame] = None, 
-    day: Optional[str] = None, 
-    resample_interval: str = '1min'
-) -> pd.DataFrame:
-    """
-    Lấy dữ liệu arbit/unwind theo thời gian và resample theo interval
-    
-    Args:
-        df: DataFrame dữ liệu đầu vào
-        day: Ngày phân tích
-        resample_interval: Khoảng thời gian để resample ('1min', '5min', etc.)
-        
-    Returns:
-        DataFrame chứa thông tin arbit/unwind theo thời gian đã resample
-    """
-    # Lấy dữ liệu thô
-    result_df = total_arbit_unwind(df, day)
-    
-    if result_df.empty:
-        return pd.DataFrame(columns=['time', 'timestamp', 'Arbit', 'Unwind'])
-    
-    # Chuyển timestamp thành datetime index
-    result_df['datetime'] = pd.to_datetime(result_df['timestamp'], unit='s')
-    result_df = result_df.set_index('datetime')
-    
-    # Resample theo khoảng thời gian yêu cầu
-    resampled_df = result_df.resample(resample_interval).last().fillna(method='ffill')
-    
-    # Thêm lại cột timestamp và định dạng thời gian
-    resampled_df['timestamp'] = resampled_df.index.astype(int) // 10**9
-    resampled_df['time'] = resampled_df.index.strftime('%H:%M:%S')
-    
-    # Sắp xếp lại và reset index
-    resampled_df = resampled_df.reset_index(drop=True)
-    
-    # Sắp xếp lại các cột
-    resampled_df = resampled_df[['time', 'timestamp', 'Arbit', 'Unwind', 'arbit_raw', 'unwind_raw']]
-    
-    return resampled_df
-
 
 # Demo chạy thử
 if __name__ == "__main__":
@@ -547,14 +505,12 @@ if __name__ == "__main__":
     # Tính toán arbit/unwind theo thời gian
     print("Đang tính toán arbit/unwind theo thời gian...")
     result_df = total_arbit_unwind(df, day)
-    
-    if not result_df.empty:
-        print("\nDữ liệu arbit/unwind theo thời gian:")
-        print(result_df.head(10))
-        
-        # Phân tích theo khoảng thời gian 5 phút
-        resampled_df = get_arbit_unwind_timeseries(df, day, resample_interval='5min')
-        print("\nDữ liệu arbit/unwind theo khoảng thời gian 5 phút:")
-        print(resampled_df.head(10))
-    else:
-        print("Không tìm thấy dữ liệu arbit/unwind!")
+    result_df['dt'] = pd.to_datetime(result_df['timestamp'], unit='s')
+    import plotly.graph_objects as go
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=result_df['dt'], y=result_df['Arbit'], name='Arbit'))
+    fig.add_trace(go.Scatter(x=result_df['dt'], y=result_df['Unwind'], name='Unwind'))
+    fig.update_layout(
+        hovermode='x'
+    )
+    fig.show()

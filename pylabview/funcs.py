@@ -58,6 +58,9 @@ class Globs:
             "busd" : Conds.Flows.busd,
             "foreign" : Conds.Flows.foreign,
             "prop_trade" : Conds.Flows.prop_trade,
+            "price_relative": Conds.Relative.price_relative,
+            "volume_relative": Conds.Relative.volume_relative,
+            "group_ursi": Conds.Relative.group_ursi,
             "net_income": Conds.Fa.net_income,
             "revenue": Conds.Fa.revenue,
             "inventory": Conds.Fa.inventory,
@@ -1465,7 +1468,7 @@ class Conds:
         def price_relative(
             df: pd.DataFrame,
             group_type: str = 'beta',
-            n_bars: int = 1,
+            return_nbars: int = 1,            
             use_vs_index: bool = False,
             vs_index_lowrange: float = 0,
             vs_index_highrange: float = 1,
@@ -1477,8 +1480,141 @@ class Conds:
             sector_vs_index_highrange: float = 1,            
             use_flag: bool = False
         ):  
-            
-            pass
+            def test():
+                group_type: str = 'hrp'
+                return_nbars: int = 1
+                use_vs_index: bool = True
+                vs_index_lowrange: float = 0
+                vs_index_highrange: float = 1
+                use_vs_sector: bool = False
+                vs_sector_lowrange: float = 0
+                vs_sector_highrange: float = 1
+                use_sector_vs_index: bool = False
+                sector_vs_index_lowrange: float = 0
+                sector_vs_index_highrange: float = 1
+                use_flag = True
+                df = Adapters.load_stocks_data_from_plasma()
+            if group_type == 'beta':
+                dic_group = glob_obj.dic_groups
+            else:
+                dic_group = glob_obj.dic_groups_hrp
+            df_vnindex = glob_obj.get_one_stock_data('VNINDEX')
+            df_vnindex['return_nbars'] = df_vnindex['close'].pct_change(return_nbars) * 100
+            df['return_nbars'] = df.groupby('stock')['close'].pct_change(return_nbars) * 100
+            df['index_return_nbars'] = df['day'].map(df_vnindex.set_index('day')['return_nbars'])
+            df['relative_return_index'] = df['return_nbars'] - df['index_return_nbars']
+
+            df['group'] = df['stock'].map(dic_group)
+            df['group_return'] = df.groupby(['group','day'])['return_nbars'].transform('mean')
+
+            df['group_relative_return'] = df['return_nbars'] - df['group_return']
+            df['group_relative_return_index'] = df['group_return'] - df['index_return_nbars']
+
+            if use_flag:
+                if use_vs_index:
+                    cond_vs_index = Conds.Standards.range_cond(df['relative_return_index'], vs_index_lowrange, vs_index_highrange, use_flag)
+                else:
+                    cond_vs_index = None
+
+                if use_vs_sector:
+                    cond_vs_sector = Conds.Standards.range_cond(df['group_relative_return'], vs_sector_lowrange, vs_sector_highrange, use_flag)
+                else:
+                    cond_vs_sector = None
+
+                if use_sector_vs_index:
+                    cond_sector_vs_index = Conds.Standards.range_cond(df['group_relative_return_index'], sector_vs_index_lowrange, sector_vs_index_highrange, use_flag)
+                else:
+                    cond_sector_vs_index = None
+
+                return Utils.combine_conditions([cond_vs_index, cond_vs_sector, cond_sector_vs_index])
+            return None
+        @staticmethod
+        def volume_relative(
+            df: pd.DataFrame,
+            group_type: str = 'beta',
+            volume_nbars: int = 1,            
+            use_vs_index: bool = False,
+            vs_index_lowrange: float = 0,
+            vs_index_highrange: float = 1,
+            use_vs_sector: bool = False,
+            vs_sector_lowrange: float = 0,
+            vs_sector_highrange: float = 1,
+            use_sector_vs_index: bool = False,
+            sector_vs_index_lowrange: float = 0,
+            sector_vs_index_highrange: float = 1,            
+            use_flag: bool = False
+        ): 
+            if group_type == 'beta':
+                dic_group = glob_obj.dic_groups
+            else:
+                dic_group = glob_obj.dic_groups_hrp
+            df_vnindex = glob_obj.get_one_stock_data('VNINDEX')
+            df_vnindex['volume_nbars'] = df_vnindex['volume'].rolling(volume_nbars).sum() 
+            df['volume_nbars'] = df.groupby('stock')['volume'].rolling(volume_nbars).sum().reset_index(0, drop=True)
+            df['index_volume_nbars'] = df['day'].map(df_vnindex.set_index('day')['volume_nbars'])
+            df['relative_volume_index'] = df['volume_nbars'] / df['index_volume_nbars'] * 100
+
+            df['group'] = df['stock'].map(dic_group)
+            df['group_volume'] = df.groupby(['group','day'])['volume_nbars'].transform('sum')
+
+            df['group_relative_volume'] = df['volume_nbars'] / df['group_volume'] * 100
+            df['group_relative_volume_index'] = df['group_volume'] / df['index_volume_nbars'] * 100
+
+            if use_flag:
+                if use_vs_index:
+                    cond_vs_index = Conds.Standards.range_cond(df['relative_volume_index'], vs_index_lowrange, vs_index_highrange, use_flag)
+                else:
+                    cond_vs_index = None
+
+                if use_vs_sector:
+                    cond_vs_sector = Conds.Standards.range_cond(df['group_relative_volume'], vs_sector_lowrange, vs_sector_highrange, use_flag)
+                else:
+                    cond_vs_sector = None
+
+                if use_sector_vs_index:
+                    cond_sector_vs_index = Conds.Standards.range_cond(df['group_relative_volume_index'], sector_vs_index_lowrange, sector_vs_index_highrange, use_flag)
+                else:
+                    cond_sector_vs_index = None
+
+                return Utils.combine_conditions([cond_vs_index, cond_vs_sector, cond_sector_vs_index])
+            return None
+        @staticmethod
+        def group_ursi(
+            df: pd.DataFrame,
+            group_type: str = 'beta',
+            length: int = 14,
+            smo_type1: str = "RMA",
+            smooth: int = 14,
+            smo_type2: str = "EMA",
+            use_vs_ma: bool = False,
+            ma_len1: int = 1,
+            ma_len2: int = 14,
+            ma_type: str = 'EMA',
+            direction: str = "crossover",
+            use_range: bool = False,
+            lower_thres: float = 0,
+            upper_thres: float = 0,
+            use_flag: bool = False,
+        ):
+            def apply_ursi(stock_df):
+                arsi, _ = Ta.ursi(stock_df['close'], length = length, smo_type1 = smo_type1, smooth = smooth, smo_type2 = smo_type2)
+                stock_df['arsi'] = arsi
+                return stock_df
+            df = df.groupby('stock').apply(apply_ursi)
+            df = df.reset_index(drop=True) #reset index after groupby apply
+            if group_type == 'beta':
+                dic_group = glob_obj.dic_groups
+            else:
+                dic_group = glob_obj.dic_groups_hrp
+            df['group'] = df['stock'].map(dic_group)
+            df['group_ursi'] = df.groupby(['group','day'])['arsi'].transform('mean')
+            if use_flag:
+                ma1 = Ta.ma(df['group_ursi'], ma_len1, ma_type= ma_type)
+                ma2 = Ta.ma(df['group_ursi'], ma_len2, ma_type= ma_type)
+                cond_ma = Conds.Standards.two_line_pos(ma1, ma2, direction= direction, use_flag= use_vs_ma)
+                cond_range = Conds.Standards.range_cond(df['group_ursi'], lower_thres, upper_thres, use_flag = use_range)
+                return Utils.combine_conditions([cond_ma, cond_range])
+            return None
     class Fa:
         """FA conditions"""
         

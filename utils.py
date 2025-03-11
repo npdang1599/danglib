@@ -641,3 +641,12 @@ def check_run_with_interactive():
 
 def totime(stamp, unit='s'):
     return pd.to_datetime(stamp, unit=unit)
+
+def clean_plasma_key(key, db):
+    from danglib.lazy_core import gen_plasma_functions
+    _, disconnect, psave, pload = gen_plasma_functions(db)
+    psave(key, None)
+    disconnect()
+
+def today():
+    return dt.now().strftime('%Y_%m_%d')

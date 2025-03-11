@@ -80,7 +80,7 @@ def function_mapping():
         'absolute_change_in_range': {   
             'function': Conds.absolute_change_in_range,
             'title': '[1_Src] Abs Change',
-            'description': "Thay đổi giá trị tuyệt đối trong một khoảng thời gian",
+            'description': "Thay đổi giá trị tuyệt đối trong n bar có nằm trong 1 khoảng nhất định",
             'inputs': ['src'],
             'params': {
                 'n_bars': {'type': 'int', 'default': 1},
@@ -93,7 +93,7 @@ def function_mapping():
         'consecutive_above_below': {
             'function': Conds.consecutive_above_below,
             'title': '[2_Src] Cons Above/Below',
-            'description': "1 đường nằm trên/dưới 1 đường khác liên tiếp trong n bar",
+            'description': "1 đường nằm trên/dưới 1 đường khác liên tục trong n bar",
             'inputs': ['src1', 'src2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'above', 'values': ['above', 'below']},
@@ -117,7 +117,7 @@ def function_mapping():
         'percentile_in_range': {
             'function': Conds.percentile_in_range,
             'title': '[1_Src] Percentile',
-            'description': "Percentile của source trong khi lookback n bars có nằm trong range giá trị",
+            'description': "Percentile của source nằm trong 1 khoảng nhất định",
             'inputs': ['src'],
             'params': {
                 'lookback_period': {'type': 'int', 'default': 20},
@@ -130,7 +130,7 @@ def function_mapping():
         'gap_percentile': {
             'function': Conds.gap_percentile,
             'title': '[2_Src] Diff Percentile',
-            'description': "Khoảng cách giữa hai đường thuộc nhóm phần trăm cao nhất",
+            'description': "Percentile Khoảng cách giữa hai đường",
             'inputs': ['src1', 'src2'],
             'params': {
                 'lookback_period': {'type': 'int', 'default': 20},
@@ -142,7 +142,7 @@ def function_mapping():
         'gap_trend': {
             'function': Conds.gap_trend,
             'title': '[2_Src] Diff Trend',
-            'description': "Phân tích xu hướng tăng/giảm của gap giữa hai đường",
+            'description': "Xu hướng tăng/giảm khoảng cách giữa hai đường",
             'inputs': ['src1', 'src2'],
             'params': {
                 'sign': {'type': 'str', 'default': 'positive', 'values': ['positive', 'negative']},
@@ -180,7 +180,7 @@ def function_mapping():
         'min_inc_dec_bars': {
             'function': Conds.min_inc_dec_bars,
             'title': '[1_Src] Up/Down Count',
-            'description': "Đếm số thanh nến tăng/giảm tối thiểu",
+            'description': "Số bar tăng/giảm tối thiểu",
             'inputs': ['src'],
             'params': {
                 'n_bars': {'type': 'int', 'default': 10},
@@ -193,7 +193,7 @@ def function_mapping():
         'percent_change_in_range': {
             'function': Conds.percent_change_in_range,
             'title': '[1_Src] % Change',
-            'description': "Phân tích phần trăm thay đổi giá trị trong khoảng thời gian",
+            'description': "Phần trăm thay đổi trong n bar có nằm trong một khoảng xác định",
             'inputs': ['src'],
             'params': {
                 'n_bars': {'type': 'int', 'default': 1},
@@ -231,7 +231,7 @@ def function_mapping():
         'two_line_pos': {
             'function': Conds.two_line_pos,
             'title': '[2_Src] Position',
-            'description': "Kiểm tra vị trí giữa hai đường",
+            'description': "Vị trí giữa hai đường: above/below/crossover/crossunder",
             'inputs': ['src1', 'src2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
@@ -243,7 +243,7 @@ def function_mapping():
         'consecutive_squeeze': {
             'function': Conds.Indicators.consecutive_squeezes,
             'title': 'Consecutive Squeezes',
-            'description': "Kiểm tra số lượng squeeze liên tiếp",
+            'description': "Consecutive Squeezes",
             'inputs': ['src', 'high', 'low', 'close'],
             'params': {
                 'bb_length': {'type': 'int', 'default': 20},
@@ -258,7 +258,7 @@ def function_mapping():
         'two_MA_pos': {
             'function': Conds.Indicators.two_MA_pos,
             'title': '[1_Src] 2MAs',
-            'description': "Kiểm tra vị trí giữa hai moving averages",
+            'description': "Vị trí giữa hai đường MA",
             'inputs': ['src'],
             'params': {
                 'ma1': {'type': 'int', 'default': 5},
@@ -2123,7 +2123,7 @@ class CombiConds:
                 data = data.groupby(level=0, axis=1).sum()
                 
                 # Process each required column
-                for col, tf, sk, window, method in required_cols:
+                for col, tf, sk, window, method, daily_rolling in required_cols:
                     if sk == stocks_key:
                         key = f"{col}_{tf}_{sk}_{window}_{method}_{daily_rolling}"
                         data_processed: pd.Series = data[col].copy()
@@ -2152,7 +2152,8 @@ class CombiConds:
     def load_and_process_one_series_data(
         conditions_params: list[dict], 
         data_src: str = 'market_stats', 
-        use_sample_data: bool = False
+        use_sample_data: bool = False,
+        realtime: bool = False,
     ) -> tuple[dict[str, pd.Series], list[dict]]:
         """
         Load and process single series data based on conditions parameters.
@@ -2210,9 +2211,12 @@ class CombiConds:
             unique_cols = {col for col, *_ in required_cols}
 
             # Load data based on source
-            data = (Adapters.load_market_stats_from_plasma(list(unique_cols), use_sample_data) 
-                    if data_src == 'market_stats' 
-                    else Adapters.load_index_daily_ohlcv_from_plasma(list(unique_cols), use_sample_data))
+            if not realtime:
+                data = (Adapters.load_market_stats_from_plasma(list(unique_cols), use_sample_data) 
+                        if data_src == 'market_stats' 
+                        else Adapters.load_index_daily_ohlcv_from_plasma(list(unique_cols), use_sample_data))
+            else:
+                data = Adapters.load_market_stats_from_plasma_realtime(list(unique_cols))
             
             # Process each required column
             for col, tf, window, method, daily_rolling in required_cols:
