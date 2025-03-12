@@ -80,7 +80,7 @@ def function_mapping():
         'absolute_change_in_range': {   
             'function': Conds.absolute_change_in_range,
             'title': '[1_Src] Abs Change',
-            'description': "Thay đổi giá trị tuyệt đối trong n bar có nằm trong 1 khoảng nhất định",
+            'description': "Thay đổi giá trị tuyệt đối trong một khoảng thời gian",
             'inputs': ['src'],
             'params': {
                 'n_bars': {'type': 'int', 'default': 1},
@@ -93,7 +93,7 @@ def function_mapping():
         'consecutive_above_below': {
             'function': Conds.consecutive_above_below,
             'title': '[2_Src] Cons Above/Below',
-            'description': "1 đường nằm trên/dưới 1 đường khác liên tục trong n bar",
+            'description': "1 đường nằm trên/dưới 1 đường khác liên tiếp trong n bar",
             'inputs': ['src1', 'src2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'above', 'values': ['above', 'below']},
@@ -117,7 +117,7 @@ def function_mapping():
         'percentile_in_range': {
             'function': Conds.percentile_in_range,
             'title': '[1_Src] Percentile',
-            'description': "Percentile của source nằm trong 1 khoảng nhất định",
+            'description': "Percentile của source trong khi lookback n bars có nằm trong range giá trị",
             'inputs': ['src'],
             'params': {
                 'lookback_period': {'type': 'int', 'default': 20},
@@ -130,7 +130,7 @@ def function_mapping():
         'gap_percentile': {
             'function': Conds.gap_percentile,
             'title': '[2_Src] Diff Percentile',
-            'description': "Percentile Khoảng cách giữa hai đường",
+            'description': "Khoảng cách giữa hai đường thuộc nhóm phần trăm cao nhất",
             'inputs': ['src1', 'src2'],
             'params': {
                 'lookback_period': {'type': 'int', 'default': 20},
@@ -142,7 +142,7 @@ def function_mapping():
         'gap_trend': {
             'function': Conds.gap_trend,
             'title': '[2_Src] Diff Trend',
-            'description': "Xu hướng tăng/giảm khoảng cách giữa hai đường",
+            'description': "Phân tích xu hướng tăng/giảm của gap giữa hai đường",
             'inputs': ['src1', 'src2'],
             'params': {
                 'sign': {'type': 'str', 'default': 'positive', 'values': ['positive', 'negative']},
@@ -180,7 +180,7 @@ def function_mapping():
         'min_inc_dec_bars': {
             'function': Conds.min_inc_dec_bars,
             'title': '[1_Src] Up/Down Count',
-            'description': "Số bar tăng/giảm tối thiểu",
+            'description': "Đếm số thanh nến tăng/giảm tối thiểu",
             'inputs': ['src'],
             'params': {
                 'n_bars': {'type': 'int', 'default': 10},
@@ -193,7 +193,7 @@ def function_mapping():
         'percent_change_in_range': {
             'function': Conds.percent_change_in_range,
             'title': '[1_Src] % Change',
-            'description': "Phần trăm thay đổi trong n bar có nằm trong một khoảng xác định",
+            'description': "Phân tích phần trăm thay đổi giá trị trong khoảng thời gian",
             'inputs': ['src'],
             'params': {
                 'n_bars': {'type': 'int', 'default': 1},
@@ -231,7 +231,7 @@ def function_mapping():
         'two_line_pos': {
             'function': Conds.two_line_pos,
             'title': '[2_Src] Position',
-            'description': "Vị trí giữa hai đường: above/below/crossover/crossunder",
+            'description': "Kiểm tra vị trí giữa hai đường",
             'inputs': ['src1', 'src2'],
             'params': {
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
@@ -243,7 +243,7 @@ def function_mapping():
         'consecutive_squeeze': {
             'function': Conds.Indicators.consecutive_squeezes,
             'title': 'Consecutive Squeezes',
-            'description': "Consecutive Squeezes",
+            'description': "Kiểm tra số lượng squeeze liên tiếp",
             'inputs': ['src', 'high', 'low', 'close'],
             'params': {
                 'bb_length': {'type': 'int', 'default': 20},
@@ -258,7 +258,7 @@ def function_mapping():
         'two_MA_pos': {
             'function': Conds.Indicators.two_MA_pos,
             'title': '[1_Src] 2MAs',
-            'description': "Vị trí giữa hai đường MA",
+            'description': "Kiểm tra vị trí giữa hai moving averages",
             'inputs': ['src'],
             'params': {
                 'ma1': {'type': 'int', 'default': 5},
@@ -2041,7 +2041,7 @@ class CombiConds:
             raise type(e)(f"Error in load_and_process_group_data: {str(e)}") from e
 
     @staticmethod
-    def load_and_process_group_data2(conditions_params: list[dict], use_sample_data: bool = False, realtime=False) -> tuple[dict[str, pd.Series], list[dict]]:
+    def load_and_process_group_data2(conditions_params: list[dict], data: pd.DataFrame=None, realtime=False) -> tuple[dict[str, pd.Series], list[dict]]:
         """
         Load and process group data based on conditions parameters with optimized processing.
         
@@ -2060,7 +2060,6 @@ class CombiConds:
         """
         def test():
             conditions_params = TestSets.LOAD_PROCESS_GROUP_DATA
-            use_sample_data = False
             realtime=True
             history_cutoff_stamp = Utils.day_to_timestamp('2025_01_01')
         try:
@@ -2114,11 +2113,12 @@ class CombiConds:
                     Globs.STOCKS
                 )
 
-                if realtime:
-                    data: pd.DataFrame = Adapters.load_stock_data_from_plasma_realtime(list(cols), filtered_stocks)
-                else:
-                    # Load and group data
-                    data: pd.DataFrame = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks, use_sample_data)
+                if data is None:
+                    if realtime:
+                        data: pd.DataFrame = Adapters.load_stock_data_from_plasma_realtime(list(cols), filtered_stocks)
+                    else:
+                        # Load and group data
+                        data: pd.DataFrame = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks)
 
                 data = data.groupby(level=0, axis=1).sum()
                 
