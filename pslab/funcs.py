@@ -257,7 +257,7 @@ def function_mapping():
         },
         'two_MA_pos': {
             'function': Conds.Indicators.two_MA_pos,
-            'title': '[1_Src] 2MAs',
+            'title': '[1_Src] 2 MAs',
             'description': "Kiểm tra vị trí giữa hai moving averages",
             'inputs': ['src'],
             'params': {
@@ -298,7 +298,9 @@ def function_mapping():
                 'fast': {'type': 'int', 'default': 10},
                 'slow': {'type': 'int', 'default': 20},
                 'signal_length': {'type': 'int', 'default': 9},
+                'use_direction': {'type': 'bool', 'default': True},
                 'direction': {'type': 'str', 'default': 'crossover', 'values': ['crossover', 'crossunder', 'above', 'below']},
+                'use_range': {'type': 'bool', 'default': False},
                 'equal': {'type': 'bool', 'default': False, 'description': 'Có xem xét giá trị bằng nhau không, ví dụ option src1 crossover src2, mà equal = True thì khi src1 = src2 cũng được xem là crossover, tương tự với crossunder, above, below'},
                 'range_lower': {'type': 'float', 'default': 30},
                 'range_upper': {'type': 'float', 'default': 70},
@@ -515,8 +517,9 @@ class Resampler:
     @staticmethod
     def get_agg_dict(names: list):
         
-        if len(names[0]) == 2:
-            return {n: Globs.STANDARD_AGG_DIC[n[0]] for n in names}
+        if isinstance(names[0], tuple) and len(names[0]) == 2:
+            return {n: Globs.STANDARD_AGG_DIC[(n[0])] for n in names}
+
         else:
             return {n: v for n, v in Globs.STANDARD_AGG_DIC.items() if n in names}
     
@@ -1809,8 +1812,10 @@ class Conds:
             fast: int = 10,
             slow: int = 20,
             signal_length: int = 9,
+            use_direction: bool = False,
             direction: str = 'crossover',
             equal: bool = False,
+            use_range: bool = True, 
             range_lower: float = 30,
             range_upper: float = 70,
             use_as_lookback_cond: bool = False,
@@ -1818,10 +1823,18 @@ class Conds:
         ):
             macd, signal = Indicators.macd(src, r2_period, fast, slow, signal_length)
 
-            pos_cond = Conds.two_line_pos(macd, signal, direction, equal)
-            range_cond = Conds.range_cond(macd, range_lower, range_upper)
+            result = pd.Series(True, index=src.index)
+    
+            if use_direction:
+                pos_cond = Conds.two_line_pos(macd, signal, direction, equal)
+                result = pos_cond
 
-            result = pos_cond & range_cond
+            if use_range:
+                range_cond = Conds.range_cond(macd, range_lower, range_upper)
+                if use_direction:
+                    result = result & range_cond
+                else:
+                    result = range_cond
 
             if use_as_lookback_cond:
                 result = Ta.make_lookback(result, lookback_cond_nbar)
@@ -1838,6 +1851,7 @@ class Conds:
             signal_length: int = 9,
             direction: str = 'crossover',
             equal: bool = False,
+
             macd_pct_range_lower: float = 30,
             macd_pct_range_upper: float = 70,
             use_as_lookback_cond: bool = False,
@@ -2154,6 +2168,7 @@ class CombiConds:
         data_src: str = 'market_stats', 
         use_sample_data: bool = False,
         realtime: bool = False,
+        data: pd.DataFrame=None
     ) -> tuple[dict[str, pd.Series], list[dict]]:
         """
         Load and process single series data based on conditions parameters.
@@ -2210,13 +2225,17 @@ class CombiConds:
             # Get unique columns needed
             unique_cols = {col for col, *_ in required_cols}
 
-            # Load data based on source
-            if not realtime:
-                data = (Adapters.load_market_stats_from_plasma(list(unique_cols), use_sample_data) 
-                        if data_src == 'market_stats' 
-                        else Adapters.load_index_daily_ohlcv_from_plasma(list(unique_cols), use_sample_data))
+            if data is None:
+                # Load data based on source
+                if not realtime:
+                    data = (Adapters.load_market_stats_from_plasma(list(unique_cols), use_sample_data) 
+                            if data_src == 'market_stats' 
+                            else Adapters.load_index_daily_ohlcv_from_plasma(list(unique_cols), use_sample_data))
+                else:
+                    data = Adapters.load_market_stats_from_plasma_realtime(list(unique_cols))
             else:
-                data = Adapters.load_market_stats_from_plasma_realtime(list(unique_cols))
+                data = data[list(unique_cols)]
+            
             
             # Process each required column
             for col, tf, window, method, daily_rolling in required_cols:
@@ -2455,6 +2474,19 @@ class CombiConds:
             else:
                 # Apply condition function
                 signal = func(**func_inputs, **condition['params'])
+
+            if not isinstance(signal.index[0], str):
+                # Check if signal time is ATC (14:45:00)
+                timestamp_seconds = signal.index // 1_000_000_000  # Convert ns to seconds
+                seconds_in_day = timestamp_seconds % 86400  # Seconds since start of day
+                atc_seconds = 14 * 3600 + 45 * 60  # 14:45:00 in seconds (53100)
+                            
+                # Set signals at ATC time to False
+                signal = signal.copy()  # Avoid modifying original signal
+                atc_mask = (seconds_in_day == atc_seconds)
+                if atc_mask.any():
+                    signal[atc_mask] = False
+
 
             if combine_calculator == 'or':
                 # Combine with final result using OR operation

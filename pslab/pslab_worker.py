@@ -76,7 +76,7 @@ def fix_conditions_params(conditions_params):
 
 
 
-def group_conditions(conditions_params: dict):
+def group_conditions(conditions_params: dict, realtime=True, data=None):
     """
         Process strategies that use stock data.
         
@@ -106,14 +106,14 @@ def group_conditions(conditions_params: dict):
         return None
         
     # Load stock data
-    required_data, updated_params = CombiConds.load_and_process_group_data2(conditions_params, realtime=True)
+    required_data, updated_params = CombiConds.load_and_process_group_data2(conditions_params, realtime=realtime, data=data)
     
     # Generate signals
     signals = CombiConds.combine_conditions(required_data, updated_params)
 
     return signals
 
-def other_conditions(conditions_params: dict):
+def other_conditions(conditions_params: dict, realtime=True, data = None):
     """
         Process strategies that use one series data.
         
@@ -129,7 +129,7 @@ def other_conditions(conditions_params: dict):
     fix_conditions_params(conditions_params)
         
     # Load one series data
-    required_data, updated_params = CombiConds.load_and_process_one_series_data(conditions_params, use_sample_data=False, realtime=True)
+    required_data, updated_params = CombiConds.load_and_process_one_series_data(conditions_params, use_sample_data=False, realtime=realtime, data=data)
     
     # Generate signals
     signals = CombiConds.combine_conditions(required_data, updated_params)
@@ -158,6 +158,9 @@ import json
 @app.task(name=TaskName.COMPUTE_SIGNALS)
 def compute_signals(
     strategy: Dict[str, Any],
+    realtime: bool = True,
+    group_data: pd.DataFrame = None,
+    market_data: pd.DataFrame = None
 ) -> Dict[str, Any]:
     """Tính toán tín hiệu giao dịch dựa trên điều kiện và tham số đầu vào.
 
@@ -175,9 +178,9 @@ def compute_signals(
     try:
         group = strategy['group']
         if group in group_conds:
-            signals = group_conditions(strategy['conditions'])
+            signals = group_conditions(strategy['conditions'], realtime, data =group_data)
         else:
-            signals = other_conditions(strategy['conditions'])
+            signals = other_conditions(strategy['conditions'], realtime, data = market_data)
         
         signals.name = 'signals'
         df = signals.to_frame().reset_index()
