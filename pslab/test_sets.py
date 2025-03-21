@@ -5,36 +5,117 @@ false = False
 class TestSets:
     LOAD_PROCESS_GROUP_DATA = [
         {
-            'function': "is_in_top_bot_percentile",
-            'inputs': {
-                'src': 'bu2',
-                'stocks': Globs.SECTOR_DIC['VN30'],
-                # 'timeframe': '15Min',
-                'rolling_window': 20,
-                'rolling_method': 'sum',
-                'exclude_atc': True
+            "function": "MA",
+            "inputs": {
+                "src": "fBuyVal",
+                "rolling_window": 1,
+                "rolling_method": "sum",
+                "daily_rolling": true,
+                "exclude_atc": false,
+                "scale": 1,
+                "timeframe": "30S",
+                "stocks": [
+                    "ACB",
+                    "BCM",
+                    "BID",
+                    "BVH",
+                    "CTG",
+                    "FPT",
+                    "GAS",
+                    "GVR",
+                    "HDB",
+                    "HPG",
+                    "MBB",
+                    "MSN",
+                    "MWG",
+                    "PLX",
+                    "POW",
+                    "SAB",
+                    "SHB",
+                    "SSB",
+                    "SSI",
+                    "STB",
+                    "TCB",
+                    "TPB",
+                    "VCB",
+                    "VHM",
+                    "VIB",
+                    "VIC",
+                    "VJC",
+                    "VNM",
+                    "VPB",
+                    "VRE"
+                ]
             },
-            'params': {
-                'lookback_period': 1000,
-                'direction': 'top',
-                'threshold': 90,
-                'use_as_lookback_cond': False,
-                'lookback_cond_nbar': 5
+            "outputs": {
+                "output": {
+                    "type": "line",
+                    "mapping": "MA",
+                    "value": "MA",
+                    "color": "#788d2a"
+                }
+            },
+            "params": {
+                "window": 10,
+                "ma_type": "SMA"
             }
         },
         {
-            'function': 'two_line_pos',
-            'inputs': {
-                'src1': 'bu2',
-                'src2': 'sd2',
-                'stocks': ['HPG', 'SSI', 'NVL'],
-                # 'timeframe': '15Min',
-                'rolling_window': 20
+            "function": "MA",
+            "inputs": {
+                "src": "fSellVal",
+                "rolling_window": 1,
+                "rolling_method": "sum",
+                "daily_rolling": true,
+                "exclude_atc": false,
+                "scale": 1000,
+                "timeframe": "30S",
+                "stocks": [
+                    "ACB",
+                    "BCM",
+                    "BID",
+                    "BVH",
+                    "CTG",
+                    "FPT",
+                    "GAS",
+                    "GVR",
+                    "HDB",
+                    "HPG",
+                    "MBB",
+                    "MSN",
+                    "MWG",
+                    "PLX",
+                    "POW",
+                    "SAB",
+                    "SHB",
+                    "SSB",
+                    "SSI",
+                    "STB",
+                    "TCB",
+                    "TPB",
+                    "VCB",
+                    "VHM",
+                    "VIB",
+                    "VIC",
+                    "VJC",
+                    "VNM",
+                    "VPB",
+                    "VRE"
+                ]
             },
-            'params': {
-                'direction': 'crossover'
+            "outputs": {
+                "output": {
+                    "type": "line",
+                    "mapping": "MA",
+                    "value": "MA2",
+                    "color": "#788d2a"
+                }
+            },
+            "params": {
+                "window": 10,
+                "ma_type": "SMA"
             }
-        },
+        }
     ]
 
 
