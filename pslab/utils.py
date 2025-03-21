@@ -7,6 +7,8 @@ from redis import StrictRedis
 from datetime import timedelta
 import hashlib
 import random
+from functools import reduce
+
 
 class RedisHandler:
     def __init__(self, host='localhost', port=6379, db=0):
@@ -91,29 +93,40 @@ class RedisHandler:
 
 class Utils:
     @staticmethod
-    def and_conditions(conditions: list[pd.DataFrame]):
-        """Calculate condition from orther conditions"""
-        res = None
-        for cond in conditions:
-            if cond is not None:
-                if res is None:
-                    res = cond
-                else:
-                    res = res & cond 
-        return res
+    def and_conditions(conditions: list):
+        # Lọc điều kiện None
+        valid_conditions = [cond for cond in conditions if cond is not None]
+        
+        if not valid_conditions:
+            return None
+        
+        if len(valid_conditions) == 1:
+            return valid_conditions[0]
+        
+        # Xử lý cả DataFrame và Series
+        def combine(obj1: pd.DataFrame, obj2: pd.DataFrame):
+            obj1_aligned, obj2_aligned = obj1.align(obj2, fill_value=False)
+            return obj1_aligned & obj2_aligned
+        
+        return reduce(combine, valid_conditions)
     
     @staticmethod
     def or_conditions(conditions: list[pd.DataFrame]):
-        """Calculate condition from orther conditions"""
-        res = None
-        for cond in conditions:
-            if cond is not None:
-                if res is None:
-                    res = cond
-                else:
-                    res = res | cond 
-        return res
-
+        #Lọc điều kiện None
+        valid_conditions = [cond for cond in conditions if cond is not None]
+        
+        if not valid_conditions:
+            return None
+        
+        if len(valid_conditions) == 1:
+            return valid_conditions[0]
+        
+        # Xử lý cả DataFrame và Series
+        def combine(obj1, obj2):
+            obj1_aligned, obj2_aligned = obj1.align(obj2, fill_value=False)
+            return obj1_aligned | obj2_aligned
+        
+        return reduce(combine, valid_conditions)
     
     @staticmethod
     def day_to_timestamp(day: str, is_end_day = False):

@@ -134,7 +134,8 @@ def function_mapping():
             'inputs': ['src1', 'src2'],
             'params': {
                 'lookback_period': {'type': 'int', 'default': 20},
-                'threshold': {'type': 'float', 'default': 90},
+                'lower_thres': {'type': 'float', 'default': 0},
+                'upper_thres': {'type': 'float', 'default': 100},
                 "use_as_lookback_cond" : {'type': 'bool', 'default': False},
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
@@ -587,12 +588,12 @@ class Resampler:
         assert agg_dict, "agg_dict is Empty"
         
         # Kiểm tra columns không tồn tại
-        invalid_cols = set(agg_dict.keys()) - set(df.columns.get_level_values(0).unique())
+        invalid_cols = set(agg_dict.keys()) - set(df.columns.get_level_values(level))
         if invalid_cols:
             raise ValueError(f"Columns không tồn tại trong DataFrame: {invalid_cols}")
         
         # Thêm columns còn thiếu với aggregation mặc định là 'last'
-        missing_cols = set(df.columns) - set(agg_dict.keys()) - {'datetime'}
+        missing_cols = set(df.columns.get_level_values(level)) - set(agg_dict.keys()) - {'datetime'}
         if missing_cols:
             for col in missing_cols:
                 agg_dict[col] = 'last'
@@ -620,8 +621,7 @@ class Resampler:
         #     agg_dict = {'buyImpact': 'last', 'sellImpact': 'last'}
 
         # Validate và chuẩn hóa agg_dict
-        is_multiindex = isinstance(df.columns, pd.MultiIndex)
-        if not is_multiindex:
+        if not isinstance(df.columns, pd.MultiIndex):
             agg_dict = cls._validate_agg_dict(df, agg_dict)
         
         # Reset index để có thể xử lý candleTime
@@ -951,7 +951,7 @@ class Ta:
     #         raise ValueError(f"Invalid rolling method: {method}. Must be one of: sum, median, mean, rank")
 
     @staticmethod
-    def apply_rolling(data: PandasObject, window: int, method: str = 'sum', daily_rolling: bool = True):
+    def apply_rolling_old(data: PandasObject, window: int, method: str = 'sum', daily_rolling: bool = True):
         """Apply rolling operation based on specified method
         Args:
             data: Input series/dataframe
@@ -961,6 +961,8 @@ class Ta:
             Rolled data with specified method
         """
         def rolling_data(data_input, window_size, method_name):
+
+
             window_size = int(window_size)
             rolling = data_input.rolling(window_size)
             if method_name == 'sum':
@@ -996,7 +998,71 @@ class Ta:
         
         # Hoặc sắp xếp lại kết quả theo timestamp gốc
         return pd.Series(result.values.tolist(), index=timestamp).sort_index()
+    
+    @staticmethod
+    def apply_rolling(data: PandasObject, window: int, method: str = 'sum', daily_rolling: bool = True):
+        """Apply rolling operation based on specified method
+        Args:
+            data: Input series/dataframe
+            window: Rolling window size
+            method: Rolling method - 'sum', 'median', 'mean', 'last', 'rank'
+        Returns:
+            Rolled data with specified method
+        """
+        
+        def test():
+            data: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/pslab_realtime_be/cache/fix_apply_rolling_for_stock_count.pkl")
+            window = 5
+            method = 'sum'
+            daily_rolling = False
 
+        def rolling_data(data_input, window_size, method_name):
+            window_size = int(window_size)
+            rolling = data_input.rolling(window_size)
+            if method_name == 'sum': return rolling.sum()
+            elif method_name == 'median': return rolling.median()
+            elif method_name == 'mean': return rolling.mean()
+            elif method_name == 'rank': return (rolling.rank() - 1) / (window_size - 1) * 100
+            else: raise ValueError(f"Invalid method: {method_name}. Use: sum, median, mean, rank")
+        
+        if daily_rolling:
+            return rolling_data(data, window, method)
+        
+        # Xử lý theo ngày
+        timestamp = data.index
+        date_groups = pd.to_datetime(timestamp, unit='ns').date
+        
+        # Tạo một MultiIndex DataFrame với date và timestamp gốc
+        if isinstance(data, pd.Series):
+            # Xử lý cho Series
+            multi_idx_data = pd.DataFrame({'data': data.values},
+                                        index=[date_groups, timestamp])
+            # Nhóm theo ngày và áp dụng rolling
+            result = multi_idx_data.groupby(level=0).apply(
+                lambda group: rolling_data(
+                    pd.Series(group['data'].values, index=group.index.get_level_values(1)), 
+                    window, method
+                )
+            )
+            return pd.Series(result.values, index=timestamp).sort_index()
+        else:
+            # Xử lý cho DataFrame
+            multi_idx_data = data.copy()
+            multi_idx_data.index = [date_groups, timestamp]
+            
+            # Áp dụng rolling trực tiếp trên toàn bộ DataFrame theo từng ngày
+            result = multi_idx_data.groupby(level=0).apply(
+                lambda group: rolling_data(group, window, method)
+            )
+            
+            # Chuyển kết quả về định dạng gốc với index là timestamp
+            flat_result = pd.DataFrame(
+                result.values,
+                index=timestamp,
+                columns=data.columns
+            ).sort_index()
+            
+            return flat_result
 
 class Indicators:
     """Technical indicators with vectorized operations for both Series and DataFrame"""
@@ -1642,7 +1708,8 @@ class Conds:
         src1: PandasObject,
         src2: PandasObject,
         lookback_period: int = 20,
-        threshold: float = 90,
+        lower_thres: float = 0,
+        upper_thres: float = 100,
         use_as_lookback_cond: bool = False,
         lookback_cond_nbar = 5,
         useflag: bool = True
@@ -1660,8 +1727,8 @@ class Conds:
         
         gap = abs(src1 - src2)
         gap_rank = Ta.rolling_rank(gap, lookback_period)
-        result = gap_rank >= threshold
-    
+        result = (gap_rank >= lower_thres) & (gap_rank <= upper_thres)
+
         if use_as_lookback_cond:
             result = Ta.make_lookback(result, lookback_cond_nbar)
         return result
@@ -1951,7 +2018,7 @@ class Conds:
 
 
 class CombiConds:
-    INPUTS_SIDE_PARAMS =  ['rolling_window', 'stocks', 'rolling_method', 'timeframe', 'daily_rolling']
+    INPUTS_SIDE_PARAMS =  ['rolling_window', 'stocks', 'rolling_method', 'timeframe', 'daily_rolling', 'exclude_atc']
 
     @staticmethod
     def load_and_process_group_data(conditions_params: list[dict], use_sample_data: bool = False, realtime=False, history_cutoff_stamp:int=0) -> tuple[dict[str, pd.Series], list[dict]]:
@@ -2166,7 +2233,6 @@ class CombiConds:
     def load_and_process_one_series_data(
         conditions_params: list[dict], 
         data_src: str = 'market_stats', 
-        use_sample_data: bool = False,
         realtime: bool = False,
         data: pd.DataFrame=None
     ) -> tuple[dict[str, pd.Series], list[dict]]:
@@ -2190,7 +2256,8 @@ class CombiConds:
         def test():
             conditions_params = TestSets.LOAD_PROCESS_SERIES_DATA
             data_src = 'market_stats'
-            use_sample_data = False
+            data = None
+            realtime = False
         try:
             if data_src not in ['market_stats', 'daily_index']:
                 raise ValueError("data_src must be one of ['market_stats', 'daily_index']")
@@ -2228,9 +2295,9 @@ class CombiConds:
             if data is None:
                 # Load data based on source
                 if not realtime:
-                    data = (Adapters.load_market_stats_from_plasma(list(unique_cols), use_sample_data) 
+                    data = (Adapters.load_market_stats_from_plasma(list(unique_cols)) 
                             if data_src == 'market_stats' 
-                            else Adapters.load_index_daily_ohlcv_from_plasma(list(unique_cols), use_sample_data))
+                            else Adapters.load_index_daily_ohlcv_from_plasma(list(unique_cols)))
                 else:
                     data = Adapters.load_market_stats_from_plasma_realtime(list(unique_cols))
             else:
@@ -2249,8 +2316,6 @@ class CombiConds:
                         timeframe=tf,
                         agg_dict=Resampler.get_agg_dict([col])
                     )[col]
-                    print('hello')
-                    print(window)
                 # Apply rolling calculations if needed
                 if window is not None:
                     data_processed = Ta.apply_rolling(data_processed, window, method, daily_rolling)
@@ -2286,70 +2351,6 @@ class CombiConds:
             ValueError: If invalid parameter combinations are provided
         """
         try:
-            def test():
-                conditions_params = [
-                        {
-                            "function": "two_line_pos",
-                            "inputs": {
-                                "src1": "bu2",
-                                "src2": "sd2",
-                                "rolling_window": 1,
-                                "rolling_method": "sum",
-                                "timeframe": "1Min"
-                            },
-                            "params": {
-                                "direction": "crossover",
-                                "equal": False,
-                                "use_as_lookback_cond": False,
-                                "lookback_cond_nbar": 5
-                            }
-                        }
-                    ]
-                stocks = [
-                    "GVR",
-                    "SSI",
-                    "DXG",
-                    "DIG",
-                    "NLG",
-                    "NVL",
-                    "KBC",
-                    "VGC",
-                    "VND",
-                    "HCM",
-                    "VCI",
-                    "BSI",
-                    "FTS",
-                    "DGW",
-                    "HSG",
-                    "NKG",
-                    "VIX",
-                    "CTS",
-                    "ORS",
-                    "AGR",
-                    "GEX",
-                    "VDS",
-                    "PDR",
-                    "CII",
-                    "HTN",
-                    "TCI",
-                    "GIL",
-                    "KSB",
-                    "FCN",
-                    "LCG",
-                    "DPG",
-                    "DBC",
-                    "TCH",
-                    "VOS",
-                    "VPG",
-                    "HDC",
-                    "ANV",
-                    "VCG",
-                    "PET",
-                    "PC1",
-                    "HAH",
-                    "ASM"
-                ]
-                use_sample_data = False
 
             required_data: dict[str, pd.Series] = {}
             required_cols: set[tuple] = set()
@@ -2405,7 +2406,7 @@ class CombiConds:
                 
                 # Apply rolling calculations if needed
                 if window is not None:
-                    data_processed = Ta.apply_rolling(data_processed, window, method)
+                    data_processed = Ta.apply_rolling(data_processed, window, method, daily_rolling)
                 
                 required_data[key] = data_processed
 
@@ -2486,7 +2487,6 @@ class CombiConds:
                 atc_mask = (seconds_in_day == atc_seconds)
                 if atc_mask.any():
                     signal[atc_mask] = False
-
 
             if combine_calculator == 'or':
                 # Combine with final result using OR operation

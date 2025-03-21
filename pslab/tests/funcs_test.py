@@ -1,241 +1,399 @@
-import pandas as pd
-import numpy as np
-import time
-from typing import Tuple, Dict
-import logging
-from danglib.pslab.resources import Globs, Adapters,
+from danglib.pslab.funcs import *
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+class CombiConds2:
+    INPUTS_SIDE_PARAMS = ['rolling_window', 'stocks', 'rolling_method', 'timeframe', 'daily_rolling', 'exclude_atc']
 
+    @staticmethod
+    def _collect_required_columns(conditions_params: list[dict]) -> tuple[set[tuple], list[dict]]:
+        def test():
+            conditions_params = TestSets.LOAD_PROCESS_GROUP_DATA
 
-def calculate_foreign_fubon_old(day: str, df: pd.DataFrame = None) -> pd.DataFrame:
-        """
-        Calculate foreign transactions for Fubon stocks with high performance optimization.
+        """Collect required columns and build updated conditions with resolved inputs."""
+        required_cols = set()
+        updated_conditions = []
         
-        Args:
-            day (str): Date in format 'YYYY_MM_DD'
+        for condition in conditions_params:
+            # Get processing parameters with defaults
+            timeframe = condition['inputs'].get('timeframe', Globs.BASE_TIMEFRAME)
+            rolling_window = condition['inputs'].get('rolling_window')
+            rolling_method = condition['inputs'].get('rolling_method', 'sum')
+            daily_rolling = condition['inputs'].get('daily_rolling', True)
+            exclude_atc = condition['inputs'].get('exclude_atc', False)
+            stocks = condition['inputs'].get('stocks', Globs.STOCKS)
+            
+            # Generate stock key if needed
+            stocks_key = hash('_'.join(sorted(stocks))) if 'stocks' in condition['inputs'] else None
+            
+            new_condition = deepcopy(condition)
+            new_condition['inputs'] = {}
+            
+            # Process each input parameter
+            for param_name, col_name in condition['inputs'].items():
+                if param_name not in CombiConds2.INPUTS_SIDE_PARAMS:
+                    if not col_name:
+                        raise InputSourceEmptyError(f"Input {param_name} is empty!")
+                    
+                    # Create tuple of requirements based on data source
+                    col_tuple = (
+                        (col_name, timeframe, stocks_key, rolling_window, rolling_method, daily_rolling, exclude_atc)
+                        if stocks_key is not None
+                        else (col_name, timeframe, rolling_window, rolling_method, daily_rolling, exclude_atc)
+                    )
+                    
+                    required_cols.add(col_tuple)
+                    
+                    # Create a unique key
+                    key_parts = [col_name, timeframe]
+                    if stocks_key is not None:
+                        key_parts.append(str(stocks_key))
+                    key_parts.extend([str(rolling_window), rolling_method, str(daily_rolling), str(exclude_atc)])
+                    new_key = "_".join(key_parts)
+                    
+                    new_condition['inputs'][param_name] = new_key
+                else:
+                    new_condition['inputs'][param_name] = condition['inputs'][param_name]
+            
+            updated_conditions.append(new_condition)
+            
+        return required_cols, updated_conditions
+
+    @staticmethod
+    def _process_data_series(data: pd.DataFrame, col: str, timeframe: str, 
+                           rolling_window: int, rolling_method: str, daily_rolling: bool, exclude_atc: bool) -> pd.Series:
+        """Process a data series with timeframe resampling and rolling calculations."""
+        data_processed = data[col].copy()
+
+        if exclude_atc:
+            def get_atc(data: PandasObject):
+                """Extract ATC timestamps from the data."""
+                atc_stamps = []
+                
+                # Get the index timestamps
+                idx = data.index
+                
+                # Convert index directly to datetime objects for checking hour and minute
+                datetimes = pd.DatetimeIndex(idx)
+                
+                # Find all timestamps at 14:45 (ATC)
+                atc_mask = (datetimes.hour == 14) & (datetimes.minute == 45)
+                atc_stamps = idx[atc_mask].tolist()
+                
+                return atc_stamps
+
+            ATC_STAMPS = get_atc(data_processed)
+            data_processed = data_processed[~data_processed.index.isin(ATC_STAMPS)]
+        
+        # Apply timeframe resampling if needed
+        if timeframe != Globs.BASE_TIMEFRAME:
+            data_processed = Resampler.resample_vn_stock_data(
+                data_processed.to_frame(), 
+                timeframe=timeframe, 
+                agg_dict=Resampler.get_agg_dict([col])
+            )[col]
+        
+        # Apply rolling calculations if needed
+        if rolling_window is not None:
+            data_processed = Ta.apply_rolling(data_processed, rolling_window, rolling_method, daily_rolling)
+        
+        return data_processed
+
+    @staticmethod
+    def load_and_process_data(
+        conditions_params: list[dict],
+        data_source: str = 'group',
+        provided_data: pd.DataFrame = None,
+        realtime: bool = False,
+        stocks: list[str] = None
+    ) -> tuple[dict[str, pd.Series], list[dict]]:
+        """Unified method to load and process data based on conditions parameters."""
+        def test():
+            conditions_params = TestSets.LOAD_PROCESS_STOCKS_DATA
+            data_source = 'stock'
+            provided_data = None
+            realtime = False
+            stocks = None
+        
+        try:
+            # Validate data source
+            valid_sources = ['group', 'one_series', 'stock', 'market_stats', 'daily_index']
+            if data_source not in valid_sources:
+                raise ValueError(f"data_source must be one of {valid_sources}")
+
+            # Collect required columns and build updated conditions
+            required_cols, updated_conditions = CombiConds2._collect_required_columns(conditions_params)
+            required_data = {}
+
+            # Handle different data sources
+            if data_source in ['group']:
+                # Group columns by stock combinations for efficient data loading
+                all_cols_by_stocks: dict[int, set[str]] = {}
+                for col_tuple in required_cols:
+                    if len(col_tuple) == 6:  # Stock-based tuple format
+                        col, _, stocks_key, _, _, _, _ = col_tuple
+                        if stocks_key not in all_cols_by_stocks:
+                            all_cols_by_stocks[stocks_key] = set()
+                        all_cols_by_stocks[stocks_key].add(col)
+
+                # Process data for each stock combination
+                for stocks_key, cols in all_cols_by_stocks.items():
+                    # Find correct stock filter for this combination
+                    filtered_stocks = next(
+                        (condition['inputs'].get('stocks', Globs.STOCKS) 
+                        for condition in conditions_params 
+                        if 'stocks' in condition['inputs'] and
+                        hash('_'.join(sorted(condition['inputs'].get('stocks', Globs.STOCKS)))) == stocks_key),
+                        Globs.STOCKS
+                    )
+
+                    # Load data or use provided data
+                    if provided_data is None:
+                        if realtime:
+                            data = Adapters.load_stock_data_from_plasma_realtime(list(cols), filtered_stocks)
+                        else:
+                            data = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks)
+                    else:
+                        data = provided_data
+
+                    data = data.groupby(level=0, axis=1).sum()
+                    
+                    # Process each required column
+                    for col_tuple in required_cols:
+                        if len(col_tuple) == 6:  # Stock-based tuple format
+                            col, timeframe, sk, rolling_window, rolling_method, daily_rolling, exclude_atc = col_tuple
+                            if sk == stocks_key:
+                                key = f"{col}_{timeframe}_{sk}_{rolling_window}_{rolling_method}_{daily_rolling}_{exclude_atc}"
+                                required_data[key] = CombiConds2._process_data_series(
+                                    data, col, timeframe, rolling_window, rolling_method, daily_rolling, exclude_atc
+                                )
+            
+            elif data_source in ['one_series', 'market_stats', 'daily_index']:
+                # Get unique columns needed
+                unique_cols = {col for col, *_ in required_cols}
+                
+                # Load data or use provided data
+                if provided_data is None:
+                    if data_source in ['market_stats', 'one_series']:
+                        if not realtime:
+                            data = Adapters.load_market_stats_from_plasma(list(unique_cols))
+                        else:
+                            data = Adapters.load_market_stats_from_plasma_realtime(list(unique_cols))
+                    else:  # daily_index
+                        data = Adapters.load_index_daily_ohlcv_from_plasma(list(unique_cols))
+                else:
+                    data = provided_data[list(unique_cols)]
+                
+                # Process each required column
+                for col_tuple in required_cols:
+                    if len(col_tuple) == 5:  # One-series tuple format
+                        col, timeframe, rolling_window, rolling_method, daily_rolling, exclude_atc = col_tuple
+                        key = f"{col}_{timeframe}_{rolling_window}_{rolling_method}_{daily_rolling}_{exclude_atc}"
+
+                        if exclude_atc:
+                            def get_atc(data: PandasObject):
+                                """Extract ATC timestamps from the data."""
+                                atc_stamps = []
+                                
+                                # Get the index timestamps
+                                idx = data.index
+                                
+                                # Convert index directly to datetime objects for checking hour and minute
+                                datetimes = pd.DatetimeIndex(idx)
+                                
+                                # Find all timestamps at 14:45 (ATC)
+                                atc_mask = (datetimes.hour == 14) & (datetimes.minute == 45)
+                                atc_stamps = idx[atc_mask].tolist()
+                                
+                                return atc_stamps
+
+                            ATC_STAMPS = get_atc(data_processed)
+                            data_processed = data_processed[~data_processed.index.isin(ATC_STAMPS)]
+                        
+                        # Only resample market_stats data
+                        should_resample = (timeframe != Globs.BASE_TIMEFRAME) and (data_source in ['market_stats', 'one_series'])
+                        
+
+                        if should_resample:
+                            data_processed = Resampler.resample_vn_stock_data(
+                                data[col].to_frame(), 
+                                timeframe=timeframe,
+                                agg_dict=Resampler.get_agg_dict([col])
+                            )[col]
+                        else:
+                            data_processed = data[col].copy()
+                        
+                        # Apply rolling calculations if needed
+                        if rolling_window is not None:
+                            data_processed = Ta.apply_rolling(data_processed, rolling_window, rolling_method, daily_rolling)
+                        
+                        required_data[key] = data_processed
+            
+            else:  # stock
+                # Get unique columns needed
+                unique_cols = {col for col, *_ in required_cols}
+                
+                # Load stock data or use provided data
+                if provided_data is None:
+                    data = Adapters.load_stock_data_from_plasma(
+                        list(unique_cols), 
+                        stocks=stocks or Globs.STOCKS
+                    )
+                else:
+                    data = provided_data
+                
+                # Process each required column
+                for col_tuple in required_cols:
+                    if len(col_tuple) == 5:  # Stock tuple format (without stocks_key)
+                        col, timeframe, rolling_window, rolling_method, daily_rolling = col_tuple
+                        key = f"{col}_{timeframe}_{rolling_window}_{rolling_method}_{daily_rolling}"
+                        
+                        # Resample all data if needed
+                        if timeframe != Globs.BASE_TIMEFRAME:
+                            resampled_data = Resampler.resample_vn_stock_data(
+                                data, 
+                                timeframe=timeframe,
+                                agg_dict=Resampler.get_agg_dict(list(data.columns))
+                            )
+                            data_processed = resampled_data[col].copy()
+                        else:
+                            data_processed = data[col].copy()
+                        
+                        # Apply rolling calculations if needed
+                        if rolling_window is not None:
+                            data_processed = Ta.apply_rolling(data_processed, rolling_window, rolling_method, daily_rolling)
+                        
+                        required_data[key] = data_processed
+
+            return required_data, updated_conditions
+        
+        except Exception as e:
+            raise type(e)(f"Error in load_and_process_data ({data_source}): {str(e)}") from e
+
+    # Wrapper methods for backward compatibility
+    @staticmethod
+    def load_and_process_group_data(conditions_params: list[dict],
+                                  realtime=False) -> tuple[dict[str, pd.Series], list[dict]]:
+        """Load and process group data (backward compatibility wrapper)."""
+        return CombiConds2.load_and_process_data(
+            conditions_params=conditions_params,
+            data_source='group',
+            realtime=realtime,
+        )
+
+    @staticmethod
+    def load_and_process_one_series_data(conditions_params: list[dict], data_src: str = 'market_stats', realtime: bool = False,
+                                       data: pd.DataFrame=None) -> tuple[dict[str, pd.Series], list[dict]]:
+        """Load and process one series data (backward compatibility wrapper)."""
+        return CombiConds2.load_and_process_data(
+            conditions_params=conditions_params,
+            data_source=data_src,
+            provided_data=data,
+            realtime=realtime
+        )
+
+    @staticmethod
+    def load_and_process_stock_data(conditions_params: list[dict], stocks: list[str] = None) -> tuple[dict[str, pd.Series], list[dict]]:
+        """Load and process stock data (backward compatibility wrapper)."""
+        return CombiConds2.load_and_process_data(
+            conditions_params=conditions_params,
+            data_source='stock',
+            stocks=stocks
+        )
+    
+def test(conditions_params, data_source):
+    def t():
+        conditions_params = TestSets.LOAD_PROCESS_GROUP_DATA
+        data_source = 'group'
+    
+    if data_source == 'group':
+        required_data, updated_params = CombiConds2.load_and_process_group_data(conditions_params)
+        required_data_old, updated_params_old = CombiConds.load_and_process_group_data(conditions_params)
+    elif data_source == 'one_series':
+        required_data, updated_params = CombiConds2.load_and_process_one_series_data(conditions_params)
+        required_data_old, updated_params_old = CombiConds.load_and_process_one_series_data(conditions_params)
+    elif data_source == 'stock':
+        required_data, updated_params = CombiConds2.load_and_process_stock_data(conditions_params)
+        required_data_old, updated_params_old = CombiConds.load_and_process_stock_data(conditions_params)
+
+    def compare_results(required_data, updated_params, required_data_old, updated_params_old):
+        print("Comparing results from CombiConds2 and CombiConds:")
+        
+        # Compare data dictionaries
+        print("\nComparing data dictionaries:")
+        if set(required_data.keys()) == set(required_data_old.keys()):
+            print("✅ Both data dictionaries have the same keys")
+        else:
+            print("❌ Data dictionaries have different keys:")
+            print(f"Keys only in CombiConds2: {set(required_data.keys()) - set(required_data_old.keys())}")
+            print(f"Keys only in CombiConds: {set(required_data_old.keys()) - set(required_data.keys())}")
+        
+        # Compare data values
+        for key in set(required_data.keys()).intersection(set(required_data_old.keys())):
+            if required_data[key].equals(required_data_old[key]):
+                print(f"✅ Series '{key}' match")
+            else:
+                print(f"❌ Series '{key}' differ:")
+                print(f"  CombiConds2 shape: {required_data[key].shape}")
+                print(f"  CombiConds shape: {required_data_old[key].shape}")
+                # Check if shapes match but values differ
+                if required_data[key].shape == required_data_old[key].shape:
+                    diff = (~required_data[key].eq(required_data_old[key])).sum()
+                    print(f"  Number of different values: {diff}")
+        
+        # Compare updated parameters
+        print("\nComparing updated parameters:")
+        if updated_params == updated_params_old:
+            print("✅ Updated parameters are identical")
+        else:
+            print("❌ Updated parameters differ")
+            # Compare first parameter as an example
+            if updated_params and updated_params_old:
+                print("First parameter comparison:")
+                for key in set(updated_params[0].keys()):
+                    if key in updated_params_old[0]:
+                        if updated_params[0][key] == updated_params_old[0][key]:
+                            print(f"  ✅ '{key}' matches")
+                        else:
+                            print(f"  ❌ '{key}' differs:")
+                            print(f"    CombiConds2: {updated_params[0][key]}")
+                            print(f"    CombiConds: {updated_params_old[0][key]}")
+
+    compare_results(required_data, updated_params, required_data_old, updated_params_old)
+
+def run_test():
+    import json
+    from tqdm import tqdm
+    def load_strategies() -> dict:
+        """
+        Load trading strategies from JSON file.
         
         Returns:
-            pd.DataFrame: Processed data excluding put-through transactions
+            dict: Trading strategies configuration
         """
-        
-        # Load and filter initial data - use vectorized operations
-        if df is None:
-            df = Adapters.load_data_only(day)
-
-        mask = (df['stock'].isin(Globs.STOCKS)) & (df['time'] <= 10144559) & \
-            ~((df['time'] >= 10113059) & (df['time'] <= 10125959))
-        cols = ['session', 'time', 'datetime', 'matchingVolume', 'totalMatchVolume',
-                    'foreignerBuyVolume', 'foreignerSellVolume', 'stock', 'last']
-        df1: pd.DataFrame = df.loc[mask][cols].copy()
-        
-        # Sort data efficiently
-        df1.sort_values(['stock', 'totalMatchVolume', 'foreignerBuyVolume', 'foreignerSellVolume', 'datetime'], inplace=True)
-        
-        # Vectorized calculation of foreign volume differences
-        df1['fBuyVol'] = df1.groupby('stock')['foreignerBuyVolume'].diff().fillna(df1['foreignerBuyVolume'])
-        df1['fSellVol'] = df1.groupby('stock')['foreignerSellVolume'].diff().fillna(df1['foreignerSellVolume'])
-        
-        # Zero out ATO session values vectorized
-        df1.loc[df1['session'] == 2, ['fBuyVol', 'fSellVol']] = 0
-
-        
-        # Efficient groupby operation
-        agg_dict = {
-            'session': 'last',
-            'datetime': 'last',
-            'matchingVolume': 'sum',
-            'totalMatchVolume': 'last',
-            'foreignerBuyVolume': 'last',
-            'foreignerSellVolume': 'last',
-            'fBuyVol': 'sum',
-            'fSellVol': 'sum',
-            'last': 'last'
-        }
-        df1 = df1.groupby(['stock', 'time'], as_index=False).agg(agg_dict)
-
-        df1['time_str'] = df1['time'].astype(str).map(lambda t: f"{t[2:4]}:{t[4:6]}:{t[6:8]}")
-        
-        # Process put-through data efficiently
-        df_tt = Adapters.load_thoathuan_dc_data_from_db(day)
-        if len(df_tt) > 0:
-            df_tt_fubon = (df_tt[df_tt['stockSymbol'].isin(Globs.STOCKS)]
-                        [['stockSymbol', 'vol', 'createdAt']]
-                        .rename(columns={'stockSymbol': 'stock', 'createdAt': 'time_str'}))
-            
-            df_tt_fubon = (df_tt_fubon.groupby(['stock', 'time_str'])
-                        .agg({'vol': 'sum'})
-                        .reset_index()
-                        .query('time_str <= "14:45:59"'))
-            
-            # Convert time indices for both dataframes
-            df1['x'] = df1['time_str'].map(FRAME.timeToIndex)
-            df_tt_fubon['x'] = pd.to_numeric(df_tt_fubon['time_str'].map(FRAME.timeToIndex), errors='coerce')
-            df_tt_fubon = df_tt_fubon.dropna()
-            df_tt_fubon['x'] = df_tt_fubon['x'].astype(int)
-            
-            # Use merge_asof on entire dataset instead of loop
-            df1 = pd.merge_asof(
-                df1.sort_values('x'),
-                df_tt_fubon[['stock', 'x', 'vol']].sort_values('x'),
-                by='stock',
-                on='x',
-                tolerance=15,
-                direction='nearest'
-            )
-        else:
-            df1['vol'] = np.nan
-        
-        # Vectorized put-through transaction filtering
-        tolerance = 0.002
-        pt_mask = ((df1['fBuyVol'].between(df1['vol'] * (1 - tolerance), df1['vol'] * (1 + tolerance))) |
-                (df1['fSellVol'].between(df1['vol'] * (1 - tolerance), df1['vol'] * (1 + tolerance))))
-        df1['is_pt'] = pt_mask
-
-        return df1[~pt_mask]
-
-
-
-class ForeignCalculationBenchmark:
-    def __init__(self, day: str):
-        self.day = day
-        self.original_result = None
-        self.new_result = None
-        self.performance_metrics = {}
-
-    def load_test_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """Load test data for both functions"""
+        path = "/home/ubuntu/Dang/strategies2.json"
         try:
-            # Load raw data for original function
-            raw_df = Adapters.load_data_only(self.day)
+            with open(path, 'r') as f:
+                strategies = json.load(f)
+            return strategies
+        except Exception as e:
+            print(f"Error loading strategies: {str(e)}")
+            return {}
+        
+    strategies = load_strategies()
+
+    group_conds = ['BidAskCS', 'BUSD', 'FBuySell' ]
+    other_conds = ['F1', 'VN30', 'VNINDEX', 'BidAskF1', 'ArbitUnwind', 'PremiumDiscount']
+
+    # Process each strategy sequentially with progress tracking
+    with tqdm(total=len(strategies), desc="Processing signals") as pbar:
+        for strategy in strategies:
+            try:
+                group = strategy['group']
+                if group in group_conds:
+                    test(strategy['conditions'], data_source='group')
+                else:
+                    test(strategy['conditions'], data_source='one_series')
+                
+            except Exception as e:
+                print(f"Error processing signals for {strategy['name']}: {str(e)}")
             
-            # Load preprocessed data
-            preprocessed_df = ProcessData.preprocess_realtime_stock_data(raw_df)
-            
-            # Load put-through data
-            put_through_df = Adapters.load_thoathuan_dc_data_from_db(self.day)
-            
-            return raw_df, preprocessed_df, put_through_df
-        except Exception as e:
-            logger.error(f"Error loading test data: {str(e)}")
-            raise
-
-    def run_original_function(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, float]:
-        """Run original implementation and measure time"""
-        start_time = time.time()
-        try:
-            result = calculate_foreign_fubon(self.day, df)
-            execution_time = time.time() - start_time
-            return result, execution_time
-        except Exception as e:
-            logger.error(f"Error in original function: {str(e)}")
-            raise
-
-    def run_new_function(self, df: pd.DataFrame, put_through_df: pd.DataFrame) -> Tuple[pd.DataFrame, float]:
-        """Run new implementation and measure time"""
-        start_time = time.time()
-        try:
-            result = Libs.calculate_foreign_fubon(df, put_through_df)
-            execution_time = time.time() - start_time
-            return result, execution_time
-        except Exception as e:
-            logger.error(f"Error in new function: {str(e)}")
-            raise
-
-    def compare_results(self) -> Dict:
-        """Compare results between two implementations"""
-        try:
-            raw_df, preprocessed_df, put_through_df = self.load_test_data()
-
-            # Run both implementations
-            self.original_result, original_time = self.run_original_function(raw_df)
-            self.new_result, new_time = self.run_new_function(preprocessed_df, put_through_df)
-
-            # Store performance metrics
-            self.performance_metrics = {
-                'original_time': original_time,
-                'new_time': new_time,
-                'time_improvement': f"{((original_time - new_time) / original_time) * 100:.2f}%"
-            }
-
-            # Compare results
-            comparison = {
-                'row_count_match': len(self.original_result) == len(self.new_result),
-                'column_differences': self._compare_columns(),
-                'value_differences': self._compare_values(),
-                'performance': self.performance_metrics
-            }
-
-            return comparison
-
-        except Exception as e:
-            logger.error(f"Error comparing results: {str(e)}")
-            raise
-
-    def _compare_columns(self) -> Dict:
-        """Compare columns between results"""
-        orig_cols = set(self.original_result.columns)
-        new_cols = set(self.new_result.columns)
-        
-        return {
-            'only_in_original': list(orig_cols - new_cols),
-            'only_in_new': list(new_cols - orig_cols),
-            'common': list(orig_cols & new_cols)
-        }
-
-    def _compare_values(self) -> Dict:
-        """Compare actual values between results"""
-        common_cols = list(set(self.original_result.columns) & set(self.new_result.columns))
-        
-        # Ensure both DataFrames are sorted the same way
-        orig_df = self.original_result.sort_values(['stock', 'timestamp']).reset_index(drop=True)
-        new_df = self.new_result.sort_values(['stock', 'timestamp']).reset_index(drop=True)
-        
-        differences = {}
-        for col in common_cols:
-            if orig_df[col].dtype in [np.float64, np.float32, np.int64, np.int32]:
-                diff = np.abs(orig_df[col] - new_df[col])
-                max_diff = diff.max()
-                if max_diff > 0:
-                    differences[col] = {
-                        'max_difference': max_diff,
-                        'mean_difference': diff.mean(),
-                        'num_differences': (diff > 0).sum()
-                    }
-        
-        return differences
-
-    def print_comparison_report(self):
-        """Print a detailed comparison report"""
-        comparison = self.compare_results()
-        
-        print("\n=== Foreign Calculation Comparison Report ===")
-        print("\nPerformance Metrics:")
-        print(f"Original function time: {comparison['performance']['original_time']:.4f} seconds")
-        print(f"New function time: {comparison['performance']['new_time']:.4f} seconds")
-        print(f"Performance improvement: {comparison['performance']['time_improvement']}")
-        
-        print("\nData Structure:")
-        print(f"Row count match: {comparison['row_count_match']}")
-        
-        print("\nColumn Comparison:")
-        col_diff = comparison['column_differences']
-        print(f"Columns only in original: {col_diff['only_in_original']}")
-        print(f"Columns only in new: {col_diff['only_in_new']}")
-        print(f"Common columns: {col_diff['common']}")
-        
-        print("\nValue Differences:")
-        for col, diff in comparison['value_differences'].items():
-            print(f"\n{col}:")
-            print(f"  Max difference: {diff['max_difference']}")
-            print(f"  Mean difference: {diff['mean_difference']}")
-            print(f"  Number of different values: {diff['num_differences']}")
-
-# Usage example
-def run_benchmark(day: str):
-    benchmark = ForeignCalculationBenchmark(day)
-    benchmark.print_comparison_report()
-
-if __name__ == "__main__":
-    run_benchmark("2025_02_12")
+            pbar.update(1)
