@@ -66,6 +66,7 @@ class TaskName:
     COMPUTE_MULTI_STRATEGIES_NUM_DAYS = 'compute_multi_strategies_num_days'
     COMPUTE_MULTI_STRATEGIES_URSI_CFM = 'compute_multi_strategies_ursi_cfm'
     COMPUTE_MULTI_STRATEGIES_OS = 'compute_multi_strategies_os'
+    COMPUTE_MULTI_STRATEGIES_LABEL = 'compute_multi_strategies_label'
 
 
 @app.task(name=TaskName.COMPUTE_SIGNAL2)
@@ -258,7 +259,7 @@ def compute_signal(idx, params: dict):
         params['use_flag'] = True
 
         signals: pd.DataFrame = Conds.compute_any_conds(df, **params)
-        signals = signals[signals.index >= '2018_01_01']
+        signals = signals[(signals.index >= '2018_01_01')]
         signals.iloc[-16:] = False
     except Exception as e:
         print(f"{idx} error: {e}")
@@ -267,6 +268,55 @@ def compute_signal(idx, params: dict):
     disconnect()
     return signals
     
+@app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_LABEL)
+def compute_multi_strategies_label(i, folder):
+
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+    array_3d = pload("sig_3d_array")
+    array_3d = array_3d[:,:1665, :]
+
+    label_rudd_2d = pload("label_rudd")
+    label_rudd_2d = label_rudd_2d[:1665]
+
+    df1 = array_3d[i]
+
+    nt_ls=[]
+    gd_ls=[]
+    bd_ls=[]
+    nd_ls=[]
+
+    for j in range(i+1, len(array_3d)):
+        df2 = array_3d[j]
+
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
+
+        cond = df1 * df2
+        num_trade = np.sum(cond, axis=0)
+
+        mask = label_rudd_2d[cond]
+        good_days = np.sum(mask == 1, axis=0)
+        bad_days = np.sum(mask == -1, axis=0)
+        neutral_days = np.sum(mask == 0, axis=0)
+
+        nt_ls.append(num_trade)
+        gd_ls.append(good_days)
+        bd_ls.append(bad_days)
+        nd_ls.append(neutral_days)
+        
+
+    disconnect()
+
+    nt_arr = np.vstack(nt_ls)
+    gd_arr = np.vstack(gd_ls)
+    bd_arr = np.vstack(bd_ls)
+    nd_arr = np.vstack(nd_ls)
+
+    with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
+        pickle.dump((nt_arr, gd_arr, bd_arr, nd_arr), f)
+
+
 
 @app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES)
 def compute_multi_strategies(i, folder):

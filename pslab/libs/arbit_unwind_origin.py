@@ -255,21 +255,19 @@ def find_arbit_unwind(df: pd.DataFrame, atype='arbit', arbit_unwind = {}):
 
         df_1['loss_num_lot'] = (abs((df_1['pred'] - num_lot) / num_lot) + 1) ** 5
         df_1['loss_ts'] = (abs(df_1['x'] - median_ti)) ** 2 / 100
-
         df_1['loss'] = df_1['loss_ts'] + df_1['loss_num_lot']
         df_1 = df_1.sort_values('loss')
-        n = len(df_1)
 
+        n = len(df_1)
         mu = np.mean(df_1['loss'].values[:int(n * 0.8)])
         std = np.std(df_1['loss'].values[:int(n * 0.8)])
 
         df_1['norm_loss'] = (df_1['loss'] - mu).abs() / std
         df_1 = df_1.sort_values('norm_loss')
         df_1 = df_1.drop_duplicates('code', keep='first')
-
         df_1 = df_1[df_1['norm_loss'] < 6].copy()
-
         df_1 = df_1.sort_values('x')
+
         ts_rolling_err = (df_1['x'].rolling(5).mean() - df_1['x']).abs().min()
 
         df_1 = df_1.sort_values('pred')
@@ -279,7 +277,7 @@ def find_arbit_unwind(df: pd.DataFrame, atype='arbit', arbit_unwind = {}):
             continue
         if lot_rolling_err > 1:
             continue
-        # print(df)
+
         if (len(df_1.index) >= MIN_BB + 3):
             dic = {
                 'time': df_1['time'].values[0],
@@ -337,6 +335,7 @@ def save_monogdb(df_arbit:pd.DataFrame, date = datetime.now(tz=VN_TZ).strftime("
     
     if date == datetime.now(tz=VN_TZ).strftime("%Y_%m_%d"):
         STORE_DB = True
+
 def process_volume_codes(volume_codes):
     dic={}
     for volume_code in volume_codes:
@@ -344,6 +343,7 @@ def process_volume_codes(volume_codes):
         volume = int(volume_code[:-3])
         dic[code] = [volume]
     return dic
+
 def process_arbit_dic(arbit_dic, save_to: None):
     global DIC_WEIGHTS_VOLUME
     lst_df_arbit = []

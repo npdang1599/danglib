@@ -2088,17 +2088,17 @@ class CombiConds:
     @staticmethod
     def _process_data_series(data: pd.DataFrame, col_name: str, timeframe: str,
                            rolling_window: int, rolling_method: str, daily_rolling: bool, exclude_atc: bool, scale: float = 1.0,
-                           allow_remove_atc: bool = True, allow_resample_candle: bool = True, **kwargs) -> pd.Series:
+                           allow_remove_atc: bool = True, allow_resample_candle: bool = True, is_multiIndex_data=False, **kwargs) -> pd.Series:
         
         def test():
-            data = pd.DataFrame()
-            params = {'timeframe': '30S',
-                'rolling_window': 1,
+            params = {'timeframe': '15Min',
+                'rolling_window': 3,
                 'rolling_method': 'sum',
-                'daily_rolling': True,
+                'daily_rolling': False,
                 'exclude_atc': False,
+                'scale': 1.0,
                 'stocks_key': None,
-                'col_name': 'fF1BuyVol'}
+                'col_name': 'bu2'}
             
             col_name = params['col_name']
             timeframe = params['timeframe']
@@ -2106,11 +2106,14 @@ class CombiConds:
             rolling_method = params['rolling_method']
             daily_rolling = params['daily_rolling']
             exclude_atc = params['exclude_atc']
+            scale = params['scale']
+            allow_resample_candle = True
+            allow_remove_atc = True
+            is_multiIndex_data = True
 
 
         data_processed = data[col_name].copy() 
         data_processed = data_processed / scale
-        print(scale)
         resampling_method = Resampler.get_agg_dict([col_name])[col_name]
 
         if exclude_atc and allow_remove_atc:
@@ -2146,7 +2149,7 @@ class CombiConds:
             # Group theo candleTime mới và áp dụng aggregation
             grouped = df.groupby('candleTime').agg(agg_method)
 
-            return grouped
+            return grouped.sort_index()
     
         # Apply timeframe resampling if needed
         if timeframe != Globs.BASE_TIMEFRAME and allow_resample_candle:
@@ -2155,6 +2158,8 @@ class CombiConds:
                 timeframe=timeframe, 
                 agg_method=resampling_method
             )
+            if not is_multiIndex_data:
+                data_processed = data_processed[col_name]
 
         # Apply rolling calculations if needed
         if rolling_window is not None:
@@ -2173,8 +2178,8 @@ class CombiConds:
         """Unified method to load and process data based on conditions parameters."""
 
         def test():
-            conditions_params = TestSets.LOAD_PROCESS_GROUP_DATA
-            data_source = 'group'
+            conditions_params = TestSets.LOAD_PROCESS_STOCKS_DATA
+            data_source = 'stock'
             provided_data = None
             realtime = False
             stocks = None
@@ -2185,6 +2190,9 @@ class CombiConds:
         
         required_cols, updated_conditions, stocks_key_map = CombiConds._collect_required_columns(conditions_params)
         required_data = {}
+
+        is_daily_index = data_source == 'daily_index'
+        is_stock_data = data_source == 'stock'
 
         if data_source in ['group']:
             all_cols_by_stocks: dict[int, set[str]] = {}
@@ -2224,20 +2232,20 @@ class CombiConds:
                         data = Adapters.load_market_stats_from_plasma(list(unique_cols))
                     else:
                         data = Adapters.load_market_stats_from_plasma_realtime(list(unique_cols))
-                elif data_source in ['daily_index']:  # daily_index
+                elif is_daily_index:  # daily_index
                     data = Adapters.load_index_daily_ohlcv_from_plasma(list(unique_cols))
-                elif data_source in ['stock']:
+                elif is_stock_data:
                     data = Adapters.load_stock_data_from_plasma(list(unique_cols), stocks=stocks)
             else:
                 data = provided_data[list(unique_cols)]
 
-            is_not_daily_index = data_source != 'daily_index'
 
             for data_key, params in required_cols.items():
                 required_data[data_key] = CombiConds._process_data_series(
                     data, **params, 
-                    allow_resample_candle=is_not_daily_index, 
-                    allow_remove_atc=is_not_daily_index
+                    allow_resample_candle=not is_daily_index, 
+                    allow_remove_atc=not is_daily_index,
+                    is_multiIndex_data=is_stock_data
                 )
 
         return required_data, updated_conditions

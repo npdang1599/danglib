@@ -1,6 +1,7 @@
 import logging
 from danglib.pylabview2.core_lib import pd, np, Ta, Adapters, Fns, Utils, Math
 from danglib.pylabview.funcs import Conds as Series_Conds
+# from lib import Label # cd in to Tai/daily_indicators
 from numba import njit
 from pymongo import MongoClient
 import logging
@@ -1917,6 +1918,8 @@ class Vectorized:
         push_ursi_numpy: bool = False,
         push_ru_dd_numpy: bool = False,
         push_uptrend_downtrend: bool = False,
+        push_label_rudd: bool = False,
+        push_label_triple: bool = False,
         push_peak_trough: bool = False,
         shift: bool = False
     ):
@@ -1963,6 +1966,12 @@ class Vectorized:
             df_drawdown = get_from_day(df_drawdown, '2018_01_01')
             dd_num = df_drawdown.to_numpy()
             psave("drawdown_vectorized", dd_num)
+
+        if push_label_rudd:
+            df_label_rudd = pd.read_pickle('/home/ubuntu/Tai/daily_indicators/pickle/df_label_stats.pickle')
+            df_label_rudd = get_from_day(df_label_rudd, '2018_01_01')
+            label_rudd_num = df_label_rudd.to_numpy()
+            psave("label_rudd", label_rudd_num)
 
         if push_uptrend_downtrend:
             start_day = '2018_01_01'
@@ -2291,7 +2300,19 @@ class Vectorized:
                 pass
 
             clean_redis()
+        @staticmethod
+        def compute_new_label_for_all_strats(n_solo_strats, folder):
+            from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_label
+            clean_redis()
+            task_dic = {}
+            print("Computing stats")
+            for i in tqdm(range(0, n_solo_strats-1)):
+                task_dic[i] = compute_multi_strategies_label.delay(i, folder)
 
+            while any(t.status!='SUCCESS' for t in task_dic.values()):
+                pass
+
+            clean_redis()
         @staticmethod
         def compute_wr_re_nt_2(n_strats, start_date_idx, end_date_idx, folder):
             from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_2
@@ -2892,6 +2913,31 @@ class Vectorized:
 
             Vectorized.MultiProcess.compute_ursi_for_all_strats_cfm(n_strats, folder=store_folder)
             Vectorized.JoinResults.join_ursi_data_cfm(src_folder=store_folder, des_folder=result_folder)
+        
+        @staticmethod
+        def compute_label():
+            ## PARAMS-------------------------------------------------------------------
+            name = 'new_label'
+
+            store_folder = f"/data/Tai/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/data/Tai/pickles/{name}"
+            maybe_create_dir(result_folder)
+
+            recompute_signals = True
+            ## CALC  -------------------------------------------------------------------
+            
+            stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+                                                push_return_numpy=True, 
+                                                push_stocks_numpy=True,
+                                                push_label_rudd= True
+                                            )
+            
+            n_strats = Vectorized.MultiProcess.compute_signals(recompute_signals)
+
+            Vectorized.MultiProcess.compute_new_label_for_all_strats(n_strats, folder=store_folder)
+            Vectorized.JoinResults.join_wr_re_nt_data(n_strats, stocks_map, src_folder=store_folder, des_folder=result_folder)
 
 
         @staticmethod

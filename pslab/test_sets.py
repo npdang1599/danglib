@@ -121,18 +121,17 @@ class TestSets:
 
     LOAD_PROCESS_SERIES_DATA = [
         {
-            "function": "absolute_change_in_range",
+            "function": "range_cond",
             "inputs": {
                 "src": "fF1BuyVol",
                 "rolling_window": 1,
                 "rolling_method": "sum",
                 "daily_rolling": true,
-                "timeframe": "30S"
+                "timeframe": "5Min"
             },
             "params": {
-                "n_bars": 1,
-                "lower_thres": 1000,
-                "upper_thres": 99999,
+                "lower_thres": 100,
+                "upper_thres": 999,
                 "use_as_lookback_cond": false,
                 "lookback_cond_nbar": 5
             }
