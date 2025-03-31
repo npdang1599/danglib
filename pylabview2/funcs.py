@@ -2525,6 +2525,49 @@ class Vectorized:
             res2 = res2.set_index(['i', 'j'])
             write_pickle(f"{des_folder}/strats_stocks_ursi.pkl", res2)
 
+        @staticmethod
+        def join_new_label_data(n, stocks_map, src_folder, des_folder):
+            fns = walk_through_files(src_folder)
+
+            def join_one_stats(name):
+
+                # df_res: pd.DataFrame = None
+                res = []
+                print(f"Join {name} stats: ")
+                for f in tqdm(fns):
+                    f: str
+                    i = int(f.split('/')[-1].split(".")[0].split("_")[1])
+                    if i < 2013:
+                        nt_raw, gd_raw, bd_raw, nd_raw = pd.read_pickle(f)
+                        src = None
+                        if name == 'nt':
+                            src = nt_raw
+                        if name == 'gd':
+                            src = gd_raw
+                        if name == 'bd':
+                            src = bd_raw
+                        if name == 'nd':
+                            src = nd_raw
+
+                        tmp = pd.DataFrame(src, index=list(range(i+1, n)))
+                        tmp[-1] = i 
+                        res.append(tmp)
+                res: pd.DataFrame = pd.concat(res)
+                res = res.reset_index(names=-2)
+                cols_map = stocks_map.copy()
+                cols_map[-1] = 'i'
+                cols_map[-2] = 'j'
+
+                res = res.rename(columns = cols_map)
+                res = res.set_index(['i', 'j'])
+                dir = f"{des_folder}/df_{name}.pkl"
+                write_pickle(dir, res)
+                print(dir)
+
+            join_one_stats('nt')
+            join_one_stats('gd')
+            join_one_stats('bd')
+            join_one_stats('nd')
 
         @staticmethod
         def join_wr_re_nt_data(n, stocks_map, src_folder, des_folder):
@@ -2937,7 +2980,7 @@ class Vectorized:
             n_strats = Vectorized.MultiProcess.compute_signals(recompute_signals)
 
             Vectorized.MultiProcess.compute_new_label_for_all_strats(n_strats, folder=store_folder)
-            Vectorized.JoinResults.join_wr_re_nt_data(n_strats, stocks_map, src_folder=store_folder, des_folder=result_folder)
+            Vectorized.JoinResults.join_new_label_data(n_strats, stocks_map, src_folder=store_folder, des_folder=result_folder)
 
 
         @staticmethod

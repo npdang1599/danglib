@@ -393,3 +393,55 @@ def hash_sha256(value):
     # Tính hash bằng SHA-256
     hash_object = hashlib.sha256(value_bytes)
     return hash_object.hexdigest()  # Trả về dạng chuỗi hex
+
+
+def generate_candle_times(timeframe: str, day: str=None, start_time='09:15:00', end_time='14:45:00', to_timestamp=False, unit='ns'):
+    """
+    Tạo ra Series các mốc thời gian cho nến dựa trên timeframe
+    
+    Parameters:
+    timeframe (str): Khung thời gian ('1s', '5s', '15s', '30s', '1min', '5min', '15min', '30min', '1h', '4h', '1d')
+    day (str): Ngày (format: 'YYYY_MM_DD')
+    start_time (str): Thời gian bắt đầu (format: 'HH:MM:SS'), mặc định '09:15:00'
+    end_time (str): Thời gian kết thúc (format: 'HH:MM:SS'), mặc định '14:45:00'
+    
+    Returns:
+    pd.Series: Series chứa các mốc thời gian cho nến
+    """
+    timeframe = timeframe.replace('S', 's')
+    start_time_full = day.replace('_', '-') + ' ' + start_time
+    lunch_time = day.replace('_', '-') + ' ' + '11:30:00'
+    
+    afternoon_time = day.replace('_', '-') + ' ' + '13:00:00'
+    atc_time = day.replace('_', '-') + ' ' + '14:30:00'
+    end_time_full = day.replace('_', '-') + ' ' + end_time
+    
+    start_dt = pd.to_datetime(start_time_full)
+    end_dt = pd.to_datetime(end_time_full)
+    
+    candle_times = pd.Series(pd.date_range(start=start_dt, end=end_dt, freq=timeframe))
+    
+    # Morning session: 9:15:00 - 11:30:00
+    filter_morning = (candle_times < lunch_time)
+    
+    # Afternoon session: 13:00:00 - 14:30:00
+    filter_afternoon = (candle_times >= afternoon_time) & (candle_times < atc_time)
+
+    # ATC
+    filter_atc = (candle_times == end_dt)
+
+    candle_times = candle_times[filter_morning|filter_afternoon|filter_atc]
+    if to_timestamp:
+        candle_times = candle_times.astype(int)
+
+        if unit=='s':
+            candle_times = candle_times // 1e9
+        elif unit=='ms':
+            candle_times = candle_times // 1e6
+
+        candle_times = candle_times.astype(int)
+
+    return candle_times.reset_index(drop=True)
+
+def totime(stamp, unit='s'):
+    return pd.to_datetime(stamp, unit=unit)

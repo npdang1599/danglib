@@ -295,10 +295,10 @@ def compute_multi_strategies_label(i, folder):
         cond = df1 * df2
         num_trade = np.sum(cond, axis=0)
 
-        mask = label_rudd_2d[cond]
-        good_days = np.sum(mask == 1, axis=0)
-        bad_days = np.sum(mask == -1, axis=0)
-        neutral_days = np.sum(mask == 0, axis=0)
+        # mask = label_rudd_2d[cond]
+        good_days = ((label_rudd_2d==1) * cond).sum(axis =0)
+        bad_days = ((label_rudd_2d==-1) * cond).sum(axis =0)
+        neutral_days = ((label_rudd_2d==0) * cond).sum(axis =0)
 
         nt_ls.append(num_trade)
         gd_ls.append(good_days)

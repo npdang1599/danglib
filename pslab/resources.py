@@ -55,9 +55,11 @@ class Globs:
         'f1Bid': 'last',
         'f1Ask': 'last',
         'Vn30Value': 'sum',
+        'Vn30Volume': 'sum',
         'F1Value': 'sum',
         'F1Volume': 'sum',
         'VnindexValue': 'sum',
+        'VnindexVolume': 'sum',
         'f1BuyVol': 'sum',
         'f1SellVol': 'sum',
         'outstandingFPos': 'last',
@@ -371,7 +373,7 @@ class Adapters:
     @staticmethod
     def load_data_only(day=None):
         if day is None:
-            day = '2022_04_11'
+            day = '2025_03_28'
 
         db = PICKLED_WS_ADAPTERS.load_hose500_from_db(day)
         df = pd.DataFrame.from_dict(db.get("data"))

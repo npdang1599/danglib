@@ -1012,8 +1012,8 @@ class Ta:
         
         def test():
             data: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/pslab_realtime_be/cache/fix_apply_rolling_for_stock_count.pkl")
-            window = 5
-            method = 'sum'
+            window = 1
+            method = 'mean'
             daily_rolling = False
 
         def rolling_data(data_input, window_size, method_name):
@@ -2163,7 +2163,7 @@ class CombiConds:
 
         # Apply rolling calculations if needed
         if rolling_window is not None:
-            data_processed = Ta.apply_rolling(data_processed, rolling_window, rolling_method, daily_rolling)
+            data_processed = Ta.apply_rolling(data=data_processed, window=rolling_window, method=rolling_method, daily_rolling=daily_rolling)
         
         return data_processed
     
@@ -2178,10 +2178,20 @@ class CombiConds:
         """Unified method to load and process data based on conditions parameters."""
 
         def test():
-            conditions_params = TestSets.LOAD_PROCESS_STOCKS_DATA
-            data_source = 'stock'
+            conditions_params =  [{'function': 'absolute_change_in_range',
+            'inputs': {'src': 'F1Value',
+                'timeframe': '30S',
+                'rolling_window': 30,
+                'rolling_method': 'mean',
+                'daily_rolling': False},
+            'params': {'n_bars': 15,
+                'lower_thres': 72000000000.0,
+                'upper_thres': 1000000000000000000,
+                'use_as_lookback_cond': False,
+                'lookback_cond_nbar': 5}}]
+            data_source = 'market_stats'
             provided_data = None
-            realtime = False
+            realtime = True
             stocks = None
 
         valid_sources = CombiConds.VALID_SOURCES
@@ -2211,6 +2221,7 @@ class CombiConds:
                 if provided_data is None:
                     if realtime:
                         data = Adapters.load_stock_data_from_plasma_realtime(list(cols), filtered_stocks)
+                        data.index = data.index * 1e9
                     else:
                         data = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks)
                 else:
@@ -2232,6 +2243,7 @@ class CombiConds:
                         data = Adapters.load_market_stats_from_plasma(list(unique_cols))
                     else:
                         data = Adapters.load_market_stats_from_plasma_realtime(list(unique_cols))
+                        data.index = data.index * 1e9
                 elif is_daily_index:  # daily_index
                     data = Adapters.load_index_daily_ohlcv_from_plasma(list(unique_cols))
                 elif is_stock_data:
@@ -2254,11 +2266,12 @@ class CombiConds:
     # Wrapper methods for backward compatibility
     @staticmethod
     def load_and_process_group_data(conditions_params: list[dict],
-                                  realtime=False) -> tuple[dict[str, pd.Series], list[dict]]:
+                                  realtime=False, data: pd.DataFrame=None) -> tuple[dict[str, pd.Series], list[dict]]:
         """Load and process group data (backward compatibility wrapper)."""
         return CombiConds.load_and_process_data(
             conditions_params=conditions_params,
             data_source='group',
+            provided_data=data,
             realtime=realtime,
         )
 

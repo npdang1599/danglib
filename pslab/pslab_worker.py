@@ -89,24 +89,29 @@ def group_conditions(conditions_params: dict, realtime=True, data=None):
     def test():
         conditions_params = [
             {
-                'function': 'two_line_pos',
-                'inputs': {
-                    'src1': 'bu',
-                    'src2': 'sd',
-                    'stocks': Globs.SECTOR_DIC['VN30'],
-                },
-                'params': {
-                    'direction': 'crossover'
-                }
-            },
+                'function': 'absolute_change_in_range',
+                'inputs': {'src': 'bid',
+                    'timeframe': '30S',
+                    'rolling_window': 1,
+                    'rolling_method': 'mean',
+                    'daily_rolling': False,
+                    'stocks': ['All']},
+                'params': {'n_bars': 20,
+                    'lower_thres': 380.0,
+                    'upper_thres': 1000000000000000000,
+                    'use_as_lookback_cond': False,
+                    'lookback_cond_nbar': 5}
+                    }
         ]
+        realtime = True
+        data = None
 
     
     if not conditions_params:
         return None
         
     # Load stock data
-    required_data, updated_params = CombiConds.load_and_process_group_data2(conditions_params, realtime=realtime, data=data)
+    required_data, updated_params = CombiConds.load_and_process_group_data(conditions_params, realtime=realtime, data=data)
     
     # Generate signals
     signals = CombiConds.combine_conditions(required_data, updated_params)
@@ -129,7 +134,7 @@ def other_conditions(conditions_params: dict, realtime=True, data = None):
     fix_conditions_params(conditions_params)
         
     # Load one series data
-    required_data, updated_params = CombiConds.load_and_process_one_series_data(conditions_params, use_sample_data=False, realtime=realtime, data=data)
+    required_data, updated_params = CombiConds.load_and_process_one_series_data(conditions_params, realtime=realtime, data=data)
     
     # Generate signals
     signals = CombiConds.combine_conditions(required_data, updated_params)
@@ -151,8 +156,8 @@ def calculate_next_candletime(timestamps: float, timeframe: str, unit='s'):
     """Calculate next candle times"""
     return calculate_current_candletime(timestamps, timeframe) + Globs.TF_TO_MIN.get(timeframe) * 60
 
-group_conds = ['BidAskCS', 'BUSD', 'FBuySell', ]
-other_conds = ['F1', 'VN30', 'VNINDEX', 'BidAskF1', 'ArbitUnwind', 'PremiumDiscount']
+group_conds = ['BidAskCS', 'BUSD', 'FBuySell']
+other_conds = ['F1', 'VN30', 'VNINDEX', 'BidAskF1', 'ArbitUnwind', 'PremiumDiscount', 'PS', 'BuySellImpact']
 
 import json
 @app.task(name=TaskName.COMPUTE_SIGNALS)
@@ -178,7 +183,7 @@ def compute_signals(
     try:
         group = strategy['group']
         if group in group_conds:
-            signals = group_conditions(strategy['conditions'], realtime, data =group_data)
+            signals = group_conditions(strategy['conditions'], realtime, data = group_data)
         else:
             signals = other_conditions(strategy['conditions'], realtime, data = market_data)
         
@@ -199,11 +204,90 @@ def compute_signals(
         df['num_entry_days'] = strategy['Number Entry Days']
         df['avg_return'] = strategy['Average Return']
         df['holding_periods'] = strategy['holding_periods']
+        df = df.dropna(subset=['entry_stamp'])
 
         return df
     except Exception as e:
-        logging.error(f"Error in compute_signals: {e}")
+        logging.error(f"Error in compute_signals: {e} {strategy}")
         logging.error(traceback.format_exc())
         return {}
+    
+
+def compute_signals_no_catch_error(
+    strategy: Dict[str, Any],
+    realtime: bool = True,
+    group_data: pd.DataFrame = None,
+    market_data: pd.DataFrame = None
+) -> Dict[str, Any]:
+    """Tính toán tín hiệu giao dịch dựa trên điều kiện và tham số đầu vào.
+
+    Args:
+        data (Dict[str, Any]): Dữ liệu đầu vào.
+        conditions (List[Dict[str, Any]]): Danh sách các điều kiện giao dịch.
+        group (int): Nhóm giao dịch.
+        direction (str): Hướng giao dịch
+        ftype (str): Loại giao dịch.
+        holding_periods (int): Số lượng thanh khoản.
+
+    Returns:
+        Dict[str, Any]: Kết quả tính toán.
+    """
+
+    def test():
+        strategy ={'name': 2311521627,
+            'conditions': [{'function': 'absolute_change_in_range',
+                'inputs': {'src': 'bid',
+                'timeframe': '30S',
+                'rolling_window': 120,
+                'rolling_method': 'mean',
+                'daily_rolling': False,
+                'stocks': ['All']},
+                'params': {'n_bars': 1,
+                'lower_thres': -1000000000000000000,
+                'upper_thres': -4.0,
+                'use_as_lookback_cond': False,
+                'lookback_cond_nbar': 5}}],
+            'holding_periods': 30,
+            'Number of Trades': 355,
+            'Number Entry Days': 33,
+            'Win Rate': 28.169014084507,
+            'Average Return': -2.86169014084507,
+            'avghigh': 2.33267605633804,
+            'avglow': -6.25718309859154,
+            'group': 'BidAskCS',
+            'type': 'short',
+            'ftype': 'single'}
+        group_data: pd.DataFrame = None
+        market_data: pd.DataFrame = None
+
+    group = strategy['group']
+    if group in group_conds:
+        signals = group_conditions(strategy['conditions'], realtime, data = group_data)
+    else:
+        signals = other_conditions(strategy['conditions'], realtime, data = market_data)
+    
+    signals.name = 'signals'
+    df = signals.to_frame().reset_index()
+    df['candleTime'] = df['candleTime'] // 1e9
+    df['exit_stamp'] = df['candleTime'].shift(-strategy['holding_periods']-1)
+    df = df.rename(columns={'candleTime': 'entry_stamp'})
+    df['entry_stamp'] = df['entry_stamp'].shift(-1)
+    df = df[df['signals']].copy()
+    df = df.drop(columns=['signals'])
+
+    df['name'] = strategy['name']
+    df['group'] = strategy['group']
+    df['type'] = strategy['type']
+    df['ftype'] = strategy['ftype']
+    df['Winrate'] = strategy['Win Rate']
+    df['num_trades'] = strategy['Number of Trades']
+    df['num_entry_days'] = strategy['Number Entry Days']
+    df['avg_return'] = strategy['Average Return']
+    df['holding_periods'] = strategy['holding_periods']
+    df = df.dropna(subset=['entry_stamp'])
+
+    return df
+
+    
     
 # celery -A pslab_worker worker --concurrency=20 --loglevel=INFO -n celery_worker@pslab
