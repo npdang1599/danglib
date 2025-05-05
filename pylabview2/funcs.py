@@ -1,6 +1,6 @@
 import logging
 from danglib.pylabview2.core_lib import pd, np, Ta, Adapters, Fns, Utils, Math
-from danglib.pylabview.funcs import Conds as Series_Conds
+from danglib.pylabview.funcs import Conds as Series_Conds, glob_obj as glob_obj1
 # from lib import Label # cd in to Tai/daily_indicators
 from numba import njit
 from pymongo import MongoClient
@@ -53,6 +53,23 @@ class Globs:
             "lookback_cond": Conds.lookback_cond,
             "lookback_cond2": Conds.lookback_cond2,
             "lookback_cond3": Conds.lookback_cond3,
+
+            "flow_percentile": Conds.Flow.percentile_cond,
+            "flow_consecutive_bars": Conds.Flow.consecutive_bars,
+            "flow_value" : Conds.Flow.value,
+            "flow_two_mas" : Conds.Flow.two_mas,
+
+            "returns_stock_vs_cluster_ranked": Conds.Cluster.returns_stock_vs_cluster_ranked,
+            "returns_cluster_vs_index_ranked": Conds.Cluster.returns_cluster_vs_index_ranked,
+            "returns_stock_vs_index_ranked": Conds.Cluster.returns_stock_vs_index_ranked,
+            "consecutive_performance": Conds.Cluster.consecutive_performance,
+            "returns_stock_vs_cluster_strength": Conds.Cluster.returns_stock_vs_cluster_strength,
+            "returns_stock_vs_index_strength": Conds.Cluster.returns_stock_vs_index_strength,
+            "returns_cluster_vs_index_strength": Conds.Cluster.returns_cluster_vs_index_strength,
+            "volume_stock_vs_index" : Conds.Cluster.volume_stock_vs_index,
+            "volume_cluster_vs_index" : Conds.Cluster.volume_cluster_vs_index,
+            "volume_stock_vs_cluster" : Conds.Cluster.volume_stock_vs_cluster,
+            "volume_cluster_vs_cluster_consecutive" : Conds.Cluster.volume_cluster_vs_cluster_consecutive,
 
             "s_price_change": Series_Conds.price_change,
             "s_price_change_vs_hl": Series_Conds.price_change_vs_hl,
@@ -322,7 +339,69 @@ class Conds:
             res = Utils.combine_conditions([pos_cond, range_cond, hline_cond])
             return res
             
+        @staticmethod
+        def combined_strength_condition(
+            df: pd.DataFrame,
+            ma_use_flag: bool = False,
+            ma_len1: int = 5,
+            ma_len2: int = 15,
+            ma_position: str = 'crossover',
+            bb_use_flag: bool = False,
+            bb_length: int = 20,
+            bb_mult: float = 2,
+            bb_position: str = 'crossover',
+            bb_cross_line: str = 'upper',
+            pct_use_flag: bool = False,
+            pct_lookback: int = 128,
+            pct_hline: float = 80,
+            pct_hline_position: str = 'crossover',
+        ):  
+            res = None
+            conds = []
+            if ma_use_flag:
+                df_ma1 = Ta.ma(df, ma_type = 'SMA', length = ma_len1)
+                df_ma2 = Ta.ma(df, ma_type = 'SMA', length = ma_len2)
+                ma_cond = Conds.Standards.two_line_pos(
+                    line1=df_ma1,
+                    line2=df_ma2,
+                    direction=ma_position,
+                    use_flag=ma_use_flag
+                )
+                if ma_cond is not None:
+                    conds.append(ma_cond)
+            if bb_use_flag:
+                df_bb_basis = Ta.sma(df, bb_length)
+                df_bb_stdev = Ta.stdev(df, bb_length)
+                df_bb_upper = df_bb_basis + bb_mult * df_bb_stdev
+                df_bb_lower = df_bb_basis - bb_mult * df_bb_stdev
+                if bb_cross_line == 'upper':
+                    df_bb_cross_line = df_bb_upper
+                elif bb_cross_line == 'lower':
+                    df_bb_cross_line = df_bb_lower 
 
+                bb_cond = Conds.Standards.two_line_pos(
+                    line1=df,
+                    line2=df_bb_cross_line,
+                    direction=bb_position,
+                    use_flag=bb_use_flag
+                )
+                if bb_cond is not None:
+                    conds.append(bb_cond)
+            if pct_use_flag:
+                df_pct = df.rolling(pct_lookback).rank()
+                df_pct = (df_pct - 1) / (pct_lookback - 1) * 100
+                hline = pd.DataFrame(pct_hline, index=df_pct.index, columns=df_pct.columns)
+                pct_cond = Conds.Standards.two_line_pos(
+                    line1=df_pct,
+                    line2=hline,
+                    direction= pct_hline_position,
+                    use_flag=pct_use_flag
+                )
+                if pct_cond is not None:
+                    conds.append(pct_cond)
+            if len(conds) > 0:
+                res = Utils.combine_conditions(conds)
+            return res
     @staticmethod
     def price_change(
         df: pd.DataFrame,
@@ -1148,9 +1227,795 @@ class Conds:
             }
         pass
     
+    class Flow:
+        @staticmethod
+        def percentile_cond(
+            df: pd.DataFrame,
+            src_name: str = 'netBUSD',
+            smoothing: int = 5,
+            lookback: int = 128,
+            position: str = 'crossover',
+            threshold: float = 80,
+            use_flag: bool = False
+        ):
+            """
+            Check if the percentile of the source is within the specified range.
+            src_name: netBUSD, netBUSD/Value, netForeign, netForeign/Value
+            """
+            res = None
+            if use_flag:
+                df_value = df['volume']
+                df_bu = df['bu']
+                df_sd = df['sd']
+                df_netbusd = df_bu - df_sd
+                df_netbusd_adjusted = df_netbusd / df_value
 
-                      
-    
+                df_fb = df['fBuyVal']
+                df_fs = df['fSellVal']
+                df_netforeign = df_fb - df_fs
+                df_netforeign_adjusted = df_netforeign / df_value
+                
+                if src_name == 'netBUSD':
+                    df_src = df_netbusd
+                elif src_name == 'netBUSD/Value':
+                    df_src = df_netbusd_adjusted
+                elif src_name == 'netForeign':
+                    df_src = df_netforeign
+                elif src_name == 'netForeign/Value':
+                    df_src = df_netforeign_adjusted
+                df_src = df_src.rolling(smoothing).mean()
+                df_src = df_src.rolling(lookback).rank()
+                df_src = (df_src - 1) / (lookback - 1) * 100
+                hline = pd.DataFrame(threshold, index = df_src.index, columns= df_src.columns)
+                res = Conds.Standards.two_line_pos(
+                    line1=df_src,
+                    line2=hline,
+                    direction=position,
+                    use_flag=use_flag
+                )
+            return res
+        @staticmethod
+        def consecutive_bars(
+            df: pd.DataFrame,
+            src_name: str = 'netBUSD',
+            smoothing: int = 5,
+            direction: str = 'up',
+            num_bars: int = 5,
+            num_conditional_bars: int = 4,
+            use_flag: bool = False
+        ):
+            """
+            src_name: netBUSD, netBUSD/Value, netForeign, netForeign/Value
+            direction: up, down, positive, negative
+            """
+            res = None
+            if use_flag:
+                df_value = df['volume']
+                df_bu = df['bu']
+                df_sd = df['sd']
+                df_netbusd = df_bu - df_sd
+                df_netbusd_adjusted = df_netbusd / df_value
+
+                df_fb = df['fBuyVal']
+                df_fs = df['fSellVal']
+                df_netforeign = df_fb - df_fs
+                df_netforeign_adjusted = df_netforeign / df_value
+                
+                if src_name == 'netBUSD':
+                    df_src = df_netbusd
+                elif src_name == 'netBUSD/Value':
+                    df_src = df_netbusd_adjusted
+                elif src_name == 'netForeign':
+                    df_src = df_netforeign
+                elif src_name == 'netForeign/Value':
+                    df_src = df_netforeign_adjusted
+
+                # Compute the rolling mean and rank
+                smoothed_src = Ta.sma(df_src, smoothing)
+
+                if direction == 'up':
+                    df_cond = smoothed_src > smoothed_src.shift(1)
+                elif direction == 'down':
+                    df_cond = smoothed_src < smoothed_src.shift(1)
+                elif direction == 'positive':
+                    df_cond = smoothed_src > 0
+                elif direction == 'negative':
+                    df_cond = smoothed_src < 0
+
+                df_cond = df_cond.rolling(num_bars).sum()
+                res = df_cond >= num_conditional_bars
+
+            return res
+        @staticmethod
+        def value(
+            df: pd.DataFrame,
+            src_name: str = 'netBUSD',
+            smoothing: int = 5,
+            position: str = 'crossover',
+            threshold: float = 0,
+            use_flag: bool = False
+        ):
+            """
+            src_name: netBUSD, netBUSD/Value, netForeign, netForeign/Value
+            position: crossover, crossunder, above, below
+            """            
+            res = None
+            if use_flag:
+                df_value = df['volume']
+                df_bu = df['bu']
+                df_sd = df['sd']
+                df_netbusd = df_bu - df_sd
+                df_netbusd_adjusted = df_netbusd / df_value
+
+                df_fb = df['fBuyVal']
+                df_fs = df['fSellVal']
+                df_netforeign = df_fb - df_fs
+                df_netforeign_adjusted = df_netforeign / df_value
+                
+                if src_name == 'netBUSD':
+                    df_src = df_netbusd
+                elif src_name == 'netBUSD/Value':
+                    df_src = df_netbusd_adjusted
+                elif src_name == 'netForeign':
+                    df_src = df_netforeign
+                elif src_name == 'netForeign/Value':
+                    df_src = df_netforeign_adjusted
+
+                smoothed_src = Ta.sma(df_src, smoothing)
+
+                hline = pd.DataFrame(threshold, index=df_src.index, columns=df_src.columns)
+                
+                res = Conds.Standards.two_line_pos(
+                    line1=smoothed_src,
+                    line2=hline,
+                    direction=position,
+                    use_flag=use_flag
+                )
+
+            return res
+        @staticmethod
+        def two_mas(
+            df: pd.DataFrame,
+            src_name: str = 'netBUSD',
+            ma_type: str = 'SMA',
+            ma_len1: int = 5,
+            ma_len2: int = 15,
+            position: str = 'crossover',
+            use_flag: bool = False
+        ):
+            """
+            src_name: netBUSD, netBUSD/Value, netForeign, netForeign/Value
+            ma_type: SMA, EMA
+            position: crossover, crossunder, above, below
+            """
+            res = None
+            if use_flag:
+                df_value = df['volume']
+                df_bu = df['bu']
+                df_sd = df['sd']
+                df_netbusd = df_bu - df_sd
+                df_netbusd_adjusted = df_netbusd / df_value
+
+                df_fb = df['fBuyVal']
+                df_fs = df['fSellVal']
+                df_netforeign = df_fb - df_fs
+                df_netforeign_adjusted = df_netforeign / df_value
+                
+                if src_name == 'netBUSD':
+                    df_src = df_netbusd
+                elif src_name == 'netBUSD/Value':
+                    df_src = df_netbusd_adjusted
+                elif src_name == 'netForeign':
+                    df_src = df_netforeign
+                elif src_name == 'netForeign/Value':
+                    df_src = df_netforeign_adjusted
+
+                df_ma1 = Ta.ma(df_src, ma_type =ma_type,  length = ma_len1)
+                df_ma2 = Ta.ma(df_src, ma_type =ma_type,  length = ma_len2)
+
+                res = Conds.Standards.two_line_pos(
+                    line1=df_ma1,
+                    line2=df_ma2,
+                    direction=position,
+                    use_flag=use_flag
+                )
+            return res
+    class Cluster:
+        @staticmethod
+        def returns_stock_vs_cluster_ranked(
+            df: pd.DataFrame,
+            num_bars: int = 1,
+            top_or_bottom: str = 'top',
+            ranking: int = 3,
+            use_flag: bool = False
+        ):
+            """
+            num_bars: number of bars to calculate return
+            """
+            res = None
+            if use_flag:
+                dic_groups_hrp = Adapters.get_hrp_group()
+                df_return = df['close'].pct_change(periods=num_bars)
+                if top_or_bottom == 'top':
+                    df_ranking_vs_cluster = df_return.groupby(dic_groups_hrp, axis =1).rank(ascending = False, method = 'min')
+                else:
+                    df_ranking_vs_cluster = df_return.groupby(dic_groups_hrp, axis =1).rank(ascending = True, method = 'min')
+                res = df_ranking_vs_cluster <= ranking
+            return res
+        @staticmethod
+        def returns_stock_vs_index_ranked(
+            df: pd.DataFrame,
+            num_bars: int = 1,
+            top_or_bottom: str = 'top',
+            ranking: int = 3,
+            use_flag: bool = False
+        ):
+            """
+            num_bars: number of bars to calculate return
+            """
+            res = None
+            if use_flag:
+                df_return = df['close'].pct_change(periods=num_bars)
+                if top_or_bottom == 'top':
+                    df_ranking_vs_market = df_return.rank(ascending = False, method = 'min', axis =1)
+                else:
+                    df_ranking_vs_market = df_return.rank(ascending = True, method = 'min', axis =1)
+                res = df_ranking_vs_market <= ranking
+            return res
+        @staticmethod
+        def returns_cluster_vs_index_ranked(
+            df: pd.DataFrame,
+            num_bars: int = 1,
+            top_or_bottom: str = 'top',
+            ranking: int = 3,
+            use_flag: bool = False
+        ):
+            """
+            num_bars: number of bars to calculate return
+            """
+            res = None
+            df_close = df['close']
+            if use_flag:
+                dic_groups_hrp = Adapters.get_hrp_group()
+                cluster_stock_map = {}    
+                for cluster in dic_groups_hrp.values():
+                    cluster_stock_map[cluster] = [k for k,v in dic_groups_hrp.items() if v == cluster]
+                s_cluster_map = pd.Series(cluster_stock_map)
+                stock_map_df = s_cluster_map.explode().reset_index()
+                stock_map_df.columns = ['cluster', 'stock']
+
+
+                df_return = df['close'].pct_change(periods=num_bars)
+                df_return_cluster = df_return.groupby(dic_groups_hrp, axis =1).mean()
+                if top_or_bottom == 'top':
+                    df_return_cluster_ranked = df_return_cluster.rank(ascending = False, method = 'min', axis =1)   
+                else:
+                    df_return_cluster_ranked = df_return_cluster.rank(ascending = True, method = 'min', axis =1)
+
+                df_reset = df_return_cluster_ranked.reset_index()
+                # Melt: Turn cluster columns into rows
+                df_long = df_reset.melt(
+                    id_vars='day',                  # Column(s) to keep as identifier variables
+                    var_name='cluster',             # Name for the new column holding cluster names
+                    value_name='cluster_value'      # Name for the new column holding the values
+                )
+                merged_df = pd.merge(df_long, stock_map_df, on='cluster')
+                result_df = merged_df.pivot(index='day', columns='stock', values='cluster_value')
+                result_df = result_df.sort_index(axis=1)  
+                res = np.where(df_close.isna(), False, result_df <= ranking)
+                res = pd.DataFrame(res, index=df_close.index, columns=df_close.columns)
+            return res
+        @staticmethod
+        def consecutive_performance(
+            df: pd.DataFrame,
+            num_return_bars: int = 1,
+            direction: str = 'positive',
+            num_consecutive_bars: int = 5,
+            num_conditional_bars: int = 4,
+            use_flag: bool = False
+        ):
+            res = None
+            if use_flag:
+                df_return = df['close'].pct_change(periods=num_return_bars)
+                df_vnindex = glob_obj1.get_one_stock_data('VNINDEX')
+                df_vnindex_return = df_vnindex['close'].pct_change(periods=num_return_bars)
+                df_vnindex_return.index = df_return.index
+                df_relative_return = df_return.subtract(df_vnindex_return, axis = 0)
+                if direction == 'positive':
+                    df_cond = df_relative_return > 0
+                elif direction == 'negative':
+                    df_cond = df_relative_return < 0
+                df_cond = df_cond.rolling(num_consecutive_bars).sum()  
+
+                res = df_cond >= num_conditional_bars
+            return res
+
+        @staticmethod
+        def returns_stock_vs_cluster_strength(
+            df: pd.DataFrame,
+            num_return_bars: int = 1,
+            ma_use_flag: bool = False,
+            ma_len1: int = 5,
+            ma_len2: int = 15,
+            ma_position: str = 'crossover',
+            bb_use_flag: bool = False,
+            bb_length: int = 20,
+            bb_mult: float = 2,
+            bb_position: str = 'crossover',
+            bb_cross_line: str = 'upper',
+            pct_use_flag: bool = False,
+            pct_lookback: int = 128,
+            pct_hline: float = 80,
+            pct_hline_position: str = 'crossover',
+            use_flag: bool = False
+        ):
+            res = None
+            if use_flag:
+                df_returns = df['close'].pct_change(periods=num_return_bars) * 100
+
+                dic_groups_hrp = Adapters.get_hrp_group()
+                df_relative_returns = pd.DataFrame()
+                for group_name in set(dic_groups_hrp.values()):
+                    group_columns = [col for col, group in dic_groups_hrp.items() if group == group_name]
+                    if group_columns:
+                        # Select the columns for the current group
+                        group_data = df_returns[group_columns]
+
+                        group_mean = group_data.mean(axis=1)
+
+                        normalized_group_data = group_data.subtract(group_mean, axis=0)
+
+                        # Add the normalized columns to the output DataFrame
+                        df_relative_returns = pd.concat([df_relative_returns, normalized_group_data], axis=1)
+                df_relative_returns = df_relative_returns.sort_index(axis=1)
+                res = Conds.Standards.combined_strength_condition(df_relative_returns,
+                                                                  ma_use_flag=ma_use_flag,
+                                                                ma_len1=ma_len1,
+                                                                ma_len2=ma_len2,
+                                                                ma_position=ma_position,
+                                                                bb_use_flag=bb_use_flag,
+                                                                bb_length=bb_length,
+                                                                bb_mult=bb_mult,
+                                                                bb_position=bb_position,
+                                                                bb_cross_line=bb_cross_line,
+                                                                pct_use_flag=pct_use_flag,
+                                                                pct_lookback=pct_lookback,
+                                                                pct_hline=pct_hline,
+                                                                pct_hline_position=pct_hline_position
+                )
+            return res
+        @staticmethod
+        def returns_stock_vs_index_strength(
+            df: pd.DataFrame,
+            num_return_bars: int = 1,
+            ma_use_flag: bool = False,
+            ma_len1: int = 5,
+            ma_len2: int = 15,
+            ma_position: str = 'crossover',
+            bb_use_flag: bool = False,
+            bb_length: int = 20,
+            bb_mult: float = 2,
+            bb_position: str = 'crossover',
+            bb_cross_line: str = 'upper',
+            pct_use_flag: bool = False,
+            pct_lookback: int = 128,
+            pct_hline: float = 80,
+            pct_hline_position: str = 'crossover',
+            use_flag: bool = False
+        ):
+            res = None
+            if use_flag:
+                df_returns = df['close'].pct_change(periods=num_return_bars) * 100
+                df_vnindex = glob_obj1.get_one_stock_data('VNINDEX')
+                df_vnindex_return = df_vnindex['close'].pct_change(periods=num_return_bars) * 100
+                df_vnindex_return.index = df_vnindex['day']
+                df_vnindex_return = df_vnindex_return.reindex(df_returns.index) # de khong loi khi data bi miss
+                # Calculate the relative returns
+                df_relative_returns = df_returns.subtract(df_vnindex_return, axis=0)
+               
+                df_relative_returns = df_relative_returns.sort_index(axis=1)
+                res = Conds.Standards.combined_strength_condition(df_relative_returns,
+                                                                  ma_use_flag=ma_use_flag,
+                                                                ma_len1=ma_len1,
+                                                                ma_len2=ma_len2,
+                                                                ma_position=ma_position,
+                                                                bb_use_flag=bb_use_flag,
+                                                                bb_length=bb_length,
+                                                                bb_mult=bb_mult,
+                                                                bb_position=bb_position,
+                                                                bb_cross_line=bb_cross_line,
+                                                                pct_use_flag=pct_use_flag,
+                                                                pct_lookback=pct_lookback,
+                                                                pct_hline=pct_hline,
+                                                                pct_hline_position=pct_hline_position
+                )
+            return res
+        @staticmethod
+        def returns_cluster_vs_index_strength(
+            df: pd.DataFrame,
+            num_return_bars: int = 1,
+            ma_use_flag: bool = False,
+            ma_len1: int = 5,
+            ma_len2: int = 15,
+            ma_position: str = 'crossover',
+            bb_use_flag: bool = False,
+            bb_length: int = 20,
+            bb_mult: float = 2,
+            bb_position: str = 'crossover',
+            bb_cross_line: str = 'upper',
+            pct_use_flag: bool = False,
+            pct_lookback: int = 128,
+            pct_hline: float = 80,
+            pct_hline_position: str = 'crossover',
+            use_flag: bool = False
+        ):
+            res = None
+            if use_flag:
+                df_returns = df['close'].pct_change(periods=num_return_bars) * 100
+                df_vnindex = glob_obj1.get_one_stock_data('VNINDEX')
+                df_vnindex_return = df_vnindex['close'].pct_change(periods=num_return_bars) * 100
+                df_vnindex_return.index = df_vnindex['day']
+                df_vnindex_return = df_vnindex_return.reindex(df_returns.index) # de khong loi khi data bi miss
+
+                dic_groups_hrp = Adapters.get_hrp_group()
+                cluster_stock_map = {}    
+                for cluster in dic_groups_hrp.values():
+                    cluster_stock_map[cluster] = [k for k,v in dic_groups_hrp.items() if v == cluster]
+                s_cluster_map = pd.Series(cluster_stock_map)
+                stock_map_df = s_cluster_map.explode().reset_index()
+                stock_map_df.columns = ['cluster', 'stock']
+
+                # df_returns_index = df_returns.mean(axis=1)
+                df_returns_cluster = df_returns.groupby(dic_groups_hrp, axis =1).mean()
+                df_relative_volume_cluster_index = df_returns_cluster.subtract(df_vnindex_return, axis=0)
+                
+                df_reset = df_relative_volume_cluster_index.reset_index()
+                # Melt: Turn cluster columns into rows
+                df_long = df_reset.melt(
+                    id_vars='day',                  # Column(s) to keep as identifier variables
+                    var_name='cluster',             # Name for the new column holding cluster names
+                    value_name='cluster_value'      # Name for the new column holding the values
+                )
+                merged_df = pd.merge(df_long, stock_map_df, on='cluster')
+                df_relative_returns = merged_df.pivot(index='day', columns='stock', values='cluster_value')
+                df_relative_returns = df_relative_returns.sort_index(axis=1) 
+                df_relative_returns = np.where(df_returns.isna(), np.nan, df_relative_returns)
+                df_relative_returns = pd.DataFrame(df_relative_returns, index=df_returns.index, columns=df_returns.columns)
+          
+                df_relative_returns = df_relative_returns.sort_index(axis=1)
+                res = Conds.Standards.combined_strength_condition(df_relative_returns,
+                                                                  ma_use_flag=ma_use_flag,
+                                                                ma_len1=ma_len1,
+                                                                ma_len2=ma_len2,
+                                                                ma_position=ma_position,
+                                                                bb_use_flag=bb_use_flag,
+                                                                bb_length=bb_length,
+                                                                bb_mult=bb_mult,
+                                                                bb_position=bb_position,
+                                                                bb_cross_line=bb_cross_line,
+                                                                pct_use_flag=pct_use_flag,
+                                                                pct_lookback=pct_lookback,
+                                                                pct_hline=pct_hline,
+                                                                pct_hline_position=pct_hline_position
+                )
+            return res
+        @staticmethod
+        def volume_stock_vs_index(
+            df: pd.DataFrame,
+            smoothing: int = 5,
+            ma_use_flag: bool = False,
+            ma_len1: int = 5,
+            ma_len2: int = 15,
+            ma_position: str = 'crossover',
+            bb_use_flag: bool = False,
+            bb_length: int = 20,
+            bb_mult: float = 2,
+            bb_position: str = 'crossover',
+            bb_cross_line: str = 'upper',
+            pct_use_flag: bool = False,
+            pct_lookback: int = 128,
+            pct_hline: float = 80,
+            pct_hline_position: str = 'crossover',
+            use_flag: bool = False
+        ):
+      
+            res = None
+            if use_flag:
+                df_volume = df['volume'].rolling(smoothing).mean()
+                df_volume_index = df_volume.sum(axis=1)
+                df_relative_volume = df_volume.div(df_volume_index, axis=0) * 100
+                res = Conds.Standards.combined_strength_condition(df_relative_volume,
+                                                                ma_use_flag=ma_use_flag,
+                                                                ma_len1=ma_len1,
+                                                                ma_len2=ma_len2,
+                                                                ma_position=ma_position,
+                                                                bb_use_flag=bb_use_flag,
+                                                                bb_length=bb_length,
+                                                                bb_mult=bb_mult,
+                                                                bb_position=bb_position,
+                                                                bb_cross_line=bb_cross_line,
+                                                                pct_use_flag=pct_use_flag,
+                                                                pct_lookback=pct_lookback,
+                                                                pct_hline=pct_hline,
+                                                                pct_hline_position=pct_hline_position
+                )
+                # if ma_use_flag:
+                #     df_ma1 = Ta.ma(df_relative_volume, ma_type = 'SMA', length = ma_len1)
+                #     df_ma2 = Ta.ma(df_relative_volume, ma_type = 'SMA', length = ma_len2)
+                #     res = Conds.Standards.two_line_pos(
+                #         line1=df_ma1,
+                #         line2=df_ma2,
+                #         direction=ma_position,
+                #         use_flag=ma_use_flag
+                #     )
+                # elif bb_use_flag:
+                #     df_bb_basis = Ta.sma(df_relative_volume, bb_length)
+                #     df_bb_stdev = Ta.stdev(df_relative_volume, bb_length)
+                #     df_bb_upper = df_bb_basis + bb_mult * df_bb_stdev
+                #     df_bb_lower = df_bb_basis - bb_mult * df_bb_stdev
+                #     if bb_cross_line == 'upper':
+                #         df_bb_cross_line = df_bb_upper
+                #     elif bb_cross_line == 'lower':
+                #         df_bb_cross_line = df_bb_lower 
+
+                #     res = Conds.Standards.two_line_pos(
+                #         line1=df_relative_volume,
+                #         line2=df_bb_cross_line,
+                #         direction=bb_position,
+                #         use_flag=bb_use_flag
+                #     )
+                # elif pct_use_flag:
+                #     df_pct = df_relative_volume.rolling(pct_lookback).rank()
+                #     df_pct = (df_pct - 1) / (pct_lookback - 1) * 100
+                #     hline = pd.DataFrame(pct_hline, index=df_pct.index, columns=df_pct.columns)
+                #     res = Conds.Standards.two_line_pos(
+                #         line1=df_pct,
+                #         line2=hline,
+                #         direction= pct_hline_position,
+                #         use_flag=pct_use_flag
+                #     )
+            return res
+        
+
+        @staticmethod
+        def volume_stock_vs_cluster(
+            df: pd.DataFrame,
+            smoothing: int = 5,
+            ma_use_flag: bool = False,
+            ma_len1: int = 5,
+            ma_len2: int = 15,
+            ma_position: str = 'crossover',
+            bb_use_flag: bool = False,
+            bb_length: int = 20,
+            bb_mult: float = 2,
+            bb_position: str = 'crossover',
+            bb_cross_line: str = 'upper',
+            pct_use_flag: bool = False,
+            pct_lookback: int = 128,
+            pct_hline: float = 80,
+            pct_hline_position: str = 'crossover',
+            use_flag: bool = False
+        ):
+            res = None
+            if use_flag:
+                df_volume = df['volume'].rolling(smoothing).mean()
+
+                dic_groups_hrp = Adapters.get_hrp_group()
+                df_relative_volume = pd.DataFrame()
+                for group_name in set(dic_groups_hrp.values()):
+                    group_columns = [col for col, group in dic_groups_hrp.items() if group == group_name]
+                    if group_columns:
+                        # Select the columns for the current group
+                        group_data = df_volume[group_columns]
+
+                        # Calculate the sum of the columns in the current group for each row
+                        group_sum = group_data.sum(axis=1)
+
+                        # Divide each column in the group by the group sum
+                        normalized_group_data = group_data.div(group_sum, axis=0) * 100
+
+                        # Add the normalized columns to the output DataFrame
+                        df_relative_volume = pd.concat([df_relative_volume, normalized_group_data], axis=1)
+                df_relative_volume = df_relative_volume.sort_index(axis=1)
+                res = Conds.Standards.combined_strength_condition(df_relative_volume,
+                                                                ma_use_flag=ma_use_flag,
+                                                                ma_len1=ma_len1,
+                                                                ma_len2=ma_len2,
+                                                                ma_position=ma_position,
+                                                                bb_use_flag=bb_use_flag,
+                                                                bb_length=bb_length,
+                                                                bb_mult=bb_mult,
+                                                                bb_position=bb_position,
+                                                                bb_cross_line=bb_cross_line,
+                                                                pct_use_flag=pct_use_flag,
+                                                                pct_lookback=pct_lookback,
+                                                                pct_hline=pct_hline,
+                                                                pct_hline_position=pct_hline_position
+                )
+                # if ma_use_flag:
+                #     df_ma1 = Ta.ma(df_relative_volume, ma_type = 'SMA', length = ma_len1)
+                #     df_ma2 = Ta.ma(df_relative_volume, ma_type = 'SMA', length = ma_len2)
+                #     res = Conds.Standards.two_line_pos(
+                #         line1=df_ma1,
+                #         line2=df_ma2,
+                #         direction=ma_position,
+                #         use_flag=ma_use_flag
+                #     )
+                # elif bb_use_flag:
+                #     df_bb_basis = Ta.sma(df_relative_volume, bb_length)
+                #     df_bb_stdev = Ta.stdev(df_relative_volume, bb_length)
+                #     df_bb_upper = df_bb_basis + bb_mult * df_bb_stdev
+                #     df_bb_lower = df_bb_basis - bb_mult * df_bb_stdev
+                #     if bb_cross_line == 'upper':
+                #         df_bb_cross_line = df_bb_upper
+                #     elif bb_cross_line == 'lower':
+                #         df_bb_cross_line = df_bb_lower 
+
+                #     res = Conds.Standards.two_line_pos(
+                #         line1=df_relative_volume,
+                #         line2=df_bb_cross_line,
+                #         direction=bb_position,
+                #         use_flag=bb_use_flag
+                #     )
+                # elif pct_use_flag:
+                #     df_pct = df_relative_volume.rolling(pct_lookback).rank()
+                #     df_pct = (df_pct - 1) / (pct_lookback - 1) * 100
+                #     hline = pd.DataFrame(pct_hline, index=df_pct.index, columns=df_pct.columns)
+                #     res = Conds.Standards.two_line_pos(
+                #         line1=df_pct,
+                #         line2=hline,
+                #         direction= pct_hline_position,
+                #         use_flag=pct_use_flag
+                #     )
+            return res
+        
+        @staticmethod
+        def volume_cluster_vs_index(
+            df: pd.DataFrame,
+            smoothing: int = 5,
+            ma_use_flag: bool = False,
+            ma_len1: int = 5,
+            ma_len2: int = 15,
+            ma_position: str = 'crossover',
+            bb_use_flag: bool = False,
+            bb_length: int = 20,
+            bb_mult: float = 2,
+            bb_position: str = 'crossover',
+            bb_cross_line: str = 'upper',
+            pct_use_flag: bool = False,
+            pct_lookback: int = 128,
+            pct_hline: float = 80,
+            pct_hline_position: str = 'crossover',
+            use_flag: bool = False
+        ):
+            res = None
+            if use_flag:
+                df_volume = df['volume'].rolling(smoothing).mean()
+                dic_groups_hrp = Adapters.get_hrp_group()
+                cluster_stock_map = {}    
+                for cluster in dic_groups_hrp.values():
+                    cluster_stock_map[cluster] = [k for k,v in dic_groups_hrp.items() if v == cluster]
+                s_cluster_map = pd.Series(cluster_stock_map)
+                stock_map_df = s_cluster_map.explode().reset_index()
+                stock_map_df.columns = ['cluster', 'stock']
+
+                df_volume_index = df_volume.sum(axis=1)
+                df_volume_cluster = df_volume.groupby(dic_groups_hrp, axis =1).sum()
+                df_relative_volume_cluster_index = df_volume_cluster.div(df_volume_index, axis=0) * 100
+                
+                df_reset = df_relative_volume_cluster_index.reset_index()
+                # Melt: Turn cluster columns into rows
+                df_long = df_reset.melt(
+                    id_vars='day',                  # Column(s) to keep as identifier variables
+                    var_name='cluster',             # Name for the new column holding cluster names
+                    value_name='cluster_value'      # Name for the new column holding the values
+                )
+                merged_df = pd.merge(df_long, stock_map_df, on='cluster')
+                df_relative_volume = merged_df.pivot(index='day', columns='stock', values='cluster_value')
+                df_relative_volume = df_relative_volume.sort_index(axis=1) 
+                df_relative_volume = np.where(df_volume.isna(), np.nan, df_relative_volume)
+                df_relative_volume = pd.DataFrame(df_relative_volume, index=df_volume.index, columns=df_volume.columns)
+
+                res = Conds.Standards.combined_strength_condition(df_relative_volume,
+                                                                ma_use_flag=ma_use_flag,
+                                                                ma_len1=ma_len1,
+                                                                ma_len2=ma_len2,
+                                                                ma_position=ma_position,
+                                                                bb_use_flag=bb_use_flag,
+                                                                bb_length=bb_length,
+                                                                bb_mult=bb_mult,
+                                                                bb_position=bb_position,
+                                                                bb_cross_line=bb_cross_line,
+                                                                pct_use_flag=pct_use_flag,
+                                                                pct_lookback=pct_lookback,
+                                                                pct_hline=pct_hline,
+                                                                pct_hline_position=pct_hline_position
+                )
+                # if ma_use_flag:
+                #     df_ma1 = Ta.ma(df_relative_volume, ma_type = 'SMA', length = ma_len1)
+                #     df_ma2 = Ta.ma(df_relative_volume, ma_type = 'SMA', length = ma_len2)
+                #     res = Conds.Standards.two_line_pos(
+                #         line1=df_ma1,
+                #         line2=df_ma2,
+                #         direction=ma_position,
+                #         use_flag=ma_use_flag
+                #     )
+                # elif bb_use_flag:
+                #     df_bb_basis = Ta.sma(df_relative_volume, bb_length)
+                #     df_bb_stdev = Ta.stdev(df_relative_volume, bb_length)
+                #     df_bb_upper = df_bb_basis + bb_mult * df_bb_stdev
+                #     df_bb_lower = df_bb_basis - bb_mult * df_bb_stdev
+                #     if bb_cross_line == 'upper':
+                #         df_bb_cross_line = df_bb_upper
+                #     elif bb_cross_line == 'lower':
+                #         df_bb_cross_line = df_bb_lower 
+
+                #     res = Conds.Standards.two_line_pos(
+                #         line1=df_relative_volume,
+                #         line2=df_bb_cross_line,
+                #         direction=bb_position,
+                #         use_flag=bb_use_flag
+                #     )
+                # elif pct_use_flag:
+                #     df_pct = df_relative_volume.rolling(pct_lookback).rank()
+                #     df_pct = (df_pct - 1) / (pct_lookback - 1) * 100
+                #     hline = pd.DataFrame(pct_hline, index=df_pct.index, columns=df_pct.columns)
+                #     res = Conds.Standards.two_line_pos(
+                #         line1=df_pct,
+                #         line2=hline,
+                #         direction= pct_hline_position,
+                #         use_flag=pct_use_flag
+                #     )
+            return res
+        @staticmethod
+        def volume_cluster_vs_cluster_consecutive(
+            df: pd.DataFrame,
+            smoothing: int = 5,
+            num_bars: int = 5,
+            top_or_bottom: str = 'top',
+            ranking: int = 3,
+            consecutive_bars: int = 5,
+            num_conditional_bars: int = 4,
+            use_flag: bool = False
+        ):
+            res = None
+            if use_flag:
+                df_volume = df['volume'].rolling(smoothing).mean()
+                dic_groups_hrp = Adapters.get_hrp_group()
+                cluster_stock_map = {}    
+                for cluster in dic_groups_hrp.values():
+                    cluster_stock_map[cluster] = [k for k,v in dic_groups_hrp.items() if v == cluster]
+                s_cluster_map = pd.Series(cluster_stock_map)
+                stock_map_df = s_cluster_map.explode().reset_index()
+                stock_map_df.columns = ['cluster', 'stock']
+
+                df_volume_index = df_volume.sum(axis=1)
+                df_volume_cluster = df_volume.groupby(dic_groups_hrp, axis =1).sum()
+                df_relative_volume_cluster_index = df_volume_cluster.div(df_volume_index, axis=0) * 100
+                df_relative_volume_cluster_index = df_relative_volume_cluster_index.pct_change(periods=num_bars) * 100
+                if top_or_bottom == 'top':
+                   df_relative_volume_cluster_index = df_relative_volume_cluster_index.rank(ascending = False, method = 'min', axis =1)
+                else:
+                   df_relative_volume_cluster_index = df_relative_volume_cluster_index.rank(ascending = True, method = 'min', axis =1)
+
+                df_reset = df_relative_volume_cluster_index.reset_index()
+                # Melt: Turn cluster columns into rows
+                df_long = df_reset.melt(
+                    id_vars='day',                  # Column(s) to keep as identifier variables
+                    var_name='cluster',             # Name for the new column holding cluster names
+                    value_name='cluster_value'      # Name for the new column holding the values
+                )
+                merged_df = pd.merge(df_long, stock_map_df, on='cluster')
+                df_relative_volume = merged_df.pivot(index='day', columns='stock', values='cluster_value')
+                df_relative_volume = df_relative_volume.sort_index(axis=1)
+                df_relative_volume = np.where(df_volume.isna(), np.nan, df_relative_volume)
+                df_relative_volume = pd.DataFrame(df_relative_volume, index=df_volume.index, columns=df_volume.columns)
+
+                df_cond = df_relative_volume <= ranking
+                df_cond = df_cond.rolling(consecutive_bars).sum()
+                res = df_cond >= num_conditional_bars
+            return res
+
 class FilteringStocks:
 
     @staticmethod
@@ -1876,6 +2741,344 @@ class Vectorized:
         return params_df
     
     @staticmethod
+    def create_params_sets2():
+
+        params_dic = {
+                    'percentile1':{
+                        'function': 'flow_percentile',
+                        'params': {
+                            'src_name': ['netBUSD', 'netBUSD/Value', 'netForeign', 'netForeign/Value'],
+                            'smoothing': [1,5, 10, 15],
+                            'lookback': [64, 128, 256],
+                            ('position','threshold') : [
+                                ('crossover', 80), ('above', 80),
+                                ('crossunder', 20), ('below', 20),
+                                ('crossover', 90), ('above', 90),
+                                ('crossunder', 10), ('below', 10),
+                                ('crossover', 95), ('above', 95),
+                                ('crossunder', 5), ('below', 5),
+                                ('crossover', 98), ('above', 98),
+                                ('crossunder', 2), ('below', 2)
+                            ],                        
+                        }
+                    },
+                    'consecutive1':{
+                        'function': 'flow_consecutive_bars',
+                         'params': {
+                            'src_name': ['netBUSD', 'netBUSD/Value', 'netForeign', 'netForeign/Value'],
+                            'smoothing': [1,5, 10, 15],
+                            'direction': ['up', 'down', 'positive','negative'],
+                            ('num_conditional_bars', 'num_bars'): [(3,3), (4,4), (5,5), (3,5), (4,5), (3,4)],
+                         }
+                    },
+                    'value1':{
+                        'function': 'flow_value',
+                        'params': {
+                            'src_name': ['netBUSD', 'netBUSD/Value', 'netForeign', 'netForeign/Value'],
+                            'smoothing': [1,5, 10, 15],
+                            'position': ['crossover', 'crossunder', 'above', 'below'],
+                            'threshold': [0]
+                        }
+                    },
+                    'two_mas1': {
+                        'function': 'flow_two_mas',
+                        'params': {
+                            'src_name': ['netBUSD', 'netBUSD/Value', 'netForeign', 'netForeign/Value'],
+                            ('ma_len1', 'ma_len2'): [(2, 5), (3, 10), (3, 15), (3, 20), (5,10), (5,15), (5,20)],
+                            'position': ['crossover', 'crossunder', 'above', 'below'],
+                        }
+                    },
+                    'returns_stock_vs_cluster': {
+                        'function': 'returns_stock_vs_cluster_ranked',
+                        'params': {
+                           'num_bars': [1, 3, 5, 10],
+                           'top_or_bottom': ['top', 'bottom'],
+                            'ranking': [2,3],
+                        }
+                    },
+                    'returns_stock_vs_market': {
+                        'function': 'returns_stock_vs_index_ranked',
+                        'params': {
+                            'num_bars': [1, 3, 5, 10],
+                            'top_or_bottom': ['top', 'bottom'],
+                            'ranking': [2,3],
+                        }
+                    },
+                    'returns_cluster_vs_market': {
+                        'function': 'returns_cluster_vs_index_ranked',
+                        'params': {
+                            'num_bars': [1, 3, 5, 10],
+                            'top_or_bottom': ['top', 'bottom'],
+                            'ranking': [2,3],
+                        }
+                    },
+                    'returns_stock_vs_index_strength1': {
+                        'function': 'returns_stock_vs_index_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'ma_use_flag': [True],
+                            ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
+                            'ma_position': ['crossover', 'crossunder', 'above', 'below'],
+                        }
+                    },
+                    'returns_stock_vs_index_strength2': {
+                        'function': 'returns_stock_vs_index_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'bb_use_flag': [True],
+                            'bb_length': [10,15,20,25],
+                            'bb_mult' : [1, 1.5, 2, 2.5],
+                            'bb_position': ['crossover', 'crossunder'],
+                            'bb_cross_line': ['upper', 'lower'],
+                        }
+                    },
+                    'returns_stock_vs_index_strength3': {
+                        'function' : 'returns_stock_vs_index_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'pct_use_flag': [True],
+                            'pct_lookback': [64, 128, 256],
+                            ('pct_hline_position','pct_hline') : [
+                                ('crossover', 80), ('above', 80),
+                                ('crossunder', 20), ('below', 20),
+                                ('crossover', 90), ('above', 90),
+                                ('crossunder', 10), ('below', 10),
+                                ('crossover', 95), ('above', 95),
+                                ('crossunder', 5), ('below', 5),
+                                ('crossover', 98), ('above', 98),
+                                ('crossunder', 2), ('below', 2)
+                            ],    
+                        }
+                    },
+                    'returns_stock_vs_cluster_strength1': {
+                        'function': 'returns_stock_vs_cluster_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'ma_use_flag': [True],
+                            ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
+                            'ma_position': ['crossover', 'crossunder', 'above', 'below'],
+                        }
+                    },
+                    'returns_stock_vs_cluster_strength2': {
+                        'function': 'returns_stock_vs_cluster_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'bb_use_flag': [True],
+                            'bb_length': [10,15,20,25],
+                            'bb_mult' : [1, 1.5, 2, 2.5],
+                            'bb_position': ['crossover', 'crossunder'],
+                            'bb_cross_line': ['upper', 'lower'],
+                        }
+                    },
+                    'returns_stock_vs_cluster_strength3': {
+                        'function' : 'returns_stock_vs_cluster_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'pct_use_flag': [True],
+                            'pct_lookback': [64, 128, 256],
+                            ('pct_hline_position','pct_hline') : [
+                                ('crossover', 80), ('above', 80),
+                                ('crossunder', 20), ('below', 20),
+                                ('crossover', 90), ('above', 90),
+                                ('crossunder', 10), ('below', 10),
+                                ('crossover', 95), ('above', 95),
+                                ('crossunder', 5), ('below', 5),
+                                ('crossover', 98), ('above', 98),
+                                ('crossunder', 2), ('below', 2)
+                            ],    
+                        }
+                    },
+                    'returns_cluster_vs_index_strength1': {
+                        'function': 'returns_cluster_vs_index_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'ma_use_flag': [True],
+                            ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
+                            'ma_position': ['crossover', 'crossunder', 'above', 'below'],
+                        }
+                    },
+                    'returns_cluster_vs_index_strength2': {
+                        'function': 'returns_cluster_vs_index_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'bb_use_flag': [True],
+                            'bb_length': [10,15,20,25],
+                            'bb_mult' : [1, 1.5, 2, 2.5],
+                            'bb_position': ['crossover', 'crossunder'],
+                            'bb_cross_line': ['upper', 'lower'],
+                        },
+                    },
+                    'returns_cluster_vs_index_strength3': {
+                        'function' : 'returns_cluster_vs_index_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'pct_use_flag': [True],
+                            'pct_lookback': [64, 128, 256],
+                            ('pct_hline_position','pct_hline') : [
+                                ('crossover', 80), ('above', 80),
+                                ('crossunder', 20), ('below', 20),
+                                ('crossover', 90), ('above', 90),
+                                ('crossunder', 10), ('below', 10),
+                                ('crossover', 95), ('above', 95),
+                                ('crossunder', 5), ('below', 5),
+                                ('crossover', 98), ('above', 98),
+                                ('crossunder', 2), ('below', 2)
+                            ],    
+                        }
+                    },
+                    'consecutive_performance' : {
+                        'function': 'consecutive_performance',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'direction': ['positive', 'negative'],
+                            ('num_conditional_bars','num_consecutive_bars'): [(1,1), (3,3), (5,5), (10,10), (4,5), (8,10), (9,10)],
+                        }
+                    },
+                    'volume_stock_vs_index1': {
+                        'function': 'volume_stock_vs_index',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'ma_use_flag': [True],
+                            ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
+                            'ma_position': ['crossover', 'crossunder', 'above', 'below'],
+                        }
+                    },
+                    'volume_stock_vs_index2': {
+                        'function': 'volume_stock_vs_index',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'bb_use_flag': [True],
+                            'bb_length': [10,15,20,25],
+                            'bb_mult' : [1, 1.5, 2, 2.5],
+                            'bb_position': ['crossover', 'crossunder'],
+                            'bb_cross_line': ['upper', 'lower'],
+                        }
+                    },
+                    'volume_stock_vs_index3': {
+                        'function' : 'volume_stock_vs_index',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'pct_use_flag': [True],
+                            'pct_lookback': [64, 128, 256],
+                            ('pct_hline_position','pct_hline') : [
+                                ('crossover', 80), ('above', 80),
+                                ('crossunder', 20), ('below', 20),
+                                ('crossover', 90), ('above', 90),
+                                ('crossunder', 10), ('below', 10),
+                                ('crossover', 95), ('above', 95),
+                                ('crossunder', 5), ('below', 5),
+                                ('crossover', 98), ('above', 98),
+                                ('crossunder', 2), ('below', 2)
+                            ],    
+                        }
+                    },
+                    'volume_stock_vs_cluster1': {
+                        'function': 'volume_stock_vs_cluster',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'ma_use_flag': [True],
+                            ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
+                            'ma_position': ['crossover', 'crossunder', 'above', 'below'],
+                        }
+                    },
+                    'volume_stock_vs_cluster2': {
+                        'function': 'volume_stock_vs_cluster',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'bb_use_flag': [True],
+                            'bb_length': [10,15,20,25],
+                            'bb_mult' : [1, 1.5, 2, 2.5],
+                            'bb_position': ['crossover', 'crossunder'],
+                            'bb_cross_line': ['upper', 'lower'],
+                        }
+                    },
+                    'volume_stock_vs_cluster3': {
+                        'function' : 'volume_stock_vs_cluster',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'pct_use_flag': [True],
+                            'pct_lookback': [64, 128, 256],
+                            ('pct_hline_position','pct_hline') : [
+                                ('crossover', 80), ('above', 80),
+                                ('crossunder', 20), ('below', 20),
+                                ('crossover', 90), ('above', 90),
+                                ('crossunder', 10), ('below', 10),
+                                ('crossover', 95), ('above', 95),
+                                ('crossunder', 5), ('below', 5),
+                                ('crossover', 98), ('above', 98),
+                                ('crossunder', 2), ('below', 2)
+                            ],    
+                        }
+                    },
+                     'volume_cluster_vs_index1': {
+                        'function': 'volume_cluster_vs_index',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'ma_use_flag': [True],
+                            ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
+                            'ma_position': ['crossover', 'crossunder', 'above', 'below'],
+                        }
+                    },
+                    'volume_cluster_vs_index2': {
+                        'function': 'volume_cluster_vs_index',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'bb_use_flag': [True],
+                            'bb_length': [10,15,20,25],
+                            'bb_mult' : [1, 1.5, 2, 2.5],
+                            'bb_position': ['crossover', 'crossunder'],
+                            'bb_cross_line': ['upper', 'lower'],
+                        },
+                    },
+                    'volume_cluster_vs_index3': {
+                        'function' : 'volume_cluster_vs_index',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'pct_use_flag': [True],
+                            'pct_lookback': [64, 128, 256],
+                            ('pct_hline_position','pct_hline') : [
+                                ('crossover', 80), ('above', 80),
+                                ('crossunder', 20), ('below', 20),
+                                ('crossover', 90), ('above', 90),
+                                ('crossunder', 10), ('below', 10),
+                                ('crossover', 95), ('above', 95),
+                                ('crossunder', 5), ('below', 5),
+                                ('crossover', 98), ('above', 98),
+                                ('crossunder', 2), ('below', 2)
+                            ],    
+                        }
+                    },
+                    'volume_cluster_vs_cluster_consecutive1': {
+                        'function' : 'volume_cluster_vs_cluster_consecutive',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'num_bars': [5, 10],
+                            'top_or_bottom': ['top', 'bottom'],
+                            'ranking': [2,3],
+                            ('num_conditional_bars', 'consecutive_bars'): [(3,3), (4,4), (5,5), (3,5), (4,5), (3,4), (8,10), (9,10), (10,10)],
+                        }
+        }
+        }
+
+
+        params_df: pd.DataFrame = None
+        for cluster, val in params_dic.items():
+            f = val['function']
+            p: dict = val['params']
+
+            combinations = list(product(*p.values()))
+            dff = pd.DataFrame(combinations, columns=p.keys())
+            for c in dff.columns:
+                if not isinstance(c, str) :
+                    dff[list(c)] = pd.DataFrame(dff[c].tolist(), index=dff.index)
+                    dff = dff.drop(c, axis=1)
+
+            dff['function'] = f
+
+            params_df = pd.concat([params_df, dff], ignore_index=True)
+        return params_df
+
+    @staticmethod
     def compute_conditions(df, to_pickle= False):
         from tqdm import tqdm
         def test():
@@ -2205,6 +3408,19 @@ class Vectorized:
 
             clean_redis()
         @staticmethod
+        def compute_wr_re_new_cond(n_solo_strats, folder):
+            from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_new_cond
+            clean_redis()
+            task_dic = {}
+            print("Computing stats")
+            for i in tqdm(range(0, n_solo_strats -1)):
+                task_dic[i] = compute_multi_strategies_new_cond.delay(i, folder)
+
+            while any(t.status!='SUCCESS' for t in task_dic.values()):
+                pass
+
+            clean_redis()
+        @staticmethod
         def compute_wr_re_nt_for_all_strats_os(n_solo_strats, folder):
             from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_os
             clean_redis()
@@ -2244,6 +3460,49 @@ class Vectorized:
                 pass
 
             clean_redis()
+
+
+        @staticmethod
+        def compute_signals_new_cond(recompute = True):
+            from danglib.pylabview2.celery_worker import compute_signal, clean_redis
+
+            params_df_old_cond: pd.DataFrame = Vectorized.create_params_sets()
+            params_df: pd.DataFrame = Vectorized.create_params_sets2()
+            params_df = pd.concat([params_df_old_cond, params_df], ignore_index=True)
+            n_strats = len(params_df)
+
+            if recompute:
+                _, client_disconnect, psave, pload = gen_plasma_functions(db=5)
+                df_tmp = df['close']
+                df_tmp = df_tmp[df_tmp.index >= '2018_01_01']
+                n_rows, n_cols = df_tmp.shape
+
+                # Khởi tạo một mảng NumPy 3 chiều với kích thước (2000, 2000, 200)
+                array_3d = np.empty((n_strats, n_rows, n_cols))
+
+                task_dic = {}
+                print("Computing signals:")
+                for idx, params in tqdm(params_df.iterrows(), total=params_df.shape[0]):    
+                    params = params.dropna().to_dict()
+                    task_dic[idx] = compute_signal.delay(idx, params)
+
+                while any(t.status!='SUCCESS' for t in task_dic.values()):
+                    pass
+                
+                for idx, v in task_dic.items():
+                    res: pd.DataFrame = v.result
+                    if res is not None:
+                        array_3d[idx, :, :] = res
+
+                    else:
+                        print(f"{idx} error")
+                array_3d = array_3d.astype(bool)
+                psave("sig_3d_array_new_cond",array_3d)
+
+                clean_redis()
+                client_disconnect()
+
+            return n_strats
 
 
 
@@ -2851,6 +4110,96 @@ class Vectorized:
 
     class Runs:
         @staticmethod
+        def compute_nt_re_wr_new_cond2():
+            name = 'new_cond'
+            store_folder = f"/data/Tai/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/data/Tai/pickles/{name}"
+            maybe_create_dir(result_folder)
+            
+            # params_df = Vectorized.create_params_sets2()
+            recompute_signals = True
+            ## CALC  -------------------------------------------------------------------
+            
+            stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+                                                push_return_numpy=True, 
+                                                push_stocks_numpy=True,
+                                                push_label_rudd= True
+                                            )
+            
+            n_strats = Vectorized.MultiProcess.compute_signals_new_cond(recompute_signals)
+            _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+            array_3d = pload("sig_3d_array_new_cond")
+            array_3d_os = array_3d[:,1665:1803, :]
+            array_3d = array_3d[:,:1665, :]
+
+            re_2d = pload("return_array")
+            re_2d_os = re_2d[1665:1803]
+            re_2d = re_2d[:1665]
+
+            label_rudd_2d = pload("label_rudd")
+            label_rudd_2d_os = label_rudd_2d[1665:1803]
+            label_rudd_2d = label_rudd_2d[:1665]
+
+            num_trade = np.sum(array_3d, axis=1)
+            arr_return_3d = array_3d * re_2d
+            arr_return_3d = np.nan_to_num(arr_return_3d, 0.0)
+            arr_total_return = np.sum(arr_return_3d, axis=1)
+            arr_num_win = np.sum(arr_return_3d > 0, axis=1)
+
+            df_nt = pd.DataFrame(num_trade, columns = stocks_map.values())
+            df_re = pd.DataFrame(arr_total_return, columns = stocks_map.values())
+            df_wt = pd.DataFrame(arr_num_win, columns = stocks_map.values())
+            
+            df_nt.to_pickle(f"{result_folder}/df_nt.pkl")
+            df_re.to_pickle(f"{result_folder}/df_re.pkl")
+            df_wt.to_pickle(f"{result_folder}/df_wt.pkl")
+
+            # label
+            good_days = (array_3d * (label_rudd_2d==1)).sum(axis =1)
+            bad_days = (array_3d * (label_rudd_2d==-1)).sum(axis =1)
+            neutral_days = (array_3d * (label_rudd_2d==0)).sum(axis =1)
+
+            df_gd = pd.DataFrame(good_days, columns = stocks_map.values())
+            df_bd = pd.DataFrame(bad_days, columns = stocks_map.values())
+            df_nd = pd.DataFrame(neutral_days, columns = stocks_map.values())
+
+            df_gd.to_pickle(f"{result_folder}/df_gd.pkl")
+            df_bd.to_pickle(f"{result_folder}/df_bd.pkl")
+            df_nd.to_pickle(f"{result_folder}/df_nd.pkl")
+
+            ### os 
+            def calculate_stats(array_3d, re_2d, label_rudd_2d, stocks_map):
+                num_trade = np.sum(array_3d, axis=1)
+                arr_return_3d = array_3d * re_2d
+                arr_return_3d = np.nan_to_num(arr_return_3d, 0.0)
+                arr_total_return = np.sum(arr_return_3d, axis=1)
+                arr_num_win = np.sum(arr_return_3d > 0, axis=1)
+
+                df_nt = pd.DataFrame(num_trade, columns = stocks_map.values())
+                df_re = pd.DataFrame(arr_total_return, columns = stocks_map.values())
+                df_wt = pd.DataFrame(arr_num_win, columns = stocks_map.values())
+                
+                good_days = (array_3d * (label_rudd_2d==1)).sum(axis =1)
+                bad_days = (array_3d * (label_rudd_2d==-1)).sum(axis =1)
+                neutral_days = (array_3d * (label_rudd_2d==0)).sum(axis =1)
+
+                df_gd = pd.DataFrame(good_days, columns = stocks_map.values())
+                df_bd = pd.DataFrame(bad_days, columns = stocks_map.values())
+                df_nd = pd.DataFrame(neutral_days, columns = stocks_map.values())
+
+                return df_nt, df_re, df_wt, df_gd, df_bd, df_nd
+            df_nt_os, df_re_os, df_wt_os, df_gd_os, df_bd_os, df_nd_os = calculate_stats(array_3d_os, re_2d_os, label_rudd_2d_os, stocks_map)
+            df_nt_os.to_pickle(f"{result_folder}/df_nt_os.pkl")
+            df_re_os.to_pickle(f"{result_folder}/df_re_os.pkl")
+            df_wt_os.to_pickle(f"{result_folder}/df_wt_os.pkl")
+            df_gd_os.to_pickle(f"{result_folder}/df_gd_os.pkl")
+            df_bd_os.to_pickle(f"{result_folder}/df_bd_os.pkl")
+            df_nd_os.to_pickle(f"{result_folder}/df_nd_os.pkl")
+
+        @staticmethod
         def compute_nt_re_wr_os():
             ## PARAMS-------------------------------------------------------------------
             # name = 'nt_re_wr_3'
@@ -2960,7 +4309,8 @@ class Vectorized:
         @staticmethod
         def compute_label():
             ## PARAMS-------------------------------------------------------------------
-            name = 'new_label'
+            # name = 'new_label'
+            name = 'new_label2'
 
             store_folder = f"/data/Tai/{name}_tmp"
             maybe_create_dir(store_folder)
@@ -2977,7 +4327,7 @@ class Vectorized:
                                                 push_label_rudd= True
                                             )
             
-            n_strats = Vectorized.MultiProcess.compute_signals(recompute_signals)
+            n_strats = Vectorized.MultiProcess.compute_signals_new_cond(recompute_signals)
 
             Vectorized.MultiProcess.compute_new_label_for_all_strats(n_strats, folder=store_folder)
             Vectorized.JoinResults.join_new_label_data(n_strats, stocks_map, src_folder=store_folder, des_folder=result_folder)

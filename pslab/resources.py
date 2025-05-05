@@ -305,7 +305,6 @@ class Adapters:
         try:
             if db is None:
                 db = Globs.PLASMA_DB
-
             from danglib.lazy_core import gen_plasma_functions
             _, disconnect, psave, pload = gen_plasma_functions(db)
 
@@ -759,11 +758,11 @@ class Adapters:
             else:
                 CREATE_SAMPLE = True
 
+                Adapters.SaveDataToPlasma.save_index_daily_ohlcv_to_plasma(CREATE_SAMPLE)
+                Adapters.SaveDataToPlasma.save_stock_data_to_plasma(CREATE_SAMPLE)
                 Adapters.SaveDataToPlasma.save_group_data_to_plasma(CREATE_SAMPLE)
                 Adapters.SaveDataToPlasma.save_index_ohlcv_to_plasma(CREATE_SAMPLE)
                 Adapters.SaveDataToPlasma.save_market_data_to_plasma(CREATE_SAMPLE)
-                Adapters.SaveDataToPlasma.save_stock_data_to_plasma(CREATE_SAMPLE)
-                Adapters.SaveDataToPlasma.save_index_daily_ohlcv_to_plasma(CREATE_SAMPLE)
                 Adapters.classify_stocks_and_save_to_plasma(CREATE_SAMPLE)
 
             redis_handler = RedisHandler()
@@ -904,21 +903,21 @@ class Adapters:
     @staticmethod
     def load_index_daily_ohlcv_from_plasma(required_stats: list = None, load_sample: bool = False):
         key = Resources.PlasmaKeys.INDEX_DAILY_OHLC
+        try:
+            if not load_sample:
+                from danglib.lazy_core import gen_plasma_functions
+                _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
 
-        if not load_sample:
-            from danglib.lazy_core import gen_plasma_functions
-            _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
+                df = pload(key)
+            else:
+                df: pd.DataFrame = FileHandler.read_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet")
 
-            df = pload(key)
+            if required_stats:
+                df = df[required_stats]
 
+            return df
+        finally:
             disconnect()
-        else:
-            df: pd.DataFrame = FileHandler.read_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet")
-
-        if required_stats:
-            df = df[required_stats]
-
-        return df
     
     @staticmethod
     def load_sectors_stocks_from_db(stocks: list = None):

@@ -8,7 +8,9 @@ from datetime import timedelta
 import hashlib
 import random
 from functools import reduce
-
+import json
+import numpy as np
+from pandas import Interval
 
 class RedisHandler:
     def __init__(self, host='localhost', port=6379, db=0):
@@ -92,6 +94,13 @@ class RedisHandler:
 
 
 class Utils:
+    @staticmethod
+    def connect_to_mongo(host, port, db_name):
+        from pymongo import MongoClient
+        client = MongoClient(host=host, port=port)
+        db = client[db_name]
+        return db
+
     @staticmethod
     def and_conditions(conditions: list):
         # Lọc điều kiện None
@@ -262,7 +271,53 @@ class Utils:
         return '#{:06x}'.format(random.randint(0, 0xFFFFFF))
 
 
+
 class FileHandler:
+
+    class CustomJSONEncoder(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, Interval):
+                return str(obj)
+            if isinstance(obj, np.integer):
+                return int(obj)
+            if isinstance(obj, np.floating):
+                return float(obj)
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, np.bool_):  # Handle numpy boolean specifically
+                return bool(obj)
+            return super().default(obj)
+
+    @staticmethod
+    def get_file_size_mb(file_path):
+        """
+        Hàm kiểm tra kích thước của file và trả về kết quả bằng MB
+        
+        Tham số:
+            file_path (str): Đường dẫn đến file cần kiểm tra
+            
+        Trả về:
+            float: Kích thước của file tính bằng MB
+            None: Nếu file không tồn tại hoặc có lỗi
+        """
+        try:
+            # Kiểm tra xem file có tồn tại không
+            if not os.path.isfile(file_path):
+                print(f"Lỗi: File '{file_path}' không tồn tại")
+                return None
+                
+            # Lấy kích thước file bằng byte
+            file_size_bytes = os.path.getsize(file_path)
+            
+            # Chuyển đổi sang MB (1 MB = 1024 * 1024 bytes)
+            file_size_mb = file_size_bytes / (1024 * 1024)
+            
+            return file_size_mb
+            
+        except Exception as e:
+            print(f"Lỗi khi kiểm tra kích thước file: {e}")
+            return None
+
     @staticmethod
     def isExists(file_path):
         return Path(file_path).is_file()
@@ -328,6 +383,32 @@ class FileHandler:
         if isinstance(substrs, str):
             substrs = [substrs]
         return [col for col in all_columns if any(substr in col for substr in substrs)]
+    
+    @staticmethod
+    def read_json(path):
+        with open(path, 'r') as file:
+            data = json.load(file)
+        return data
+    
+    @staticmethod
+    def write_json(path, data, use_custom_encoder=False):
+        custom_encoder = FileHandler.CustomJSONEncoder if use_custom_encoder else None
+        with open(path, 'w') as file:
+            json.dump(data, file, cls=custom_encoder, indent=4)
+            
+    @staticmethod
+    def read_jsonl(path):
+        with open(path, 'r') as file:
+            data = [json.loads(line) for line in file]
+        return data
+    
+    @staticmethod
+    def write_jsonl(path, data, use_custom_encoder=False):
+        custom_encoder = FileHandler.CustomJSONEncoder if use_custom_encoder else None
+
+        with open(path, 'w') as file:
+            for item in data:
+                file.write(json.dumps(item, cls=custom_encoder) + '\n')
 
 
 def day_to_timestamp(day: str, is_end_day = False):

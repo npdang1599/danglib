@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import glob
 from logging.handlers import RotatingFileHandler
 
+
 class DataLogger:
     def __init__(self, log_dir="logs",file_prefix="aggregator", prefix=None):
         self.log_dir = log_dir
@@ -85,3 +86,17 @@ class DataLogger:
             self.logger.error(message, exc_info=exc_info)
         elif level == 'CRITICAL':
             self.logger.critical(message, exc_info=exc_info)
+
+    @staticmethod
+    def print(level, message, *args, **kwargs):
+        """Print a message with the specified level"""
+        
+        now = datetime.now().strftime('%Y_%m_%d %H:%M:%S')
+        if  level == 'DEBUG':
+            print(f"{now} - DEBUG - {message}")
+        elif level == 'INFO':
+            print(f"{now} - INFO - {message}")
+        elif level == 'WARNING':
+            print(f"{now} - WARNING - {message}")
+        elif level == 'ERROR':
+            print(f"{now} - ERROR - {message}")

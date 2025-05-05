@@ -67,6 +67,7 @@ class TaskName:
     COMPUTE_MULTI_STRATEGIES_URSI_CFM = 'compute_multi_strategies_ursi_cfm'
     COMPUTE_MULTI_STRATEGIES_OS = 'compute_multi_strategies_os'
     COMPUTE_MULTI_STRATEGIES_LABEL = 'compute_multi_strategies_label'
+    COMPUTE_MULTI_STRATEGIES_NEW_COND = 'compute_multi_strategies_new_cond'
 
 
 @app.task(name=TaskName.COMPUTE_SIGNAL2)
@@ -129,6 +130,55 @@ def compute_multi_strategies_cfm(i, folder):
 
     with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
         pickle.dump((nt_arr, re_arr, wt_arr), f)
+
+@app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_NEW_COND)
+def compute_multi_strategies_new_cond(i, folder):
+
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+    array_3d = pload("sig_3d_array_new_cond")
+    array_3d = array_3d[:,:1665, :]
+
+    re_2d = pload("return_array")
+    re_2d = re_2d[:1665]
+
+    df1 = array_3d[i]
+
+    cond = df1
+    num_trade = np.sum(cond, axis=0)
+    re = np.nan_to_num(re_2d * cond, 0.0)
+    total_re = np.sum(re, axis=0)
+    num_win = np.sum(re > 0, axis=0)
+
+
+    nt_ls=[]
+    re_ls=[]
+    wt_ls=[]
+    for j in range(i+1, len(array_3d)):
+        df2 = array_3d[j]
+
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
+
+        cond = df1 * df2
+        num_trade = np.sum(cond, axis=0)
+        re = np.nan_to_num(re_2d * cond, 0.0)
+        total_re = np.sum(re, axis=0)
+        num_win = np.sum(re > 0, axis=0)
+
+        nt_ls.append(num_trade)
+        re_ls.append(total_re)
+        wt_ls.append(num_win)
+
+    disconnect()
+
+    nt_arr = np.vstack(nt_ls)
+    re_arr = np.vstack(re_ls)
+    wt_arr = np.vstack(wt_ls)
+
+    with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
+        pickle.dump((nt_arr, re_arr, wt_arr), f)
+
 
 @app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_OS)
 def compute_multi_strategies_os(i, folder):
@@ -252,10 +302,12 @@ def compute_signal(idx, params: dict):
 
     try:
         for k, v in params.items():
-            for patt in ['len', 'bar', 'lkbk', 'period', 'ranking']:
-                k: str
+            k: str
+            for patt in ['len', 'bar', 'lkbk', 'period', 'ranking','lookback','smoothing',
+                         ]:
                 if patt in k:
                     params[k] = int(v)
+            if 'use' in k: params[k] = bool(v)
         params['use_flag'] = True
 
         signals: pd.DataFrame = Conds.compute_any_conds(df, **params)

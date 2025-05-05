@@ -58,6 +58,7 @@ app = app_factory(CELERY_RESOURCES.HOST)
 
 class TaskName:
     COMPUTE_SIGNALS = 'compute_signals'
+    RUN_ANY_FUNCIONS = 'run_any_functions'
 
 
 def fix_conditions_params(conditions_params):
@@ -189,6 +190,7 @@ def compute_signals(
         
         signals.name = 'signals'
         df = signals.to_frame().reset_index()
+        df['candleTime'] = df['candleTime'] // 1e9
         df['exit_stamp'] = df['candleTime'].shift(-strategy['holding_periods']-1)
         df = df.rename(columns={'candleTime': 'entry_stamp'})
         df['entry_stamp'] = df['entry_stamp'].shift(-1)
@@ -287,6 +289,31 @@ def compute_signals_no_catch_error(
     df = df.dropna(subset=['entry_stamp'])
 
     return df
+
+import importlib
+
+@app.task(name=TaskName.RUN_ANY_FUNCIONS)
+def run_dynamic_function(function_path: str, *args, **kwargs):
+    """
+    Chạy bất kỳ hàm nào dựa trên đường dẫn đến hàm và các tham số
+    
+    :param function_path: Đường dẫn đến hàm (ví dụ: "module.submodule.function")
+    :param args: Các tham số positional
+    :param kwargs: Các tham số keyword
+    :return: Kết quả từ hàm được gọi
+    """
+    # Tách module path và tên hàm
+    module_path, function_name = function_path.rsplit('.', 1)
+    
+    # Import module động
+    module = importlib.import_module(module_path)
+    
+    # Lấy hàm từ module
+    func = getattr(module, function_name)
+    
+    # Chạy hàm với các tham số được cung cấp
+    return func(*args, **kwargs)
+
 
     
     
