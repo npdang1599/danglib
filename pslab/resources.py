@@ -212,7 +212,7 @@ class Resources:
         
         @staticmethod
         def get_PS_realtime_key(day):
-            return f"pylabview_future_{day}"
+            return f"pylabview_ps_{day}"
         
         @staticmethod
         def get_index_realtime_key(day):
@@ -769,24 +769,37 @@ class Adapters:
             redis_handler.delete_keys_by_pattern("pslab/stockcount/*")
 
     @staticmethod 
-    def load_groups_and_stocks_data_from_plasma(required_stats: list = None, groups_and_stocks: list = None, load_sample = False) -> pd.DataFrame:
+    def load_groups_and_stocks_data_from_plasma(
+        required_stats: list = None, 
+        groups_and_stocks: list = None, 
+        load_sample = False
+    ) -> pd.DataFrame:
         
         def test(): 
             required_stats = ['bu', 'sd']
-            groups_and_stocks = ['VN30', 'Super High Beta', 'HPG', 'SSI']
+            groups_and_stocks = ['All']
+            from_day = '2024_10_01'
+            to_day = '2025_10_25'
 
         if groups_and_stocks is None:
             return Adapters.load_group_data_from_plasma()
         
-        stocks = [i for i in groups_and_stocks if i in Globs.STOCKS]
-        groups = [i for i in groups_and_stocks if i in Globs.SECTOR_DIC.keys()]
+        # stocks = [i for i in groups_and_stocks if i in Globs.STOCKS]
+
+
+        true_stocks = []
+        if groups_and_stocks is not None:
+            for s in groups_and_stocks:
+                if s in Globs.SECTOR_DIC.keys():
+                    true_stocks += Globs.SECTOR_DIC[s]
+                elif s in Globs.STOCKS:
+                    true_stocks.append(s)
+
+        true_stocks = [i for i in true_stocks if i in Globs.STOCKS]
 
         ls = []
-        if len(stocks) > 0:
-            ls.append(Adapters.load_stock_data_from_plasma(required_stats, stocks, load_sample))
-
-        if len(groups) > 0:
-            ls.append(Adapters.load_group_data_from_plasma(required_stats, groups, load_sample))
+        if len(true_stocks) > 0:
+            ls.append(Adapters.load_stock_data_from_plasma(required_stats, true_stocks, load_sample))
 
         df = pd.concat(ls, axis=1).sort_index()
 

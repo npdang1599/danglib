@@ -269,6 +269,31 @@ class Utils:
     def random_color():
         """Trả về một màu ngẫu nhiên dưới dạng mã hex"""
         return '#{:06x}'.format(random.randint(0, 0xFFFFFF))
+    
+    @staticmethod
+    def slice_df_with_timestamp_index(df: pd.DataFrame, start_day: str = None, end_day: str = None) -> pd.DataFrame:
+        """
+        Slice DataFrame theo khoảng thời gian cho trước.
+        
+        Parameters:
+        df (pd.DataFrame): DataFrame cần slice
+        start (str): Thời gian bắt đầu (format: 'YYYY_MM_DD')
+        end (str): Thời gian kết thúc (format: 'YYYY_MM_DD')
+        
+        Returns:
+        pd.DataFrame: DataFrame đã được slice
+        """
+        if start_day is not None:
+            start_stamp = day_to_timestamp(start_day)
+            df = df[df.index >= start_stamp]
+        
+        if end_day is not None:
+            end_stamp = day_to_timestamp(end_day, is_end_day=True)
+            df = df[df.index < end_stamp]
+        
+        return df
+
+
 
 
 
@@ -526,3 +551,5 @@ def generate_candle_times(timeframe: str, day: str=None, start_time='09:15:00', 
 
 def totime(stamp, unit='s'):
     return pd.to_datetime(stamp, unit=unit)
+
+

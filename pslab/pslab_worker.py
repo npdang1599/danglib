@@ -104,7 +104,7 @@ def group_conditions(conditions_params: dict, realtime=True, data=None):
                     'lookback_cond_nbar': 5}
                     }
         ]
-        realtime = True
+        realtime = False
         data = None
 
     

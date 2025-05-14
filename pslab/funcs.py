@@ -2173,25 +2173,30 @@ class CombiConds:
         data_source: str = 'group', 
         provided_data: pd.DataFrame = None,
         realtime: bool = False,
-        stocks: list[str] = None
+        stocks: list[str] = None, 
+        start_day: str = None,
+        end_day: str = None
     )-> tuple[dict[str, pd.Series], list[dict]]:
         """Unified method to load and process data based on conditions parameters."""
 
         def test():
-            conditions_params =  [{'function': 'absolute_change_in_range',
-            'inputs': {'src': 'F1Value',
-                'timeframe': '30S',
-                'rolling_window': 30,
-                'rolling_method': 'mean',
-                'daily_rolling': False},
-            'params': {'n_bars': 15,
-                'lower_thres': 72000000000.0,
-                'upper_thres': 1000000000000000000,
-                'use_as_lookback_cond': False,
-                'lookback_cond_nbar': 5}}]
-            data_source = 'market_stats'
+            conditions_params = [{
+                'function': 'absolute_change_in_range',
+                'inputs': {'src': 'bid',
+                    'timeframe': '30S',
+                    'rolling_window': 1,
+                    'rolling_method': 'mean',
+                    'daily_rolling': False,
+                    'stocks': ['All']},
+                'params': {'n_bars': 20,
+                    'lower_thres': 380.0,
+                    'upper_thres': 1000000000000000000,
+                    'use_as_lookback_cond': False,
+                    'lookback_cond_nbar': 5}
+                }]
+            data_source = 'group'
             provided_data = None
-            realtime = True
+            realtime = False
             stocks = None
 
         valid_sources = CombiConds.VALID_SOURCES
@@ -2226,9 +2231,8 @@ class CombiConds:
                         data = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks)
                 else:
                     data = provided_data
-
+                data = Utils.slice_df_with_timestamp_index(data, start_day=start_day, end_day=end_day)
                 data = data.groupby(level=0, axis=1).sum()
-
                 for data_key, params in required_cols.items():
                     if params['stocks_key'] == stocks_key and data_key not in required_data:
                         required_data[data_key] = CombiConds._process_data_series(data, **params)
@@ -2251,6 +2255,8 @@ class CombiConds:
             else:
                 data = provided_data[list(unique_cols)]
 
+            data = Utils.slice_df_with_timestamp_index(data, start_day=start_day, end_day=end_day)
+
 
             for data_key, params in required_cols.items():
                 required_data[data_key] = CombiConds._process_data_series(
@@ -2266,33 +2272,45 @@ class CombiConds:
     # Wrapper methods for backward compatibility
     @staticmethod
     def load_and_process_group_data(conditions_params: list[dict],
-                                  realtime=False, data: pd.DataFrame=None) -> tuple[dict[str, pd.Series], list[dict]]:
+                                realtime=False, data: pd.DataFrame=None, 
+                                start_day: str = None, end_day: str = None
+                            ) -> tuple[dict[str, pd.Series], list[dict]]:
         """Load and process group data (backward compatibility wrapper)."""
         return CombiConds.load_and_process_data(
             conditions_params=conditions_params,
             data_source='group',
             provided_data=data,
             realtime=realtime,
+            start_day=start_day,
+            end_day=end_day
         )
 
     @staticmethod
     def load_and_process_one_series_data(conditions_params: list[dict], data_src: str = 'market_stats', realtime: bool = False,
-                                       data: pd.DataFrame=None) -> tuple[dict[str, pd.Series], list[dict]]:
+                                       data: pd.DataFrame=None, 
+                                       start_day: str = None, end_day: str = None
+                                       ) -> tuple[dict[str, pd.Series], list[dict]]:
         """Load and process one series data (backward compatibility wrapper)."""
         return CombiConds.load_and_process_data(
             conditions_params=conditions_params,
             data_source=data_src,
             provided_data=data,
-            realtime=realtime
+            realtime=realtime,
+            start_day=start_day,
+            end_day=end_day
         )
 
     @staticmethod
-    def load_and_process_stock_data(conditions_params: list[dict], stocks: list[str] = None) -> tuple[dict[str, pd.Series], list[dict]]:
+    def load_and_process_stock_data(conditions_params: list[dict], stocks: list[str] = None,
+                                    start_day: str = None, end_day: str = None
+                                    ) -> tuple[dict[str, pd.Series], list[dict]]:
         """Load and process stock data (backward compatibility wrapper)."""
         return CombiConds.load_and_process_data(
             conditions_params=conditions_params,
             data_source='stock',
-            stocks=stocks
+            stocks=stocks,
+            start_day=start_day,
+            end_day=end_day
         )
 
     @staticmethod

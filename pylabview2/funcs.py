@@ -54,6 +54,8 @@ class Globs:
             "lookback_cond2": Conds.lookback_cond2,
             "lookback_cond3": Conds.lookback_cond3,
 
+            'price_change_no_break': Conds.price_change_no_break_cond,
+
             "flow_percentile": Conds.Flow.percentile_cond,
             "flow_consecutive_bars": Conds.Flow.consecutive_bars,
             "flow_value" : Conds.Flow.value,
@@ -1205,12 +1207,96 @@ class Conds:
             fig.show()
 
     @staticmethod
-    def no_break_cond(df: pd.DataFrame,
-                      mark: pd.Series,
-                      direction: str = 'higher',
-                      wait_bars: int = 5
-                      ):
-        pass
+    def price_change_no_break_cond(
+        df: pd.DataFrame,
+        src_name = 'close',
+        use_flag: bool = False, 
+        direction: str = "Increase",
+        nbars: int = 10,
+        low_range: float = 10,
+        high_range: float = 10000,
+        use_wait: bool = False,
+        wbars: int = 5,
+        bound: float = 3,
+        ):
+        nbars = int(nbars)
+        close = df[src_name]
+        comp_src = Ta.lowest(df['low'], nbars) if direction == 'Increase' else Ta.highest(df['high'], nbars)
+        
+        if use_flag:
+            pct_change = Utils.calc_percentage_change(comp_src, close)
+            if direction == "Decrease":
+                pct_change = pct_change * -1
+            if use_wait == False:
+                return Utils.in_range(pct_change, low_range, high_range, equal=True)
+
+            inrange = Utils.in_range(pct_change, low_range, high_range, equal=True)
+            if direction == "Increase":
+                mark = np.where(inrange, df['high'], np.nan)
+                mark = pd.DataFrame(mark, index=close.index, columns= close.columns)
+            else:
+                mark = np.where(inrange, df['low'], np.nan)
+                mark = pd.DataFrame(mark, index=close.index, columns = close.columns)
+
+            highest_close = Ta.highest(df['close'], wbars)
+            lowest_close = Ta.lowest(df['close'], wbars)
+                
+            fwmark = mark.shift(wbars)
+            rs = Utils.new_1val_df(False, close) 
+            isw = (highest_close < fwmark * (1 + bound / 100)) & (lowest_close > fwmark * (1 - bound / 100))
+            rs_arr = rs.values
+            fwmark_arr = fwmark.values
+            isw_arr = isw.values
+            rs_arr[(~np.isnan(fwmark_arr) & isw_arr)] = True
+            rs = pd.DataFrame(rs_arr, index = close.index, columns = close.columns)
+            return rs
+    
+        return None
+    @staticmethod
+    def ursi_no_break_cond(
+        df: pd.DataFrame,
+        use_flag: bool = False, 
+        direction: str = "Increase",
+        nbars: int = 10,
+        low_range: float = 10,
+        high_range: float = 10000,
+        wait_bars: bool = False,
+        wbars: int = 5,
+        bound: float = 3,
+        ):
+        nbars = int(nbars)
+        close = df['close']
+        comp_src = Ta.lowest(df['low'], nbars) if direction == 'Increase' else Ta.highest(df['high'], nbars)
+        ursi, _ = Ta.ursi(close)
+        if use_flag:
+            pct_change = Utils.calc_percentage_change(comp_src, close)
+            if direction == "Decrease":
+                pct_change = pct_change * -1
+            if wait_bars == False:
+                return Utils.in_range(pct_change, low_range, high_range, equal=True)
+
+            inrange = Utils.in_range(pct_change, low_range, high_range, equal=True)
+            if direction == "Increase":
+                mark = np.where(inrange, df['high'], np.nan)
+                mark = pd.DataFrame(mark, index=close.index, columns= close.columns)
+            else:
+                mark = np.where(inrange, df['low'], np.nan)
+                mark = pd.Series(mark, index=close.index, columns = close.columns)
+
+            highest_close = Ta.highest(df['close'], wbars)
+            lowest_close = Ta.lowest(df['close'], wbars)
+                
+            fwmark = mark.shift(wbars)
+            rs = Utils.new_1val_df(False, close) 
+            isw = (highest_close < fwmark * (1 + bound / 100)) & (lowest_close > fwmark * (1 - bound / 100))
+            rs_arr = rs.values
+            fwmark_arr = fwmark.values
+            isw_arr = isw.values
+            rs_arr[(~np.isnan(fwmark_arr) & isw_arr)] = True
+            rs = pd.DataFrame(rs_arr, index = close.index, columns = close.columns)
+            return rs
+    
+        return None
     @staticmethod
     def wait_cond(df: pd.DataFrame,
                   entry_params: dict,
@@ -1517,9 +1603,11 @@ class Conds:
             res = None
             if use_flag:
                 df_return = df['close'].pct_change(periods=num_return_bars)
+  
                 df_vnindex = glob_obj1.get_one_stock_data('VNINDEX')
-                df_vnindex_return = df_vnindex['close'].pct_change(periods=num_return_bars)
-                df_vnindex_return.index = df_return.index
+                df_vnindex_return = df_vnindex['close'].pct_change(periods=num_return_bars) 
+                df_vnindex_return.index = df_vnindex['day']
+                df_vnindex_return = df_vnindex_return.reindex(df_return.index) # de khong loi khi data bi miss
                 df_relative_return = df_return.subtract(df_vnindex_return, axis = 0)
                 if direction == 'positive':
                     df_cond = df_relative_return > 0
@@ -2168,7 +2256,8 @@ class Vectorized:
                     'periods': [1],
                     'lower_thres': [0, 3, 5, 6.7],
                     'direction': ['increase', 'decrease']
-                 }
+                 },
+                 'type': 'trigger'
             },
             'price2':{
                 'function':'price_change',
@@ -2176,7 +2265,8 @@ class Vectorized:
                     'periods': [2],
                     'lower_thres': [6, 10, 13],
                     'direction': ['increase', 'decrease']
-                }
+                },
+                'type': 'trigger'
             }, 
             'price3':{
                 'function': 'price_change',
@@ -2184,7 +2274,8 @@ class Vectorized:
                     'periods': [3],
                     'lower_thres': [9, 15, 19],
                     'direction': ['increase', 'decrease']
-                }
+                },
+                'type': 'trigger'
             },
             'price4':{
                 'function': 'price_change',
@@ -2192,47 +2283,98 @@ class Vectorized:
                     'periods': [5],
                     'lower_thres': [10, 15, 20, 25],
                     'direction': ['increase', 'decrease']
-                }
+                },
+                'type': 'trigger'
             },
-            'price_ma1':{
+            'price_ma1_env':{
                 'function': 'price_comp_ma',
                 'params': {
                     'ma_len1':[1],
                     'ma_len2':[5,10,15,20,50,200],
-                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
-                }
+                    'ma_dir': ['above', 'below'],
+                },
+                'type': 'env'
             },
-            'price_ma2':{
+            'price_ma1_trigger':{
+                'function': 'price_comp_ma',
+                'params': {
+                    'ma_len1':[1],
+                    'ma_len2':[5,10,15,20,50,200],
+                    'ma_dir': ['crossover', 'crossunder'],
+                },
+                'type': 'trigger'
+            },
+            'price_ma2_env':{
                 'function': 'price_comp_ma',
                 'params': {
                     'ma_len1':[5],
                     'ma_len2':[15,20],
-                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
-                }
+                    'ma_dir': ['above', 'below'],
+                },
+                'type': 'env'
             },
-            'price_ma3':{
+            'price_ma2_trigger':{
+                'function': 'price_comp_ma',
+                'params': {
+                    'ma_len1':[5],
+                    'ma_len2':[15,20],
+                    'ma_dir': ['crossover', 'crossunder']
+                },
+                'type': 'trigger'
+            },
+            'price_ma3_env':{
                 'function': 'price_comp_ma',
                 'params': {
                     'ma_len1':[10],
                     'ma_len2':[30],
-                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
-                }
+                    'ma_dir': ['above', 'below',],
+                },
+                'type': 'env'
             },
-            'price_ma4':{
+            'price_ma3_trigger':{
+                'function': 'price_comp_ma',
+                'params': {
+                    'ma_len1':[10],
+                    'ma_len2':[30],
+                    'ma_dir': ['crossover', 'crossunder'],
+                },
+                'type': 'trigger'
+            },
+            'price_ma4_env':{
                 'function': 'price_comp_ma',
                 'params': {
                     'ma_len1':[20],
                     'ma_len2':[50, 100],
-                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
-                }
+                    'ma_dir': ['above', 'below'],
+                },
+                'type':'env'
             },
-            'price_ma5':{
+            'price_ma4_trigger':{
+                'function': 'price_comp_ma',
+                'params': {
+                    'ma_len1':[20],
+                    'ma_len2':[50, 100],
+                    'ma_dir': ['crossover', 'crossunder'],
+                },
+                'type':'trigger'
+            },
+            'price_ma5_env':{
                 'function': 'price_comp_ma',
                 'params': {
                     'ma_len1':[50],
                     'ma_len2':[200],
-                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
-                }
+                    'ma_dir': ['above', 'below'],
+                },
+                'type':'env'
+            },
+            'price_ma5_trigger':{
+                'function': 'price_comp_ma',
+                'params': {
+                    'ma_len1':[50],
+                    'ma_len2':[200],
+                    'ma_dir': ['above', 'below'],
+                },
+                'type':'trigger'
             },
             'price_hl1':{
                 'function': 'price_change_vs_hl',
@@ -2240,20 +2382,23 @@ class Vectorized:
                     'direction': ['Increase','Decrease'],
                     'nbars': [5, 10, 15, 20, 30],
                     'low_range': [10, 15, 20, 25]
-                }
+                },
+                'type': 'env'
             },
             'price_gap1':{
                 'function': 'price_gap',
                 'params':{
                     'gap_dir': ['Use Gap Up', 'Use Gap Down']
-                }
+                },
+                'type': 'trigger'
             },
             'hlest1':{
                 'function': 'price_highest_lowest',
                 'params': {
                     'method': ['Highest', 'Lowest'],
                     'num_bars': [5, 10, 15, 20, 50, 200]
-                }
+                },
+                'type': 'trigger'
             },
             'cons_bar1':{
                 'function': 'consecutive_conditional_bars',
@@ -2261,7 +2406,8 @@ class Vectorized:
                     ('src1_name', 'src2_name'): [('close', 'close'), ('high', 'low'), ('low', 'low'), ('high', 'high'), ('high', 'close'), ('low', 'close')],
                     'direction': ['Increase', 'Decrease'],
                     ('num_bars', 'num_matched'): [(2,2), (3,3), (4,4), (5,5), (6,6), (7,7), (8,8)]
-                }
+                },
+                'type' : 'trigger'
             },
             'vol_comp_ma1':{
                 'function': 'vol_comp_ma',
@@ -2269,7 +2415,8 @@ class Vectorized:
                     ("n_bars", "ma_len") : [(1, 20), (1, 10), (1, 6), (2, 20), (3, 15)],
                     "comp_ma_dir": ["higher", "lower"],
                     "comp_ma_perc": [0, 25, 50, 75, 100, 150]
-                }
+                },
+                'type': 'trigger'
             },
             # 'vol_perc1':{
             #     'function': 'vol_percentile',
@@ -2280,35 +2427,59 @@ class Vectorized:
             #         'high_range': [80, 90, 95, 98]
             #     }
             # },
-            'vol_perc2':{
+            'vol_perc2_env':{
                 'function': 'vol_percentile',
                 'params': {
                     'ma_length': [1,3,5,10],
                     'ranking_window': [64, 128, 256],
                     'low_range': [0],
-                    'high_range': [2,5, 10, 15, 20]
-                }
+                    'high_range': [10, 15, 20]
+                },
+                'type': 'env'
             },
-            'vol_perc3':{
+            'vol_perc2_trigger':{
                 'function': 'vol_percentile',
                 'params': {
                     'ma_length': [1,3,5,10],
                     'ranking_window': [64, 128, 256],
-                    'low_range': [80, 90, 95, 98],
+                    'low_range': [0],
+                    'high_range': [2,5]
+                },
+                'type': 'trigger'
+            },
+            'vol_perc3_env':{
+                'function': 'vol_percentile',
+                'params': {
+                    'ma_length': [1,3,5,10],
+                    'ranking_window': [64, 128, 256],
+                    'low_range': [80, 90],
                     'high_range': [100]
-                }
+                },
+                'type': 'env'
+            },
+            'vol_perc3_trigger':{
+                'function': 'vol_percentile',
+                'params': {
+                    'ma_length': [1,3,5,10],
+                    'ranking_window': [64, 128, 256],
+                    'low_range': [95, 98],
+                    'high_range': [100]
+                },
+                'type': 'trigger'
             },
             'squeeze1':{
                 'function': 'consecutive_squeezes', 
                 'params': {
                     'use_no_sqz': [True]
-                }
+                },
+                'type': 'env'
             },
             'squeeze2':{
                 'function': 'consecutive_squeezes', 
                 'params': {
                     'num_bars': [3, 5, 10, 15, 20]
-                }
+                },
+                'type': 'env'
             },
             # 'bbwp1' : {
             #     'function': 'bbwp',
@@ -2320,25 +2491,49 @@ class Vectorized:
             #         'high_thres': [80, 90, 95, 98]
             #     }
             # },
-            'bbwp2' : {
+            'bbwp2_env' : {
                 'function': 'bbwp',
                 'params': {
                     ('use_low_thres', 'use_high_thres'):[(True, False)],
                     'bbwp_len': [13, 30, 50],
                     'bbwp_lkbk': [64, 128, 256],
-                    'low_thres': [2,5,10,20],
+                    'low_thres': [10,20],
                     'high_thres': [100]
-                }
+                },
+                'type': 'env'
             },
-            'bbwp3' : {
+            'bbwp2_trigger' : {
+                'function': 'bbwp',
+                'params': {
+                    ('use_low_thres', 'use_high_thres'):[(True, False)],
+                    'bbwp_len': [13, 30, 50],
+                    'bbwp_lkbk': [64, 128, 256],
+                    'low_thres': [2,5],
+                    'high_thres': [100]
+                },
+                'type': 'trigger'
+            },
+            'bbwp3_env' : {
                 'function': 'bbwp',
                 'params': {
                     ('use_low_thres', 'use_high_thres'):[(False, True)],
                     'bbwp_len': [13, 30, 50],
                     'bbwp_lkbk': [64, 128, 256],
                     'low_thres': [0],
-                    'high_thres': [80, 90, 95, 98]
-                }
+                    'high_thres': [80, 90]
+                },
+                'type': 'env'
+            },
+            'bbwp3_trigger' : {
+                'function': 'bbwp',
+                'params': {
+                    ('use_low_thres', 'use_high_thres'):[(False, True)],
+                    'bbwp_len': [13, 30, 50],
+                    'bbwp_lkbk': [64, 128, 256],
+                    'low_thres': [0],
+                    'high_thres': [95, 98]
+                },
+                'type': 'trigger'
             },
             'bbpctb1':{
                 'function': 'bbpctb',
@@ -2347,7 +2542,8 @@ class Vectorized:
                 'mult': [1.5, 2, 2.5, 3],
                 'direction' : ['crossover', 'crossunder'],
                 'cross_line': ['Upper band', 'Lower band']
-                }
+                },
+                'type': 'trigger'
             },
             # 'ursi1': {
             #     'function': 'ursi',
@@ -2358,13 +2554,23 @@ class Vectorized:
             #         ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
             #     }
             # },
-            'ursi2': {
+            'ursi2_env': {
                 'function': 'ursi',
                 'params': {
-                    'direction': ['crossover', 'crossunder', 'above', 'below'],
+                    'direction': ['above', 'below'],
                     ('use_vs_signal','use_range'): [(True, False), (False,True), (True, True)],
                     ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
-                }
+                },
+                'type':'env'
+            },
+            'ursi2_trigger': {
+                'function': 'ursi',
+                'params': {
+                    'direction': ['crossover', 'crossunder'],
+                    ('use_vs_signal','use_range'): [(True, False), (True, True)],
+                    ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
+                },
+                'type':'trigger'
             },
             # 'macd1': {
             #     'function': 'macd',
@@ -2375,13 +2581,23 @@ class Vectorized:
             #         ('lower_thres','upper_thres'):[(-9999,0), (0, 9999)]
             #     }
             # },
-            'macd2': {
+            'macd2_env': {
                 'function': 'macd',
                 'params': {
-                    ('use_vs_signal','use_range'): [(True, False), (False,True), (True, True)],
+                    ('use_vs_signal','use_range'): [(False,True)],
                     'direction': ['crossover', 'crossunder'],
                     ('lower_thres','upper_thres'):[(-9999999,0), (0, 9999999)]
-                }
+                },
+                'type': 'env'
+            },
+            'macd2_trigger': {
+                'function': 'macd',
+                'params': {
+                    ('use_vs_signal','use_range'): [(True, False), (True, True)],
+                    'direction': ['crossover', 'crossunder'],
+                    ('lower_thres','upper_thres'):[(-9999999,0), (0, 9999999)]
+                },
+                'type': 'trigger'
             },
             'index1': {
                 'function': 'index_cond',
@@ -2389,7 +2605,8 @@ class Vectorized:
                     'function2': ['s_price_comp_ma'],
                     ('ma_len1', 'ma_len2'): [(1,5), (1, 10), (1, 15), (1, 20), (1, 50), (1, 200), (5, 15), (5, 20), (10, 30), (20, 50), (20, 100), (50, 200)],
                     'ma_dir': ['above', 'below', 'crossover', 'crossunder']
-                }
+                },
+                'type': 'env'
             },
             # 'index2': {
             #     'function': 'index_cond',
@@ -2411,7 +2628,8 @@ class Vectorized:
                     'bbwp_lkbk': [64, 128, 256],
                     'low_thres': [2,5,10,20],
                     'high_thres': [100]
-                }
+                },
+                'type': 'env'
             },
             'index2.2': {
                 'function': 'index_cond',
@@ -2422,21 +2640,24 @@ class Vectorized:
                     'bbwp_lkbk': [64, 128, 256],
                     'low_thres': [0],
                     'high_thres': [80, 90, 95, 98]
-                }
+                },
+                'type': 'env'
             },
             'index3': {
                 'function': 'index_cond', 
                 'params': {
                     'function2': ['s_consecutive_squeezes'],
                     'use_no_sqz': [True]
-                }
+                },
+                'type': 'env'
             },
             'index4': {
                 'function': 'index_cond', 
                 'params': {
                     'function2': ['s_consecutive_squeezes'],
                     'num_bars': [3, 5, 10, 15, 20]
-                }
+                },
+                'type': 'env'
             },
             # 'index5': {
             #     'function': 'index_cond', 
@@ -2455,7 +2676,8 @@ class Vectorized:
                     'direction': ['crossover', 'crossunder', 'above', 'below'],
                     ('use_vs_signal','use_range'): [(True, False), (False,True), (True, True)],
                     ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
-                }
+                },
+                'type': 'env'
             },
             'lkbk1':{
                 'function': 'lookback_cond',
@@ -2464,7 +2686,8 @@ class Vectorized:
                     'periods': [1],
                     'lower_thres': [0, 3, 5, 6.7],
                     'direction': ['increase', 'decrease']
-                 }
+                 },
+                 'type': 'trigger'
             },
             'lkbk2':{
                 'function': 'lookback_cond',
@@ -2474,7 +2697,8 @@ class Vectorized:
                     'periods': [2],
                     'lower_thres': [6, 10, 13],
                     'direction': ['increase', 'decrease']
-                }
+                },
+                'type': 'trigger'
             }, 
             'lkbk3':{
                 'function': 'lookback_cond',
@@ -2484,7 +2708,8 @@ class Vectorized:
                     'periods': [3],
                     'lower_thres': [9, 15, 19],
                     'direction': ['increase', 'decrease']
-                }
+                },
+                'type': 'trigger'
             },
             'lkbk4':{
                 'function': 'lookback_cond',
@@ -2494,7 +2719,8 @@ class Vectorized:
                     'periods': [5],
                     'lower_thres': [10, 15, 20, 25],
                     'direction': ['increase', 'decrease']
-                }
+                },
+                'type': 'trigger'
             },
             'lkbk5':{
                 'function': 'lookback_cond',
@@ -2725,7 +2951,10 @@ class Vectorized:
         for cluster, val in params_dic.items():
             f = val['function']
             p: dict = val['params']
-
+            if 'type' in val:
+                t = val['type']
+            else:
+                t = 'env'
             combinations = list(product(*p.values()))
             dff = pd.DataFrame(combinations, columns=p.keys())
             for c in dff.columns:
@@ -2734,7 +2963,7 @@ class Vectorized:
                     dff = dff.drop(c, axis=1)
 
             dff['function'] = f
-
+            dff['type'] = t
             params_df = pd.concat([params_df, dff], ignore_index=True)
 
         t = params_df[params_df['function'] == 'index_cond'].dropna(axis=1, how='all')
@@ -2742,25 +2971,53 @@ class Vectorized:
     
     @staticmethod
     def create_params_sets2():
-
         params_dic = {
-                    'percentile1':{
+                    'price_change_no_break':{
+                        'function': 'price_change_no_break',
+                        'params': {
+                            'direction': ["Increase", "Decrease"],
+                            'nbars': [10,15,20,25,30],
+                            'low_range': [10,15,20,25],
+                            'high_range': [10000],
+                            'use_wait': [True],
+                            'wbars': [3,5,7,10],
+                            'bound': [2,3,4]
+                        },
+                        'type': 'trigger'
+                    },
+                    'percentile1_env':{
                         'function': 'flow_percentile',
                         'params': {
                             'src_name': ['netBUSD', 'netBUSD/Value', 'netForeign', 'netForeign/Value'],
                             'smoothing': [1,5, 10, 15],
                             'lookback': [64, 128, 256],
                             ('position','threshold') : [
-                                ('crossover', 80), ('above', 80),
-                                ('crossunder', 20), ('below', 20),
-                                ('crossover', 90), ('above', 90),
-                                ('crossunder', 10), ('below', 10),
+                                ('above', 80),
+                                ('below', 20),
+                                ('above', 90),
+                                ('below', 10)
+                            ],                        
+                        },
+                        'type': 'env'
+                    },
+                    'percentile1_trigger':{
+                        'function': 'flow_percentile',
+                        'params': {
+                            'src_name': ['netBUSD', 'netBUSD/Value', 'netForeign', 'netForeign/Value'],
+                            'smoothing': [1,5, 10, 15],
+                            'lookback': [64, 128, 256],
+                            ('position','threshold') : [
+                                ('crossover', 80), 
+                                ('crossunder', 20), 
+                                ('crossover', 90), 
+                                ('crossunder', 10),
                                 ('crossover', 95), ('above', 95),
                                 ('crossunder', 5), ('below', 5),
                                 ('crossover', 98), ('above', 98),
                                 ('crossunder', 2), ('below', 2)
                             ],                        
-                        }
+                        },
+                        'type': 'trigger'
                     },
                     'consecutive1':{
                         'function': 'flow_consecutive_bars',
@@ -2769,24 +3026,46 @@ class Vectorized:
                             'smoothing': [1,5, 10, 15],
                             'direction': ['up', 'down', 'positive','negative'],
                             ('num_conditional_bars', 'num_bars'): [(3,3), (4,4), (5,5), (3,5), (4,5), (3,4)],
-                         }
+                         },
+                         'type': 'trigger'
                     },
-                    'value1':{
+                    'value1_env':{
                         'function': 'flow_value',
                         'params': {
                             'src_name': ['netBUSD', 'netBUSD/Value', 'netForeign', 'netForeign/Value'],
                             'smoothing': [1,5, 10, 15],
                             'position': ['crossover', 'crossunder', 'above', 'below'],
                             'threshold': [0]
-                        }
+                        },
+                        'type': 'env'
                     },
-                    'two_mas1': {
+                    'value1_trigger':{
+                        'function': 'flow_value',
+                        'params': {
+                            'src_name': ['netBUSD', 'netBUSD/Value', 'netForeign', 'netForeign/Value'],
+                            'smoothing': [1,5, 10, 15],
+                            'position': ['above', 'below'],
+                            'threshold': [0]
+                        },
+                        'type': 'trigger'
+                    },
+                    'two_mas1_env': {
                         'function': 'flow_two_mas',
                         'params': {
                             'src_name': ['netBUSD', 'netBUSD/Value', 'netForeign', 'netForeign/Value'],
                             ('ma_len1', 'ma_len2'): [(2, 5), (3, 10), (3, 15), (3, 20), (5,10), (5,15), (5,20)],
-                            'position': ['crossover', 'crossunder', 'above', 'below'],
-                        }
+                            'position': ['above', 'below'],
+                        },
+                        'type': 'env'
+                    },
+                    'two_mas_trigger': {
+                        'function': 'flow_two_mas',
+                        'params': {
+                            'src_name': ['netBUSD', 'netBUSD/Value', 'netForeign', 'netForeign/Value'],
+                            ('ma_len1', 'ma_len2'): [(2, 5), (3, 10), (3, 15), (3, 20), (5,10), (5,15), (5,20)],
+                            'position': ['crossover', 'crossunder'],
+                        },
+                        'type': 'trigger'
                     },
                     'returns_stock_vs_cluster': {
                         'function': 'returns_stock_vs_cluster_ranked',
@@ -2794,7 +3073,8 @@ class Vectorized:
                            'num_bars': [1, 3, 5, 10],
                            'top_or_bottom': ['top', 'bottom'],
                             'ranking': [2,3],
-                        }
+                        },
+                        'type': 'env'
                     },
                     'returns_stock_vs_market': {
                         'function': 'returns_stock_vs_index_ranked',
@@ -2802,7 +3082,8 @@ class Vectorized:
                             'num_bars': [1, 3, 5, 10],
                             'top_or_bottom': ['top', 'bottom'],
                             'ranking': [2,3],
-                        }
+                        },
+                        'type': 'env'
                     },
                     'returns_cluster_vs_market': {
                         'function': 'returns_cluster_vs_index_ranked',
@@ -2810,16 +3091,28 @@ class Vectorized:
                             'num_bars': [1, 3, 5, 10],
                             'top_or_bottom': ['top', 'bottom'],
                             'ranking': [2,3],
-                        }
+                        },
+                        'type': 'env'
                     },
-                    'returns_stock_vs_index_strength1': {
+                    'returns_stock_vs_index_strength1_env': {
                         'function': 'returns_stock_vs_index_strength',
                         'params': {
                             'num_return_bars': [1, 3, 5, 10],
                             'ma_use_flag': [True],
                             ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
-                            'ma_position': ['crossover', 'crossunder', 'above', 'below'],
-                        }
+                            'ma_position': [ 'above', 'below'],
+                        },
+                        'type': 'env'
+                    },
+                    'returns_stock_vs_index_strength1_trigger': {
+                        'function': 'returns_stock_vs_index_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'ma_use_flag': [True],
+                            ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
+                            'ma_position': ['crossover', 'crossunder'],
+                        },
+                        'type': 'trigger'
                     },
                     'returns_stock_vs_index_strength2': {
                         'function': 'returns_stock_vs_index_strength',
@@ -2830,34 +3123,62 @@ class Vectorized:
                             'bb_mult' : [1, 1.5, 2, 2.5],
                             'bb_position': ['crossover', 'crossunder'],
                             'bb_cross_line': ['upper', 'lower'],
-                        }
+                        },
+                        'type': 'trigger'
                     },
-                    'returns_stock_vs_index_strength3': {
+                    'returns_stock_vs_index_strength3_env': {
                         'function' : 'returns_stock_vs_index_strength',
                         'params': {
                             'num_return_bars': [1, 3, 5, 10],
                             'pct_use_flag': [True],
                             'pct_lookback': [64, 128, 256],
                             ('pct_hline_position','pct_hline') : [
-                                ('crossover', 80), ('above', 80),
-                                ('crossunder', 20), ('below', 20),
-                                ('crossover', 90), ('above', 90),
-                                ('crossunder', 10), ('below', 10),
+                                ('above', 80),
+                                ('below', 20),
+                                ('above', 90),
+                                ('below', 10),
+                            ],    
+                        },
+                        'type': 'env'
+                    },
+                    'returns_stock_vs_index_strength3_trigger': {
+                        'function' : 'returns_stock_vs_index_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'pct_use_flag': [True],
+                            'pct_lookback': [64, 128, 256],
+                            ('pct_hline_position','pct_hline') : [
+                                ('crossover', 80), 
+                                ('crossunder', 20), 
+                                ('crossover', 90), 
+                                ('crossunder', 10),
                                 ('crossover', 95), ('above', 95),
                                 ('crossunder', 5), ('below', 5),
                                 ('crossover', 98), ('above', 98),
                                 ('crossunder', 2), ('below', 2)
                             ],    
-                        }
+                        },
+                        'type': 'trigger'
                     },
-                    'returns_stock_vs_cluster_strength1': {
+                    'returns_stock_vs_cluster_strength1_env': {
                         'function': 'returns_stock_vs_cluster_strength',
                         'params': {
                             'num_return_bars': [1, 3, 5, 10],
                             'ma_use_flag': [True],
                             ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
-                            'ma_position': ['crossover', 'crossunder', 'above', 'below'],
-                        }
+                            'ma_position': [ 'above', 'below'],
+                        },
+                        'type': 'env'
+                    },
+                    'returns_stock_vs_cluster_strength1_trigger': {
+                        'function': 'returns_stock_vs_cluster_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'ma_use_flag': [True],
+                            ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
+                            'ma_position': ['above', 'below'],
+                        },
+                        'type': 'trigger'
                     },
                     'returns_stock_vs_cluster_strength2': {
                         'function': 'returns_stock_vs_cluster_strength',
@@ -2868,34 +3189,62 @@ class Vectorized:
                             'bb_mult' : [1, 1.5, 2, 2.5],
                             'bb_position': ['crossover', 'crossunder'],
                             'bb_cross_line': ['upper', 'lower'],
-                        }
+                        },
+                        'type': 'trigger'
                     },
-                    'returns_stock_vs_cluster_strength3': {
+                    'returns_stock_vs_cluster_strength3_env': {
                         'function' : 'returns_stock_vs_cluster_strength',
                         'params': {
                             'num_return_bars': [1, 3, 5, 10],
                             'pct_use_flag': [True],
                             'pct_lookback': [64, 128, 256],
                             ('pct_hline_position','pct_hline') : [
-                                ('crossover', 80), ('above', 80),
-                                ('crossunder', 20), ('below', 20),
-                                ('crossover', 90), ('above', 90),
-                                ('crossunder', 10), ('below', 10),
+                                ('above', 80),
+                                ('below', 20),
+                                ('above', 90),
+                                ('below', 10),
+                            ],    
+                        },
+                        'type': 'env'
+                    },
+                    'returns_stock_vs_cluster_strength3_trigger': {
+                        'function' : 'returns_stock_vs_cluster_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'pct_use_flag': [True],
+                            'pct_lookback': [64, 128, 256],
+                            ('pct_hline_position','pct_hline') : [
+                                ('crossover', 80), 
+                                ('crossunder', 20), 
+                                ('crossover', 90), 
+                                ('crossunder', 10), 
                                 ('crossover', 95), ('above', 95),
                                 ('crossunder', 5), ('below', 5),
                                 ('crossover', 98), ('above', 98),
                                 ('crossunder', 2), ('below', 2)
                             ],    
-                        }
+                        },
+                        'type': 'trigger'
                     },
-                    'returns_cluster_vs_index_strength1': {
+                    'returns_cluster_vs_index_strength1_env': {
                         'function': 'returns_cluster_vs_index_strength',
                         'params': {
                             'num_return_bars': [1, 3, 5, 10],
                             'ma_use_flag': [True],
                             ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
-                            'ma_position': ['crossover', 'crossunder', 'above', 'below'],
-                        }
+                            'ma_position': [ 'above', 'below'],
+                        },
+                        'type': 'env'
+                    },
+                    'returns_cluster_vs_index_strength1_trigger': {
+                        'function': 'returns_cluster_vs_index_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'ma_use_flag': [True],
+                            ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
+                            'ma_position': ['above', 'below'],
+                        },
+                        'type': 'trigger'
                     },
                     'returns_cluster_vs_index_strength2': {
                         'function': 'returns_cluster_vs_index_strength',
@@ -2907,24 +3256,41 @@ class Vectorized:
                             'bb_position': ['crossover', 'crossunder'],
                             'bb_cross_line': ['upper', 'lower'],
                         },
+                        'type': 'trigger'
                     },
-                    'returns_cluster_vs_index_strength3': {
+                    'returns_cluster_vs_index_strength3_env': {
                         'function' : 'returns_cluster_vs_index_strength',
                         'params': {
                             'num_return_bars': [1, 3, 5, 10],
                             'pct_use_flag': [True],
                             'pct_lookback': [64, 128, 256],
                             ('pct_hline_position','pct_hline') : [
-                                ('crossover', 80), ('above', 80),
-                                ('crossunder', 20), ('below', 20),
-                                ('crossover', 90), ('above', 90),
-                                ('crossunder', 10), ('below', 10),
+                                ('above', 80),
+                                ('below', 20),
+                                ('above', 90),
+                                ('below', 10),
+                            ],    
+                        },
+                        'type': 'env'
+                    },
+                    'returns_cluster_vs_index_strength3_trigger': {
+                        'function' : 'returns_cluster_vs_index_strength',
+                        'params': {
+                            'num_return_bars': [1, 3, 5, 10],
+                            'pct_use_flag': [True],
+                            'pct_lookback': [64, 128, 256],
+                            ('pct_hline_position','pct_hline') : [
+                                ('crossover', 80), 
+                                ('crossunder', 20),
+                                ('crossover', 90),
+                                ('crossunder', 10), 
                                 ('crossover', 95), ('above', 95),
                                 ('crossunder', 5), ('below', 5),
                                 ('crossover', 98), ('above', 98),
                                 ('crossunder', 2), ('below', 2)
                             ],    
-                        }
+                        },
+                        'type': 'trigger'
                     },
                     'consecutive_performance' : {
                         'function': 'consecutive_performance',
@@ -2932,16 +3298,28 @@ class Vectorized:
                             'num_return_bars': [1, 3, 5, 10],
                             'direction': ['positive', 'negative'],
                             ('num_conditional_bars','num_consecutive_bars'): [(1,1), (3,3), (5,5), (10,10), (4,5), (8,10), (9,10)],
-                        }
+                        },
+                        'type': 'trigger'
                     },
-                    'volume_stock_vs_index1': {
+                    'volume_stock_vs_index1_env': {
                         'function': 'volume_stock_vs_index',
                         'params': {
                             'smoothing': [1, 5, 10, 15],
                             'ma_use_flag': [True],
                             ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
-                            'ma_position': ['crossover', 'crossunder', 'above', 'below'],
-                        }
+                            'ma_position': ['above', 'below'],
+                        },
+                        'type': 'env'
+                    },
+                    'volume_stock_vs_index1_trigger': {
+                        'function': 'volume_stock_vs_index',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'ma_use_flag': [True],
+                            ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
+                            'ma_position': ['above', 'below'],
+                        },
+                        'type': 'trigger'
                     },
                     'volume_stock_vs_index2': {
                         'function': 'volume_stock_vs_index',
@@ -2952,34 +3330,62 @@ class Vectorized:
                             'bb_mult' : [1, 1.5, 2, 2.5],
                             'bb_position': ['crossover', 'crossunder'],
                             'bb_cross_line': ['upper', 'lower'],
-                        }
+                        },
+                        'type': 'trigger'
                     },
-                    'volume_stock_vs_index3': {
+                    'volume_stock_vs_index3_env': {
                         'function' : 'volume_stock_vs_index',
                         'params': {
                             'smoothing': [1, 5, 10, 15],
                             'pct_use_flag': [True],
                             'pct_lookback': [64, 128, 256],
                             ('pct_hline_position','pct_hline') : [
-                                ('crossover', 80), ('above', 80),
-                                ('crossunder', 20), ('below', 20),
-                                ('crossover', 90), ('above', 90),
-                                ('crossunder', 10), ('below', 10),
+                                ('above', 80),
+                                ('below', 20),
+                                ('above', 90),
+                                ('below', 10)
+                            ],    
+                        },
+                        'type': 'env'
+                    },
+                    'volume_stock_vs_index3_trigger': {
+                        'function' : 'volume_stock_vs_index',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'pct_use_flag': [True],
+                            'pct_lookback': [64, 128, 256],
+                            ('pct_hline_position','pct_hline') : [
+                                ('crossover', 80), 
+                                ('crossunder', 20), 
+                                ('crossover', 90),
+                                ('crossunder', 10), 
                                 ('crossover', 95), ('above', 95),
                                 ('crossunder', 5), ('below', 5),
                                 ('crossover', 98), ('above', 98),
                                 ('crossunder', 2), ('below', 2)
                             ],    
-                        }
+                        },
+                        'type': 'trigger'
                     },
-                    'volume_stock_vs_cluster1': {
+                    'volume_stock_vs_cluster1_env': {
                         'function': 'volume_stock_vs_cluster',
                         'params': {
                             'smoothing': [1, 5, 10, 15],
                             'ma_use_flag': [True],
                             ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
-                            'ma_position': ['crossover', 'crossunder', 'above', 'below'],
-                        }
+                            'ma_position': [ 'above', 'below'],
+                        },
+                        'type' : 'env'
+                    },
+                    'volume_stock_vs_cluster1_trigger': {
+                        'function': 'volume_stock_vs_cluster',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'ma_use_flag': [True],
+                            ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
+                            'ma_position': ['above', 'below'],
+                        },
+                        'type' : 'trigger'
                     },
                     'volume_stock_vs_cluster2': {
                         'function': 'volume_stock_vs_cluster',
@@ -2990,34 +3396,63 @@ class Vectorized:
                             'bb_mult' : [1, 1.5, 2, 2.5],
                             'bb_position': ['crossover', 'crossunder'],
                             'bb_cross_line': ['upper', 'lower'],
-                        }
+                        },
+                        'type':'trigger'
                     },
-                    'volume_stock_vs_cluster3': {
+                    'volume_stock_vs_cluster3_env': {
                         'function' : 'volume_stock_vs_cluster',
                         'params': {
                             'smoothing': [1, 5, 10, 15],
                             'pct_use_flag': [True],
                             'pct_lookback': [64, 128, 256],
                             ('pct_hline_position','pct_hline') : [
-                                ('crossover', 80), ('above', 80),
-                                ('crossunder', 20), ('below', 20),
-                                ('crossover', 90), ('above', 90),
-                                ('crossunder', 10), ('below', 10),
+                                ('above', 80),
+                                ('below', 20),
+                                ('above', 90),
+                                ('below', 10)
+                          
+                            ],    
+                        },
+                        'type': 'env'
+                    },
+                    'volume_stock_vs_cluster3_trigger': {
+                        'function' : 'volume_stock_vs_cluster',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'pct_use_flag': [True],
+                            'pct_lookback': [64, 128, 256],
+                            ('pct_hline_position','pct_hline') : [
+                                ('crossover', 80), 
+                                ('crossunder', 20),
+                                ('crossover', 90), 
+                                ('crossunder', 10), 
                                 ('crossover', 95), ('above', 95),
                                 ('crossunder', 5), ('below', 5),
                                 ('crossover', 98), ('above', 98),
                                 ('crossunder', 2), ('below', 2)
                             ],    
-                        }
+                        },
+                        'type': 'trigger'
                     },
-                     'volume_cluster_vs_index1': {
+                     'volume_cluster_vs_index1_env': {
                         'function': 'volume_cluster_vs_index',
                         'params': {
                             'smoothing': [1, 5, 10, 15],
                             'ma_use_flag': [True],
                             ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
-                            'ma_position': ['crossover', 'crossunder', 'above', 'below'],
-                        }
+                            'ma_position': [ 'above', 'below'],
+                        },
+                        'type': 'env'
+                    },
+                    'volume_cluster_vs_index1_trigger': {
+                        'function': 'volume_cluster_vs_index',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'ma_use_flag': [True],
+                            ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
+                            'ma_position': ['crossover', 'crossunder'],
+                        },
+                        'type': 'trigger'
                     },
                     'volume_cluster_vs_index2': {
                         'function': 'volume_cluster_vs_index',
@@ -3029,24 +3464,42 @@ class Vectorized:
                             'bb_position': ['crossover', 'crossunder'],
                             'bb_cross_line': ['upper', 'lower'],
                         },
+                        'type':'trigger'
                     },
-                    'volume_cluster_vs_index3': {
+                    'volume_cluster_vs_index3_env': {
                         'function' : 'volume_cluster_vs_index',
                         'params': {
                             'smoothing': [1, 5, 10, 15],
                             'pct_use_flag': [True],
                             'pct_lookback': [64, 128, 256],
                             ('pct_hline_position','pct_hline') : [
-                                ('crossover', 80), ('above', 80),
-                                ('crossunder', 20), ('below', 20),
-                                ('crossover', 90), ('above', 90),
-                                ('crossunder', 10), ('below', 10),
+                                ('above', 80),
+                                ('below', 20),
+                                ('above', 90),
+                                ('below', 10)
+                             
+                            ],    
+                        },
+                        'type': 'env'
+                    },
+                    'volume_cluster_vs_index3_trigger': {
+                        'function' : 'volume_cluster_vs_index',
+                        'params': {
+                            'smoothing': [1, 5, 10, 15],
+                            'pct_use_flag': [True],
+                            'pct_lookback': [64, 128, 256],
+                            ('pct_hline_position','pct_hline') : [
+                                ('crossover', 80), 
+                                ('crossunder', 20), 
+                                ('crossover', 90), 
+                                ('crossunder', 10), 
                                 ('crossover', 95), ('above', 95),
                                 ('crossunder', 5), ('below', 5),
                                 ('crossover', 98), ('above', 98),
                                 ('crossunder', 2), ('below', 2)
                             ],    
-                        }
+                        },
+                        'type': 'trigger'
                     },
                     'volume_cluster_vs_cluster_consecutive1': {
                         'function' : 'volume_cluster_vs_cluster_consecutive',
@@ -3056,7 +3509,8 @@ class Vectorized:
                             'top_or_bottom': ['top', 'bottom'],
                             'ranking': [2,3],
                             ('num_conditional_bars', 'consecutive_bars'): [(3,3), (4,4), (5,5), (3,5), (4,5), (3,4), (8,10), (9,10), (10,10)],
-                        }
+                        },
+                        'type': 'trigger'
         }
         }
 
@@ -3065,7 +3519,10 @@ class Vectorized:
         for cluster, val in params_dic.items():
             f = val['function']
             p: dict = val['params']
-
+            if 'type' in val:
+                t = val['type']
+            else:
+                t = 'env'
             combinations = list(product(*p.values()))
             dff = pd.DataFrame(combinations, columns=p.keys())
             for c in dff.columns:
@@ -3074,7 +3531,7 @@ class Vectorized:
                     dff = dff.drop(c, axis=1)
 
             dff['function'] = f
-
+            dff['type'] = t
             params_df = pd.concat([params_df, dff], ignore_index=True)
         return params_df
 
@@ -3316,6 +3773,93 @@ class Vectorized:
     
     class MultiProcess:
         @staticmethod
+        def compute_signals_env(recompute = True):
+            from danglib.pylabview2.celery_worker import compute_signal, clean_redis
+
+            params_df_old: pd.DataFrame = Vectorized.create_params_sets()
+            params_df_new: pd.DataFrame = Vectorized.create_params_sets2()
+            params_df = pd.concat([params_df_old, params_df_new], ignore_index=True)
+            params_df = params_df[params_df['type'] == 'env'].reset_index(drop=True)
+            
+            n_strats = len(params_df)
+
+            if recompute:
+                _, client_disconnect, psave, pload = gen_plasma_functions(db=5)
+                df_tmp = df['close']
+                df_tmp = df_tmp[df_tmp.index >= '2018_01_01']
+                n_rows, n_cols = df_tmp.shape
+
+                # Khởi tạo một mảng NumPy 3 chiều với kích thước (2000, 2000, 200)
+                array_3d = np.empty((n_strats, n_rows, n_cols))
+
+                task_dic = {}
+                print("Computing signals:")
+                for idx, params in tqdm(params_df.iterrows(), total=params_df.shape[0]):    
+                    params = params.dropna().to_dict()
+                    params.pop('type',None)
+                    task_dic[idx] = compute_signal.delay(idx, params)
+
+                while any(t.status!='SUCCESS' for t in task_dic.values()):
+                    pass
+                
+                for idx, v in task_dic.items():
+                    res: pd.DataFrame = v.result
+                    if res is not None:
+                        array_3d[idx, :, :] = res
+
+                    else:
+                        print(f"{idx} error")
+                array_3d = array_3d.astype(bool)
+                psave("sig_3d_array_env",array_3d)
+
+                clean_redis()
+                client_disconnect()
+
+            return n_strats
+        @staticmethod
+        def compute_signals_trigger(recompute = True):
+            from danglib.pylabview2.celery_worker import compute_signal, clean_redis
+
+            params_df_old: pd.DataFrame = Vectorized.create_params_sets()
+            params_df_new: pd.DataFrame = Vectorized.create_params_sets2()
+            params_df = pd.concat([params_df_old, params_df_new], ignore_index=True)
+            params_df = params_df[params_df['type'] == 'trigger']
+            n_strats = len(params_df)
+
+            if recompute:
+                _, client_disconnect, psave, pload = gen_plasma_functions(db=5)
+                df_tmp = df['close']
+                df_tmp = df_tmp[df_tmp.index >= '2018_01_01']
+                n_rows, n_cols = df_tmp.shape
+
+                # Khởi tạo một mảng NumPy 3 chiều với kích thước (2000, 2000, 200)
+                array_3d = np.empty((n_strats, n_rows, n_cols))
+
+                task_dic = {}
+                print("Computing signals:")
+                for idx, params in tqdm(params_df.iterrows(), total=params_df.shape[0]):    
+                    params = params.dropna().to_dict()
+                    params.pop('type',None)
+                    task_dic[idx] = compute_signal.delay(idx, params)
+
+                while any(t.status!='SUCCESS' for t in task_dic.values()):
+                    pass
+                
+                for idx, v in task_dic.items():
+                    res: pd.DataFrame = v.result
+                    if res is not None:
+                        array_3d[idx, :, :] = res
+
+                    else:
+                        print(f"{idx} error")
+                array_3d = array_3d.astype(bool)
+                psave("sig_3d_array_trigger",array_3d)
+
+                clean_redis()
+                client_disconnect()
+
+            return n_strats
+        @staticmethod
         def compute_signals2(recompute = True):
             from danglib.pylabview2.celery_worker import compute_signal2, clean_redis
 
@@ -3484,6 +4028,7 @@ class Vectorized:
                 print("Computing signals:")
                 for idx, params in tqdm(params_df.iterrows(), total=params_df.shape[0]):    
                     params = params.dropna().to_dict()
+                    params.pop('type', None)
                     task_dic[idx] = compute_signal.delay(idx, params)
 
                 while any(t.status!='SUCCESS' for t in task_dic.values()):
@@ -4110,8 +4655,31 @@ class Vectorized:
 
     class Runs:
         @staticmethod
+        def compute_nt_re_wr_new_combination():
+            name = 'new_combination'
+            store_folder = f"/data/Tai/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/data/Tai/pickles/{name}"
+            maybe_create_dir(result_folder)
+            
+            recompute_signals = True
+            ## CALC  -------------------------------------------------------------------
+            
+            stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+                                                push_return_numpy=True, 
+                                                push_stocks_numpy=True
+                                            )
+            
+            n_strats_env = Vectorized.MultiProcess.compute_signals_env(recompute_signals)
+            n_strats_trigger = Vectorized.MultiProcess.compute_signals_trigger(recompute_signals)
+            # n_strats = 1418
+
+            Vectorized.MultiProcess.compute_wr_re_nt_new_combination(n_strats, folder=store_folder)
+            Vectorized.JoinResults.join_wr_re_nt_data_new_combination(n_strats, stocks_map, src_folder=store_folder, des_folder=result_folder)
+        @staticmethod
         def compute_nt_re_wr_new_cond2():
-            name = 'new_cond'
+            name = 'new_cond_test'
             store_folder = f"/data/Tai/{name}_tmp"
             maybe_create_dir(store_folder)
 
