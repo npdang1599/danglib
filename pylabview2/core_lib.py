@@ -414,7 +414,12 @@ class Adapters:
         df["group_name"] = df["Group"].map(group_name_map)
         stocks_groups_map = dict(zip(df["Ticker"], df["group_name"]))
         return stocks, stocks_groups_map
-    
+    @staticmethod
+    def get_hrp_group():
+        with open('/home/ubuntu/Tai/Production/pickle/cluster_hrp.pkl', 'rb') as f:
+            hrp_group = pickle.load(f)
+        hrp_group_renamed = {k: f"cluster_{v}" for k, v in hrp_group.items()}
+        return hrp_group_renamed
     @staticmethod
     def load_quarter_netincome_from_db_VCI(symbols: list):
         db = MongoClient("ws", 27022)["stockdata"]

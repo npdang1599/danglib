@@ -55,9 +55,11 @@ class Globs:
         'f1Bid': 'last',
         'f1Ask': 'last',
         'Vn30Value': 'sum',
+        'Vn30Volume': 'sum',
         'F1Value': 'sum',
         'F1Volume': 'sum',
         'VnindexValue': 'sum',
+        'VnindexVolume': 'sum',
         'f1BuyVol': 'sum',
         'f1SellVol': 'sum',
         'outstandingFPos': 'last',
@@ -95,7 +97,9 @@ class Globs:
         'foreignerBuyVolume': 'last',
         'foreignerSellVolume': 'last',
         'volume': 'sum',
-        'value': 'sum'
+        'value': 'sum',
+        'fF1BuyVol': 'sum',
+        'fF1SellVol': 'sum',
     }
 
 
@@ -105,15 +109,6 @@ class Globs:
         'Medium': ['VRE', 'EIB', 'STB', 'DSC', 'TCB', 'KDH', 'MSB', 'VHM', 'TV2', 'CTR', 'LDG', 'VGT', 'CTI', 'BSR', 'SHB', 'MSH', 'CTG', 'ELC', 'PHR', 'VIB', 'VIC', 'PSH', 'TTF', 'BFC', 'TPB', 'MSR', 'LHG', 'VCS', 'SIP', 'OCB', 'SKG', 'DPR', 'GMD', 'VPB', 'MBB', 'BID', 'APH'], 
         'Low': ['HAG', 'PLX', 'AGG', 'HAX', 'SBT', 'LPB', 'BMP', 'BCM', 'GEG', 'FPT', 'POW', 'HVN', 'PVP', 'TNH', 'DHC', 'NT2', 'OIL', 'DRC', 'BVH', 'REE', 'FRT', 'ABB', 'ACB', 'HNG', 'CMG', 'GAS', 'GSP', 'VIP', 'HDB', 'DHA', 'SAB', 'VTO', 'PNJ', 'BAF', 'QNS', 'NAF', 'YEG', 'VJC', 'VNM', 'NAB', 'PTB', 'VCB', 'ITD', 'TCM', 'VPI', 'VEA', 'SJS', 'MCH', 'SSB', 'FOX', 'ACV', 'SCS', 'BWE', 'NCT', 'KDC'],
         "VN30": ['ACB', 'BCM', 'BID', 'BVH', 'CTG', 'FPT', 'GAS', 'GVR', 'HDB', 'HPG', 'MBB', 'MSN', 'MWG', 'PLX', 'POW', 'SAB', 'SHB', 'SSB', 'SSI', 'STB', 'TCB', 'TPB', 'VCB', 'VHM', 'VIB', 'VIC', 'VJC', 'VNM', 'VPB', 'VRE'],
-        # "RE1":[ 'DXG', 'DIG', 'KDH', 'CEO', 'NLG'],
-        # "RE2":[ 'DXG', 'DIG', 'KDH', 'CEO', 'NLG', 'NVL', 'VHM'],
-        # "IP":[ 'KBC' ,'IDC' ,'VGC'],
-        # "SEC1":[ 'SSI' , 'VND' , 'HCM' , 'VCI'],
-        # "SEC2":[ 'SHS', 'BSI', 'FTS'],
-        # "Retail":[ 'MWG'  , 'DGW', 'FRT'],
-        # "Steel":[ 'HPG' , 'HSG' , 'NKG'],
-        # "SOBank":[ 'VCB' , 'BID' , 'CTG'],
-        # "POBank":[ 'TCB' , 'SHB' , 'VPB' , 'STB' , 'MBB'],
         "All": STOCKS,
     }
 
@@ -217,7 +212,7 @@ class Resources:
         
         @staticmethod
         def get_PS_realtime_key(day):
-            return f"pylabview_future_{day}"
+            return f"pylabview_ps_{day}"
         
         @staticmethod
         def get_index_realtime_key(day):
@@ -254,7 +249,7 @@ class Adapters:
         return df
 
     @staticmethod
-    def load_stock_data_from_plasma_realtime(required_stats: list = None, stocks = None):
+    def load_stock_data_from_plasma_realtime(required_stats: list = None, stocks = None) -> pd.DataFrame:
         def test(): 
             required_stats = ['bu', 'sd']
             groups_and_stocks = ['HPG', 'SSI']
@@ -295,29 +290,33 @@ class Adapters:
 
     @staticmethod
     def load_data_from_plasma(key, db=None):
-        if db is None:
-            db = Globs.PLASMA_DB
+        try:
+            if db is None:
+                db = Globs.PLASMA_DB
 
-        from danglib.lazy_core import gen_plasma_functions
-        _, disconnect, psave, pload = gen_plasma_functions(db)
+            from danglib.lazy_core import gen_plasma_functions
+            _, disconnect, psave, pload = gen_plasma_functions(db)
 
-        df: pd.DataFrame = pload(key)
+            df: pd.DataFrame = pload(key)
 
-        disconnect()
-        return df
+            return df
+
+        finally:
+            disconnect()
+    
     
     @staticmethod
     def save_data_to_plasma(key, data, db=None):
-        if db is None:
-            db = Globs.PLASMA_DB
+        try:
+            if db is None:
+                db = Globs.PLASMA_DB
+            from danglib.lazy_core import gen_plasma_functions
+            _, disconnect, psave, pload = gen_plasma_functions(db)
 
-        from danglib.lazy_core import gen_plasma_functions
-        _, disconnect, psave, pload = gen_plasma_functions(db)
+            psave(key, data)
 
-        df: pd.DataFrame = psave(key, data)
-
-        disconnect()
-        return df
+        finally:
+            disconnect()
 
 
     @staticmethod
@@ -378,7 +377,7 @@ class Adapters:
     @staticmethod
     def load_data_only(day=None):
         if day is None:
-            day = '2022_04_11'
+            day = '2025_03_28'
 
         db = PICKLED_WS_ADAPTERS.load_hose500_from_db(day)
         df = pd.DataFrame.from_dict(db.get("data"))
@@ -594,13 +593,17 @@ class Adapters:
     class SaveDataToPlasma:
         @staticmethod
         def save_data_to_plasma(key, data, db=None):
-            if db is None:
-                db = Globs.PLASMA_DB
-            from danglib.lazy_core import gen_plasma_functions
-            _, disconnect, psave, pload = gen_plasma_functions(db)
+            try:
+                if db is None:
+                    db = Globs.PLASMA_DB
+                from danglib.lazy_core import gen_plasma_functions
+                _, disconnect, psave, pload = gen_plasma_functions(db)
 
-            psave(key, data)
-
+                psave(key, data)
+            except Exception as e:
+                logging.error(f"Error saving data to plasma: {str(e)}")
+            finally:
+                disconnect()
 
         @staticmethod
         def save_stock_data_to_plasma(create_sample=False):
@@ -661,7 +664,7 @@ class Adapters:
 
             df = Adapters.load_index_ohlc_from_pickle()
             df['F1_volume'] = df['F1_value'].copy()
-            df['F1_value'] = df['F1_value'] * df['F1_close']
+            df['F1_value'] = df['F1_value'] * df['F1_close'] * 100000
             df['VN30_volume'] = df['VN30_value'].copy()
             df['VNINDEX_volume'] = df['VNINDEX_value'].copy()
 
@@ -725,8 +728,7 @@ class Adapters:
             dfr = dfr.rename(columns= {k: underscore_to_camel(k) for k in dfr.columns})
 
             dfr = dfr.rename(columns={'VnindexVolume': 'VnindexValue', 'Vn30Volume': 'Vn30Value'})
-            dfr['F1Value'] = dfr['F1Volume'] * dfr['F1Close']
-            dfr['F1Volume'] = dfr['F1Value'].copy()
+            dfr['F1Value'] = dfr['F1Volume'] * dfr['F1Close'] * 100000
             dfr['Vn30Volume'] = dfr['Vn30Value'].copy()
             dfr['VnindexVolume'] = dfr['VnindexValue'].copy()
 
@@ -761,35 +763,48 @@ class Adapters:
             else:
                 CREATE_SAMPLE = True
 
+                Adapters.SaveDataToPlasma.save_index_daily_ohlcv_to_plasma(CREATE_SAMPLE)
+                Adapters.SaveDataToPlasma.save_stock_data_to_plasma(CREATE_SAMPLE)
                 Adapters.SaveDataToPlasma.save_group_data_to_plasma(CREATE_SAMPLE)
                 Adapters.SaveDataToPlasma.save_index_ohlcv_to_plasma(CREATE_SAMPLE)
                 Adapters.SaveDataToPlasma.save_market_data_to_plasma(CREATE_SAMPLE)
-                Adapters.SaveDataToPlasma.save_stock_data_to_plasma(CREATE_SAMPLE)
-                Adapters.SaveDataToPlasma.save_index_daily_ohlcv_to_plasma(CREATE_SAMPLE)
                 Adapters.classify_stocks_and_save_to_plasma(CREATE_SAMPLE)
 
             redis_handler = RedisHandler()
             redis_handler.delete_keys_by_pattern("pslab/stockcount/*")
 
     @staticmethod 
-    def load_groups_and_stocks_data_from_plasma(required_stats: list = None, groups_and_stocks: list = None, load_sample = False) -> pd.DataFrame:
+    def load_groups_and_stocks_data_from_plasma(
+        required_stats: list = None, 
+        groups_and_stocks: list = None, 
+        load_sample = False
+    ) -> pd.DataFrame:
         
         def test(): 
             required_stats = ['bu', 'sd']
-            groups_and_stocks = ['VN30', 'Super High Beta', 'HPG', 'SSI']
+            groups_and_stocks = ['All']
+            from_day = '2024_10_01'
+            to_day = '2025_10_25'
 
         if groups_and_stocks is None:
             return Adapters.load_group_data_from_plasma()
         
-        stocks = [i for i in groups_and_stocks if i in Globs.STOCKS]
-        groups = [i for i in groups_and_stocks if i in Globs.SECTOR_DIC.keys()]
+        # stocks = [i for i in groups_and_stocks if i in Globs.STOCKS]
+
+
+        true_stocks = []
+        if groups_and_stocks is not None:
+            for s in groups_and_stocks:
+                if s in Globs.SECTOR_DIC.keys():
+                    true_stocks += Globs.SECTOR_DIC[s]
+                elif s in Globs.STOCKS:
+                    true_stocks.append(s)
+
+        true_stocks = [i for i in true_stocks if i in Globs.STOCKS]
 
         ls = []
-        if len(stocks) > 0:
-            ls.append(Adapters.load_stock_data_from_plasma(required_stats, stocks, load_sample))
-
-        if len(groups) > 0:
-            ls.append(Adapters.load_group_data_from_plasma(required_stats, groups, load_sample))
+        if len(true_stocks) > 0:
+            ls.append(Adapters.load_stock_data_from_plasma(required_stats, true_stocks, load_sample))
 
         df = pd.concat(ls, axis=1).sort_index()
 
@@ -906,21 +921,21 @@ class Adapters:
     @staticmethod
     def load_index_daily_ohlcv_from_plasma(required_stats: list = None, load_sample: bool = False):
         key = Resources.PlasmaKeys.INDEX_DAILY_OHLC
+        try:
+            if not load_sample:
+                from danglib.lazy_core import gen_plasma_functions
+                _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
 
-        if not load_sample:
-            from danglib.lazy_core import gen_plasma_functions
-            _, disconnect, psave, pload = gen_plasma_functions(Globs.PLASMA_DB)
+                df = pload(key)
+            else:
+                df: pd.DataFrame = FileHandler.read_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet")
 
-            df = pload(key)
+            if required_stats:
+                df = df[required_stats]
 
+            return df
+        finally:
             disconnect()
-        else:
-            df: pd.DataFrame = FileHandler.read_parquet(f"{Resources.SAMPLE_DATA_FOLDER}/{key}.parquet")
-
-        if required_stats:
-            df = df[required_stats]
-
-        return df
     
     @staticmethod
     def load_sectors_stocks_from_db(stocks: list = None):
@@ -952,12 +967,12 @@ class Adapters:
     
     @staticmethod
     def load_sector_stocks_data_from_db():
-
+        
         db = MongoClient(port=27022)['stockdata']
-        collection = db["symbols_by_industries"] 
+        collection = db["dc_sector_mapping"] 
         df_raw = pd.DataFrame(list(collection.find({}, {'_id': 0})))
-        sector_dic = df_raw.groupby('en_icb_name2')['symbol'].apply(list).to_dict()
-
+        sector_dic = df_raw.groupby('L2')['Ticker'].apply(list).to_dict()
+        
         return sector_dic
     
     @staticmethod
@@ -986,6 +1001,8 @@ class Adapters:
     def classify_stocks_and_save_to_plasma(create_sample: bool = False):
 
         def _classify_by_sector():
+            Globs.SECTOR_DIC.update(Adapters.load_sector_stocks_data_from_db())
+
             sector_dic = {k: v for k, v in Globs.SECTOR_DIC.items() if k not in ['Super High Beta', 'High Beta', 'Medium', 'Low']}
             group_dic = {}
             for k, v in sector_dic.items():

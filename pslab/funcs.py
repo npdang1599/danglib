@@ -134,7 +134,8 @@ def function_mapping():
             'inputs': ['src1', 'src2'],
             'params': {
                 'lookback_period': {'type': 'int', 'default': 20},
-                'threshold': {'type': 'float', 'default': 90},
+                'lower_thres': {'type': 'float', 'default': 0},
+                'upper_thres': {'type': 'float', 'default': 100},
                 "use_as_lookback_cond" : {'type': 'bool', 'default': False},
                 'lookback_cond_nbar' : {'type': 'int', 'default': 5}
             }
@@ -587,12 +588,12 @@ class Resampler:
         assert agg_dict, "agg_dict is Empty"
         
         # Kiểm tra columns không tồn tại
-        invalid_cols = set(agg_dict.keys()) - set(df.columns.get_level_values(0).unique())
+        invalid_cols = set(agg_dict.keys()) - set(df.columns.get_level_values(level))
         if invalid_cols:
             raise ValueError(f"Columns không tồn tại trong DataFrame: {invalid_cols}")
         
         # Thêm columns còn thiếu với aggregation mặc định là 'last'
-        missing_cols = set(df.columns) - set(agg_dict.keys()) - {'datetime'}
+        missing_cols = set(df.columns.get_level_values(level)) - set(agg_dict.keys()) - {'datetime'}
         if missing_cols:
             for col in missing_cols:
                 agg_dict[col] = 'last'
@@ -620,8 +621,7 @@ class Resampler:
         #     agg_dict = {'buyImpact': 'last', 'sellImpact': 'last'}
 
         # Validate và chuẩn hóa agg_dict
-        is_multiindex = isinstance(df.columns, pd.MultiIndex)
-        if not is_multiindex:
+        if not isinstance(df.columns, pd.MultiIndex):
             agg_dict = cls._validate_agg_dict(df, agg_dict)
         
         # Reset index để có thể xử lý candleTime
@@ -951,7 +951,7 @@ class Ta:
     #         raise ValueError(f"Invalid rolling method: {method}. Must be one of: sum, median, mean, rank")
 
     @staticmethod
-    def apply_rolling(data: PandasObject, window: int, method: str = 'sum', daily_rolling: bool = True):
+    def apply_rolling_old(data: PandasObject, window: int, method: str = 'sum', daily_rolling: bool = True):
         """Apply rolling operation based on specified method
         Args:
             data: Input series/dataframe
@@ -961,6 +961,8 @@ class Ta:
             Rolled data with specified method
         """
         def rolling_data(data_input, window_size, method_name):
+
+
             window_size = int(window_size)
             rolling = data_input.rolling(window_size)
             if method_name == 'sum':
@@ -996,7 +998,71 @@ class Ta:
         
         # Hoặc sắp xếp lại kết quả theo timestamp gốc
         return pd.Series(result.values.tolist(), index=timestamp).sort_index()
+    
+    @staticmethod
+    def apply_rolling(data: PandasObject, window: int, method: str = 'sum', daily_rolling: bool = True):
+        """Apply rolling operation based on specified method
+        Args:
+            data: Input series/dataframe
+            window: Rolling window size
+            method: Rolling method - 'sum', 'median', 'mean', 'last', 'rank'
+        Returns:
+            Rolled data with specified method
+        """
+        
+        def test():
+            data: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/pslab_realtime_be/cache/fix_apply_rolling_for_stock_count.pkl")
+            window = 1
+            method = 'mean'
+            daily_rolling = False
 
+        def rolling_data(data_input, window_size, method_name):
+            window_size = int(window_size)
+            rolling = data_input.rolling(window_size)
+            if method_name == 'sum': return rolling.sum()
+            elif method_name == 'median': return rolling.median()
+            elif method_name == 'mean': return rolling.mean()
+            elif method_name == 'rank': return (rolling.rank() - 1) / (window_size - 1) * 100
+            else: raise ValueError(f"Invalid method: {method_name}. Use: sum, median, mean, rank")
+        
+        if daily_rolling:
+            return rolling_data(data, window, method)
+        
+        # Xử lý theo ngày
+        timestamp = data.index
+        date_groups = pd.to_datetime(timestamp, unit='ns').date
+        
+        # Tạo một MultiIndex DataFrame với date và timestamp gốc
+        if isinstance(data, pd.Series):
+            # Xử lý cho Series
+            multi_idx_data = pd.DataFrame({'data': data.values},
+                                        index=[date_groups, timestamp])
+            # Nhóm theo ngày và áp dụng rolling
+            result = multi_idx_data.groupby(level=0).apply(
+                lambda group: rolling_data(
+                    pd.Series(group['data'].values, index=group.index.get_level_values(1)), 
+                    window, method
+                )
+            )
+            return pd.Series(result.values, index=timestamp).sort_index()
+        else:
+            # Xử lý cho DataFrame
+            multi_idx_data = data.copy()
+            multi_idx_data.index = [date_groups, timestamp]
+            
+            # Áp dụng rolling trực tiếp trên toàn bộ DataFrame theo từng ngày
+            result = multi_idx_data.groupby(level=0).apply(
+                lambda group: rolling_data(group, window, method)
+            )
+            
+            # Chuyển kết quả về định dạng gốc với index là timestamp
+            flat_result = pd.DataFrame(
+                result.values,
+                index=timestamp,
+                columns=data.columns
+            ).sort_index()
+            
+            return flat_result
 
 class Indicators:
     """Technical indicators with vectorized operations for both Series and DataFrame"""
@@ -1642,7 +1708,8 @@ class Conds:
         src1: PandasObject,
         src2: PandasObject,
         lookback_period: int = 20,
-        threshold: float = 90,
+        lower_thres: float = 0,
+        upper_thres: float = 100,
         use_as_lookback_cond: bool = False,
         lookback_cond_nbar = 5,
         useflag: bool = True
@@ -1660,8 +1727,8 @@ class Conds:
         
         gap = abs(src1 - src2)
         gap_rank = Ta.rolling_rank(gap, lookback_period)
-        result = gap_rank >= threshold
-    
+        result = (gap_rank >= lower_thres) & (gap_rank <= upper_thres)
+
         if use_as_lookback_cond:
             result = Ta.make_lookback(result, lookback_cond_nbar)
         return result
@@ -1952,469 +2019,301 @@ class Conds:
 
 
 class CombiConds:
-    INPUTS_SIDE_PARAMS =  ['rolling_window', 'stocks', 'rolling_method', 'timeframe', 'daily_rolling']
+    INPUTS_SIDE_PARAMS = ['timeframe', 'stocks', 'rolling_window', 'rolling_method', 'daily_rolling', 'exclude_atc', 'scale']
+    VALID_SOURCES = ['group', 'market_stats', 'daily_index', 'stock']
 
     @staticmethod
-    def load_and_process_group_data(conditions_params: list[dict], use_sample_data: bool = False, realtime=False, history_cutoff_stamp:int=0) -> tuple[dict[str, pd.Series], list[dict]]:
-        """
-        Load and process group data based on conditions parameters with optimized processing.
-        
-        Args:
-            conditions_params: List of condition parameters containing inputs and processing requirements
-            use_sample_data: Whether to use sample data instead of live data
-            
-        Returns:
-            Tuple containing:
-            - Dictionary mapping processed data keys to pandas Series
-            - List of updated condition parameters with resolved inputs
-            
-        Raises:
-            InputSourceEmptyError: If an input source is empty
-            ValueError: If invalid parameter combinations are provided
-        """
-        def test():
-            conditions_params = TestSets.COMBINE_TEST
-            use_sample_data = False
-        try:
-            required_data: dict[str, pd.Series] = {}
-            required_cols: set[tuple] = set()
-
-            updated_conditions = []
-            # First pass: collect all required columns and build updated conditions
-            for condition in conditions_params:
-                # Get processing parameters with defaults
-                timeframe = condition['inputs'].get('timeframe', Globs.BASE_TIMEFRAME)
-                rolling_window = condition['inputs'].get('rolling_window')
-                rolling_method = condition['inputs'].get('rolling_method', 'sum')
-                daily_rolling = condition['inputs'].get('daily_rolling', True)
-                stocks = condition['inputs'].get('stocks', Globs.STOCKS)
-                stocks_key = hash('_'.join(sorted(stocks)))
-                
-                new_condition = deepcopy(condition)
-                new_condition['inputs'] = {}
-                
-                # Process each input parameter
-                for param_name, col_name in condition['inputs'].items():
-                    if param_name not in CombiConds.INPUTS_SIDE_PARAMS:
-                        if not col_name:  # More robust empty check
-                            raise InputSourceEmptyError(f"Input {param_name} is empty!")
-                        
-                        # Create unique identifier for this data requirement
-                        required_cols.add((col_name, timeframe, stocks_key, rolling_window, rolling_method, daily_rolling))
-                        new_key = f"{col_name}_{timeframe}_{stocks_key}_{rolling_window}_{rolling_method}_{daily_rolling}"
-                        new_condition['inputs'][param_name] = new_key
-                    else:
-                        new_condition['inputs'][param_name] = condition['inputs'][param_name]
-                
-                updated_conditions.append(new_condition)
-
-            # Group columns by stock combinations for efficient data loading
-            all_cols_by_stocks: dict[int, set[str]] = {}
-            for col, _, stocks_key, _, _, _ in required_cols:
-                if stocks_key not in all_cols_by_stocks:
-                    all_cols_by_stocks[stocks_key] = set()
-                all_cols_by_stocks[stocks_key].add(col)
-
-            # Process data for each stock combination
-            for stocks_key, cols in all_cols_by_stocks.items():
-                # Find correct stock filter for this combination
-                filtered_stocks = next(
-                    (condition['inputs'].get('stocks', Globs.STOCKS) 
-                    for condition in conditions_params 
-                    if hash('_'.join(sorted(condition['inputs'].get('stocks', Globs.STOCKS)))) == stocks_key),
-                    Globs.STOCKS
-                )
-
-                # Load and group data
-                data: pd.DataFrame = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks, use_sample_data)
-                data = data.groupby(level=0, axis=1).sum()
-                
-                # Process each required column
-                for col, tf, sk, window, method, daily_rolling in required_cols:
-                    if sk == stocks_key:
-                        key = f"{col}_{tf}_{sk}_{window}_{method}_{daily_rolling}"
-                        data_processed: pd.Series = data[col].copy()
-                        
-                        # Apply timeframe resampling if needed
-                        if tf != Globs.BASE_TIMEFRAME:
-                            data_processed = Resampler.resample_vn_stock_data(
-                                data_processed.to_frame(), 
-                                timeframe=tf, 
-                                agg_dict=Resampler.get_agg_dict([col])
-                            )[col]  # Extract series from resampled frame
-                        
-                        # Apply rolling calculations if needed
-                        if window is not None:
-                            data_processed = Ta.apply_rolling(data_processed, window, method, daily_rolling)
-                        
-                        required_data[key] = data_processed
-
-            return required_data, updated_conditions
-        
-        except Exception as e:
-            # Add context to any errors
-            raise type(e)(f"Error in load_and_process_group_data: {str(e)}") from e
+    def _create_data_key(col_name, timeframe, stocks_key, rolling_window, rolling_method, daily_rolling, exclude_atc, scale) -> str:
+        """Create a unique key for a data column based on processing parameters."""
+        key_parts = [col_name, timeframe, str(stocks_key), str(rolling_window), rolling_method,  str(daily_rolling), str(exclude_atc), str(scale)]
+        return "_".join(key_parts)
 
     @staticmethod
-    def load_and_process_group_data2(conditions_params: list[dict], data: pd.DataFrame=None, realtime=False) -> tuple[dict[str, pd.Series], list[dict]]:
-        """
-        Load and process group data based on conditions parameters with optimized processing.
-        
-        Args:
-            conditions_params: List of condition parameters containing inputs and processing requirements
-            use_sample_data: Whether to use sample data instead of live data
-            
-        Returns:
-            Tuple containing:
-            - Dictionary mapping processed data keys to pandas Series
-            - List of updated condition parameters with resolved inputs
-            
-        Raises:
-            InputSourceEmptyError: If an input source is empty
-            ValueError: If invalid parameter combinations are provided
-        """
-        def test():
-            conditions_params = TestSets.LOAD_PROCESS_GROUP_DATA
-            realtime=True
-            history_cutoff_stamp = Utils.day_to_timestamp('2025_01_01')
-        try:
-            required_data: dict[str, pd.Series] = {}
-            required_cols: set[tuple] = set()
-
-            updated_conditions = []
-            # First pass: collect all required columns and build updated conditions
-            for condition in conditions_params:
-                # Get processing parameters with defaults
-                timeframe = condition['inputs'].get('timeframe', Globs.BASE_TIMEFRAME)
-                rolling_window = condition['inputs'].get('rolling_window')
-                rolling_method = condition['inputs'].get('rolling_method', 'sum')
-                daily_rolling = condition['inputs'].get('daily_rolling', True)
-
-                stocks = condition['inputs'].get('stocks', Globs.STOCKS)
-                stocks_key = hash('_'.join(sorted(stocks)))
-                
-                new_condition = deepcopy(condition)
-                new_condition['inputs'] = {}
-                
-                # Process each input parameter
-                for param_name, col_name in condition['inputs'].items():
-                    if param_name not in CombiConds.INPUTS_SIDE_PARAMS:
-                        if not col_name:  # More robust empty check
-                            raise InputSourceEmptyError(f"Input {param_name} is empty!")
-                        
-                        # Create unique identifier for this data requirement
-                        required_cols.add((col_name, timeframe, stocks_key, rolling_window, rolling_method, daily_rolling))
-                        new_key = f"{col_name}_{timeframe}_{stocks_key}_{rolling_window}_{rolling_method}_{daily_rolling}"
-                        new_condition['inputs'][param_name] = new_key
-                    else:
-                        new_condition['inputs'][param_name] = condition['inputs'][param_name]
-                
-                updated_conditions.append(new_condition)
-
-            # Group columns by stock combinations for efficient data loading
-            all_cols_by_stocks: dict[int, set[str]] = {}
-            for col, _, stocks_key, _, _, _ in required_cols:
-                if stocks_key not in all_cols_by_stocks:
-                    all_cols_by_stocks[stocks_key] = set()
-                all_cols_by_stocks[stocks_key].add(col)
-
-            # Process data for each stock combination
-            for stocks_key, cols in all_cols_by_stocks.items():
-                # Find correct stock filter for this combination
-                filtered_stocks = next(
-                    (condition['inputs'].get('stocks', Globs.STOCKS) 
-                    for condition in conditions_params 
-                    if hash('_'.join(sorted(condition['inputs'].get('stocks', Globs.STOCKS)))) == stocks_key),
-                    Globs.STOCKS
-                )
-
-                if data is None:
-                    if realtime:
-                        data: pd.DataFrame = Adapters.load_stock_data_from_plasma_realtime(list(cols), filtered_stocks)
-                    else:
-                        # Load and group data
-                        data: pd.DataFrame = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks)
-
-                data = data.groupby(level=0, axis=1).sum()
-                
-                # Process each required column
-                for col, tf, sk, window, method, daily_rolling in required_cols:
-                    if sk == stocks_key:
-                        key = f"{col}_{tf}_{sk}_{window}_{method}_{daily_rolling}"
-                        data_processed: pd.Series = data[col].copy()
-                        
-                        # Apply timeframe resampling if needed
-                        if tf != Globs.BASE_TIMEFRAME:
-                            data_processed = Resampler.resample_vn_stock_data(
-                                data_processed.to_frame(), 
-                                timeframe=tf, 
-                                agg_dict=Resampler.get_agg_dict([col])
-                            )[col]  # Extract series from resampled frame
-                        
-                        # Apply rolling calculations if needed
-                        if window is not None:
-                            data_processed = Ta.apply_rolling(data_processed, window, method, daily_rolling)
-                        
-                        required_data[key] = data_processed
-
-            return required_data, updated_conditions
-        
-        except Exception as e:
-            # Add context to any errors
-            raise type(e)(f"Error in load_and_process_group_data: {str(e)}") from e
-
-    @staticmethod
-    def load_and_process_one_series_data(
-        conditions_params: list[dict], 
-        data_src: str = 'market_stats', 
-        use_sample_data: bool = False,
-        realtime: bool = False,
-        data: pd.DataFrame=None
-    ) -> tuple[dict[str, pd.Series], list[dict]]:
-        """
-        Load and process single series data based on conditions parameters.
-        
-        Args:
-            conditions_params: List of condition parameters
-            data_src: Source of data ('market_stats' or 'daily_index')
-            use_sample_data: Whether to use sample data
-            
-        Returns:
-            Tuple containing:
-            - Dictionary mapping processed data keys to pandas Series
-            - List of updated condition parameters with resolved inputs
-            
-        Raises:
-            InputSourceEmptyError: If an input source is empty
-            ValueError: If invalid data_src or parameter combinations are provided
-        """
+    def _collect_required_columns(conditions_params: list[dict]) -> tuple[set[tuple], list[dict]]:
         def test():
             conditions_params = TestSets.LOAD_PROCESS_SERIES_DATA
-            data_src = 'market_stats'
-            use_sample_data = False
-        try:
-            if data_src not in ['market_stats', 'daily_index']:
-                raise ValueError("data_src must be one of ['market_stats', 'daily_index']")
 
-            required_data: dict[str, pd.Series] = {}
-            required_cols: set[tuple] = set()
-            
-            updated_conditions = []
-            # First pass: collect all required columns and build updated conditions
-            for condition in conditions_params:
-                timeframe = condition['inputs'].get('timeframe', Globs.BASE_TIMEFRAME)
-                rolling_window = condition['inputs'].get('rolling_window')
-                rolling_method = condition['inputs'].get('rolling_method', 'sum')
-                daily_rolling = condition['inputs'].get('daily_rolling', True)
-
-                new_condition = deepcopy(condition)
-                new_condition['inputs'] = {}
-                
-                for param_name, col_name in condition['inputs'].items():
-                    if param_name not in CombiConds.INPUTS_SIDE_PARAMS:
-                        if not col_name:
-                            raise InputSourceEmptyError(f"Input {param_name} is empty!")
-                        
-                        required_cols.add((col_name, timeframe, rolling_window, rolling_method, daily_rolling))
-                        new_key = f"{col_name}_{timeframe}_{rolling_window}_{rolling_method}_{daily_rolling}"
-                        new_condition['inputs'][param_name] = new_key
-                    else:
-                        new_condition['inputs'][param_name] = condition['inputs'][param_name]
-                
-                updated_conditions.append(new_condition)
-
-            # Get unique columns needed
-            unique_cols = {col for col, *_ in required_cols}
-
-            if data is None:
-                # Load data based on source
-                if not realtime:
-                    data = (Adapters.load_market_stats_from_plasma(list(unique_cols), use_sample_data) 
-                            if data_src == 'market_stats' 
-                            else Adapters.load_index_daily_ohlcv_from_plasma(list(unique_cols), use_sample_data))
-                else:
-                    data = Adapters.load_market_stats_from_plasma_realtime(list(unique_cols))
-            else:
-                data = data[list(unique_cols)]
-            
-            
-            # Process each required column
-            for col, tf, window, method, daily_rolling in required_cols:
-                key = f"{col}_{tf}_{window}_{method}_{daily_rolling}"
-                data_processed: pd.Series = data[col].copy()
-                
-                # Apply timeframe resampling if needed
-                if (tf != Globs.BASE_TIMEFRAME) and (data_src == 'market_stats'):
-                    data_processed = Resampler.resample_vn_stock_data(
-                        data_processed.to_frame(), 
-                        timeframe=tf,
-                        agg_dict=Resampler.get_agg_dict([col])
-                    )[col]
-                    print('hello')
-                    print(window)
-                # Apply rolling calculations if needed
-                if window is not None:
-                    data_processed = Ta.apply_rolling(data_processed, window, method, daily_rolling)
-                
-                required_data[key] = data_processed
-
-            return required_data, updated_conditions
+        """Collect required columns and build updated conditions with resolved inputs."""
+        required_cols = {}
+        updated_conditions = []
+        stocks_key_map = {}
         
-        except Exception as e:
-            raise type(e)(f"Error in load_and_process_one_series_data: {str(e)}") from e
+        for condition in conditions_params:
+            # Get processing parameters with defaults
+            side_params_dict = {
+                "timeframe" : condition['inputs'].get('timeframe', Globs.BASE_TIMEFRAME),
+                "rolling_window" : condition['inputs'].get('rolling_window'),
+                "rolling_method" : condition['inputs'].get('rolling_method', 'sum'),
+                "daily_rolling" : condition['inputs'].get('daily_rolling', True),
+                "exclude_atc" : condition['inputs'].get('exclude_atc', False),
+                "scale" : condition['inputs'].get('scale', 1.0),
+
+            }
+            
+            stocks = condition['inputs'].get('stocks', None)
+            # Generate stock key if needed
+            stocks_key = None
+            if stocks is not None:
+                stocks_key = hash('_'.join(sorted(stocks)))
+
+            side_params_dict['stocks_key'] = stocks_key
+
+            if stocks_key not in stocks_key_map:
+                stocks_key_map[stocks_key] = stocks
+            
+            new_condition = deepcopy(condition)
+            new_condition['inputs'] = {}
+            
+            # Process each input parameter
+            for param_name, col_name in condition['inputs'].items():
+                if param_name not in CombiConds.INPUTS_SIDE_PARAMS:
+                    if not col_name:
+                        raise InputSourceEmptyError(f"Input {param_name} is empty!")
+                    
+                    col_dict = side_params_dict.copy()
+                    col_dict['col_name'] = col_name
+                    data_key = CombiConds._create_data_key(**col_dict)
+
+                    if data_key not in required_cols:
+                        required_cols[data_key] = col_dict
+                    
+                    # Create a unique key
+                    new_condition['inputs'][param_name] = data_key
+                else:
+                    new_condition['inputs'][param_name] = condition['inputs'][param_name]
+            
+            updated_conditions.append(new_condition)
+            
+        return required_cols, updated_conditions, stocks_key_map
+    
+    @staticmethod
+    def _process_data_series(data: pd.DataFrame, col_name: str, timeframe: str,
+                           rolling_window: int, rolling_method: str, daily_rolling: bool, exclude_atc: bool, scale: float = 1.0,
+                           allow_remove_atc: bool = True, allow_resample_candle: bool = True, is_multiIndex_data=False, **kwargs) -> pd.Series:
+        
+        def test():
+            params = {'timeframe': '15Min',
+                'rolling_window': 3,
+                'rolling_method': 'sum',
+                'daily_rolling': False,
+                'exclude_atc': False,
+                'scale': 1.0,
+                'stocks_key': None,
+                'col_name': 'bu2'}
+            
+            col_name = params['col_name']
+            timeframe = params['timeframe']
+            rolling_window = params['rolling_window']
+            rolling_method = params['rolling_method']
+            daily_rolling = params['daily_rolling']
+            exclude_atc = params['exclude_atc']
+            scale = params['scale']
+            allow_resample_candle = True
+            allow_remove_atc = True
+            is_multiIndex_data = True
+
+
+        data_processed = data[col_name].copy() 
+        data_processed = data_processed / scale
+        resampling_method = Resampler.get_agg_dict([col_name])[col_name]
+
+        if exclude_atc and allow_remove_atc:
+            def get_atc(data: PandasObject):
+                """Extract ATC timestamps from the data."""
+                atc_stamps = []
+                
+                # Get the index timestamps
+                idx = data.index
+                
+                # Convert index directly to datetime objects for checking hour and minute
+                datetimes = pd.DatetimeIndex(idx)
+                
+                # Find all timestamps at 14:45 (ATC)
+                atc_mask = (datetimes.hour == 14) & (datetimes.minute == 45)
+                atc_stamps = idx[atc_mask].tolist()
+                
+                return atc_stamps
+
+            ATC_STAMPS = get_atc(data_processed)
+            data_processed = data_processed[~data_processed.index.isin(ATC_STAMPS)]
+
+        def resample_vn_stock_data(df: pd.DataFrame, timeframe: str, agg_method: dict) -> pd.DataFrame:
+                    # Reset index để có thể xử lý candleTime
+            df = df.reset_index()
+
+            # Tính candleTime mới cho mỗi row
+            df['candleTime'] = Resampler._calculate_candle_time(
+                    timestamps=df['candleTime'],
+                    timeframe=timeframe
+                )
+            
+            # Group theo candleTime mới và áp dụng aggregation
+            grouped = df.groupby('candleTime').agg(agg_method)
+
+            return grouped.sort_index()
+    
+        # Apply timeframe resampling if needed
+        if timeframe != Globs.BASE_TIMEFRAME and allow_resample_candle:
+            data_processed = resample_vn_stock_data(
+                data_processed, 
+                timeframe=timeframe, 
+                agg_method=resampling_method
+            )
+            if not is_multiIndex_data:
+                data_processed = data_processed[col_name]
+
+        # Apply rolling calculations if needed
+        if rolling_window is not None:
+            data_processed = Ta.apply_rolling(data=data_processed, window=rolling_window, method=rolling_method, daily_rolling=daily_rolling)
+        
+        return data_processed
+    
+    @staticmethod
+    def load_and_process_data(
+        conditions_params: list[dict],
+        data_source: str = 'group', 
+        provided_data: pd.DataFrame = None,
+        realtime: bool = False,
+        stocks: list[str] = None, 
+        start_day: str = None,
+        end_day: str = None
+    )-> tuple[dict[str, pd.Series], list[dict]]:
+        """Unified method to load and process data based on conditions parameters."""
+
+        def test():
+            conditions_params = [{
+                'function': 'absolute_change_in_range',
+                'inputs': {'src': 'bid',
+                    'timeframe': '30S',
+                    'rolling_window': 1,
+                    'rolling_method': 'mean',
+                    'daily_rolling': False,
+                    'stocks': ['All']},
+                'params': {'n_bars': 20,
+                    'lower_thres': 380.0,
+                    'upper_thres': 1000000000000000000,
+                    'use_as_lookback_cond': False,
+                    'lookback_cond_nbar': 5}
+                }]
+            data_source = 'group'
+            provided_data = None
+            realtime = False
+            stocks = None
+
+        valid_sources = CombiConds.VALID_SOURCES
+        if data_source not in valid_sources:
+            raise ValueError(f"data_source must be one of {valid_sources}")
+        
+        required_cols, updated_conditions, stocks_key_map = CombiConds._collect_required_columns(conditions_params)
+        required_data = {}
+
+        is_daily_index = data_source == 'daily_index'
+        is_stock_data = data_source == 'stock'
+
+        if data_source in ['group']:
+            all_cols_by_stocks: dict[int, set[str]] = {}
+            for data_key, params in required_cols.items():
+                col = params['col_name']
+                stocks_key = params['stocks_key']
+
+                if stocks_key not in all_cols_by_stocks:
+                    all_cols_by_stocks[stocks_key] = set()
+                all_cols_by_stocks[stocks_key].add(col)
+
+            for stocks_key, cols in all_cols_by_stocks.items():
+                # Find correct stock filter for this combination
+                filtered_stocks = stocks_key_map[stocks_key]
+
+                if provided_data is None:
+                    if realtime:
+                        data = Adapters.load_stock_data_from_plasma_realtime(list(cols), filtered_stocks)
+                        data.index = data.index * 1e9
+                    else:
+                        data = Adapters.load_groups_and_stocks_data_from_plasma(list(cols), filtered_stocks)
+                else:
+                    data = provided_data
+                data = Utils.slice_df_with_timestamp_index(data, start_day=start_day, end_day=end_day)
+                data = data.groupby(level=0, axis=1).sum()
+                for data_key, params in required_cols.items():
+                    if params['stocks_key'] == stocks_key and data_key not in required_data:
+                        required_data[data_key] = CombiConds._process_data_series(data, **params)
+
+        elif data_source in ['market_stats', 'daily_index', 'stock']:
+            unique_cols = {params['col_name'] for params in required_cols.values()}
+
+            # Load data or use provided data
+            if provided_data is None:
+                if data_source in ['market_stats']:
+                    if not realtime:
+                        data = Adapters.load_market_stats_from_plasma(list(unique_cols))
+                    else:
+                        data = Adapters.load_market_stats_from_plasma_realtime(list(unique_cols))
+                        data.index = data.index * 1e9
+                elif is_daily_index:  # daily_index
+                    data = Adapters.load_index_daily_ohlcv_from_plasma(list(unique_cols))
+                elif is_stock_data:
+                    data = Adapters.load_stock_data_from_plasma(list(unique_cols), stocks=stocks)
+            else:
+                data = provided_data[list(unique_cols)]
+
+            data = Utils.slice_df_with_timestamp_index(data, start_day=start_day, end_day=end_day)
+
+
+            for data_key, params in required_cols.items():
+                required_data[data_key] = CombiConds._process_data_series(
+                    data, **params, 
+                    allow_resample_candle=not is_daily_index, 
+                    allow_remove_atc=not is_daily_index,
+                    is_multiIndex_data=is_stock_data
+                )
+
+        return required_data, updated_conditions
+
+
+    # Wrapper methods for backward compatibility
+    @staticmethod
+    def load_and_process_group_data(conditions_params: list[dict],
+                                realtime=False, data: pd.DataFrame=None, 
+                                start_day: str = None, end_day: str = None
+                            ) -> tuple[dict[str, pd.Series], list[dict]]:
+        """Load and process group data (backward compatibility wrapper)."""
+        return CombiConds.load_and_process_data(
+            conditions_params=conditions_params,
+            data_source='group',
+            provided_data=data,
+            realtime=realtime,
+            start_day=start_day,
+            end_day=end_day
+        )
 
     @staticmethod
-    def load_and_process_stock_data(
-        conditions_params: list[dict], 
-        stocks: list[str] = None, 
-        use_sample_data: bool = False
-    ) -> tuple[dict[str, pd.Series], list[dict]]:
-        """
-        Load and process stock data based on conditions parameters.
-        
-        Args:
-            conditions_params: List of condition parameters
-            stocks: List of stock symbols to process. If None, uses all available stocks
-            use_sample_data: Whether to use sample data
-            
-        Returns:
-            Tuple containing:
-            - Dictionary mapping processed data keys to pandas Series
-            - List of updated condition parameters with resolved inputs
-            
-        Raises:
-            InputSourceEmptyError: If an input source is empty
-            ValueError: If invalid parameter combinations are provided
-        """
-        try:
-            def test():
-                conditions_params = [
-                        {
-                            "function": "two_line_pos",
-                            "inputs": {
-                                "src1": "bu2",
-                                "src2": "sd2",
-                                "rolling_window": 1,
-                                "rolling_method": "sum",
-                                "timeframe": "1Min"
-                            },
-                            "params": {
-                                "direction": "crossover",
-                                "equal": False,
-                                "use_as_lookback_cond": False,
-                                "lookback_cond_nbar": 5
-                            }
-                        }
-                    ]
-                stocks = [
-                    "GVR",
-                    "SSI",
-                    "DXG",
-                    "DIG",
-                    "NLG",
-                    "NVL",
-                    "KBC",
-                    "VGC",
-                    "VND",
-                    "HCM",
-                    "VCI",
-                    "BSI",
-                    "FTS",
-                    "DGW",
-                    "HSG",
-                    "NKG",
-                    "VIX",
-                    "CTS",
-                    "ORS",
-                    "AGR",
-                    "GEX",
-                    "VDS",
-                    "PDR",
-                    "CII",
-                    "HTN",
-                    "TCI",
-                    "GIL",
-                    "KSB",
-                    "FCN",
-                    "LCG",
-                    "DPG",
-                    "DBC",
-                    "TCH",
-                    "VOS",
-                    "VPG",
-                    "HDC",
-                    "ANV",
-                    "VCG",
-                    "PET",
-                    "PC1",
-                    "HAH",
-                    "ASM"
-                ]
-                use_sample_data = False
+    def load_and_process_one_series_data(conditions_params: list[dict], data_src: str = 'market_stats', realtime: bool = False,
+                                       data: pd.DataFrame=None, 
+                                       start_day: str = None, end_day: str = None
+                                       ) -> tuple[dict[str, pd.Series], list[dict]]:
+        """Load and process one series data (backward compatibility wrapper)."""
+        return CombiConds.load_and_process_data(
+            conditions_params=conditions_params,
+            data_source=data_src,
+            provided_data=data,
+            realtime=realtime,
+            start_day=start_day,
+            end_day=end_day
+        )
 
-            required_data: dict[str, pd.Series] = {}
-            required_cols: set[tuple] = set()
-            
-            updated_conditions = []
-            # First pass: collect all required columns and build updated conditions
-            for condition in conditions_params:
-                timeframe = condition['inputs'].get('timeframe', Globs.BASE_TIMEFRAME)
-                rolling_window = condition['inputs'].get('rolling_window')
-                rolling_method = condition['inputs'].get('rolling_method', 'sum')
-                daily_rolling = condition['inputs'].get('daily_rolling', True)
-                
-                new_condition = deepcopy(condition)
-                new_condition['inputs'] = {}
-                
-                for param_name, col_name in condition['inputs'].items():
-                    if param_name not in CombiConds.INPUTS_SIDE_PARAMS:
-                        if not col_name:
-                            raise InputSourceEmptyError(f"Input {param_name} is empty!")
-                        
-                        required_cols.add((col_name, timeframe, rolling_window, rolling_method, daily_rolling))
-                        new_key = f"{col_name}_{timeframe}_{rolling_window}_{rolling_method}_{daily_rolling}"
-                        new_condition['inputs'][param_name] = new_key
-                    else:
-                        new_condition['inputs'][param_name] = condition['inputs'][param_name]
-                
-                updated_conditions.append(new_condition)
+    @staticmethod
+    def load_and_process_stock_data(conditions_params: list[dict], stocks: list[str] = None,
+                                    start_day: str = None, end_day: str = None
+                                    ) -> tuple[dict[str, pd.Series], list[dict]]:
+        """Load and process stock data (backward compatibility wrapper)."""
+        return CombiConds.load_and_process_data(
+            conditions_params=conditions_params,
+            data_source='stock',
+            stocks=stocks,
+            start_day=start_day,
+            end_day=end_day
+        )
 
-            # Get unique columns needed
-            unique_cols = {col for col, *_ in required_cols}
-
-            # Load stock data
-            data = Adapters.load_stock_data_from_plasma(
-                list(unique_cols), 
-                stocks=stocks, 
-                load_sample=use_sample_data
-            )
-            
-            # Process each required column
-            for col, tf, window, method, daily_rolling in required_cols:
-                key = f"{col}_{tf}_{window}_{method}_{daily_rolling}"
-                
-                # Apply timeframe resampling if needed
-                if tf != Globs.BASE_TIMEFRAME:
-                    data = Resampler.resample_vn_stock_data(
-                        data, 
-                        timeframe=tf,
-                        agg_dict=Resampler.get_agg_dict(list(data.columns))
-                    )
-
-                data_processed = data[col].copy()
-                
-                
-                # Apply rolling calculations if needed
-                if window is not None:
-                    data_processed = Ta.apply_rolling(data_processed, window, method)
-                
-                required_data[key] = data_processed
-
-            return required_data, updated_conditions
-        
-        except Exception as e:
-            raise type(e)(f"Error in load_and_process_stock_data: {str(e)}") from e
-    
     @staticmethod
     def combine_conditions(required_data: dict[str, pd.DataFrame], conditions_params: list[dict], combine_calculator: str = 'and') -> pd.Series:
         """Combine multiple conditions with optimized data loading and rolling operations"""
@@ -2487,7 +2386,6 @@ class CombiConds:
                 atc_mask = (seconds_in_day == atc_seconds)
                 if atc_mask.any():
                     signal[atc_mask] = False
-
 
             if combine_calculator == 'or':
                 # Combine with final result using OR operation
@@ -2656,7 +2554,7 @@ class QuerryData:
 
                 df_data: pd.DataFrame = df_data.rename(columns=func_outputs)
 
-                info = [{'name': c, 'key': f"{key}-{col_mapping[c]}", 'type': style_mapping[c], 'color': color_mapping[c], 'mapping':col_mapping[c]} for c in df_data.columns]
+                info = [{'name': c, 'key': f"{key}-{col_mapping[c]}", 'type': style_mapping[c], 'color': color_mapping[c], 'mapping':col_mapping[c], 'describe': df_data[c].describe().to_dict()} for c in df_data.columns]
 
                 return df_data, info
 
@@ -2680,7 +2578,7 @@ class QuerryData:
             other_params = payload['other_params']
             dailyindex_params = payload['dailyindex_params']
             start_day = '2025_01_13'
-            end_day = '2025_01_14'
+            end_day = '2025_03_20'
 
         start_timestamp = Utils.day_to_timestamp(start_day)
         end_timestamp = Utils.day_to_timestamp(end_day, is_end_day=True)
@@ -2754,6 +2652,7 @@ class QuerryData:
                 result_df = pd.concat([result_df, indexdaily_data], axis=1) if result_df is not None else indexdaily_data 
                 result_df = result_df.fillna(method='ffill')
                 
+
             result_info.extend(indexdaily_info)
 
 

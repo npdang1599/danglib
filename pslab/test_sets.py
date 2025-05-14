@@ -1,57 +1,163 @@
 from danglib.pslab.resources import Globs
+true = True
+false = False
 
 class TestSets:
     LOAD_PROCESS_GROUP_DATA = [
         {
-            'function': "is_in_top_bot_percentile",
-            'inputs': {
-                'src': 'bu2',
-                'stocks': Globs.SECTOR_DIC['VN30'],
-                # 'timeframe': '15Min',
-                'rolling_window': 20,
-                'rolling_method': 'sum'
+            "function": "MA",
+            "inputs": {
+                "src": "fBuyVal",
+                "rolling_window": 1,
+                "rolling_method": "sum",
+                "daily_rolling": true,
+                "exclude_atc": false,
+                "scale": 1,
+                "timeframe": "30S",
+                "stocks": [
+                    "ACB",
+                    "BCM",
+                    "BID",
+                    "BVH",
+                    "CTG",
+                    "FPT",
+                    "GAS",
+                    "GVR",
+                    "HDB",
+                    "HPG",
+                    "MBB",
+                    "MSN",
+                    "MWG",
+                    "PLX",
+                    "POW",
+                    "SAB",
+                    "SHB",
+                    "SSB",
+                    "SSI",
+                    "STB",
+                    "TCB",
+                    "TPB",
+                    "VCB",
+                    "VHM",
+                    "VIB",
+                    "VIC",
+                    "VJC",
+                    "VNM",
+                    "VPB",
+                    "VRE"
+                ]
             },
-            'params': {
-                'lookback_period': 1000,
-                'direction': 'top',
-                'threshold': 90,
-                'use_as_lookback_cond': False,
-                'lookback_cond_nbar': 5
+            "outputs": {
+                "output": {
+                    "type": "line",
+                    "mapping": "MA",
+                    "value": "MA",
+                    "color": "#788d2a"
+                }
+            },
+            "params": {
+                "window": 10,
+                "ma_type": "SMA"
             }
         },
         {
-            'function': 'two_line_pos',
-            'inputs': {
-                'src1': 'bu2',
-                'src2': 'sd2',
-                'stocks': ['HPG', 'SSI', 'NVL'],
-                # 'timeframe': '15Min',
-                'rolling_window': 20
+            "function": "MA",
+            "inputs": {
+                "src": "fSellVal",
+                "rolling_window": 1,
+                "rolling_method": "sum",
+                "daily_rolling": true,
+                "exclude_atc": false,
+                "scale": 1000,
+                "timeframe": "30S",
+                "stocks": [
+                    "ACB",
+                    "BCM",
+                    "BID",
+                    "BVH",
+                    "CTG",
+                    "FPT",
+                    "GAS",
+                    "GVR",
+                    "HDB",
+                    "HPG",
+                    "MBB",
+                    "MSN",
+                    "MWG",
+                    "PLX",
+                    "POW",
+                    "SAB",
+                    "SHB",
+                    "SSB",
+                    "SSI",
+                    "STB",
+                    "TCB",
+                    "TPB",
+                    "VCB",
+                    "VHM",
+                    "VIB",
+                    "VIC",
+                    "VJC",
+                    "VNM",
+                    "VPB",
+                    "VRE"
+                ]
             },
-            'params': {
-                'direction': 'crossover'
+            "outputs": {
+                "output": {
+                    "type": "line",
+                    "mapping": "MA",
+                    "value": "MA2",
+                    "color": "#788d2a"
+                }
+            },
+            "params": {
+                "window": 10,
+                "ma_type": "SMA"
             }
-        },
+        }
     ]
 
 
     LOAD_PROCESS_SERIES_DATA = [
         {
-            "function": "absolute_change_in_range",
+            "function": "range_cond",
             "inputs": {
-            "src": "VnindexClose",
-            "daily_rolling": False
-            # "timeframe": "15Min",
+                "src": "fF1BuyVol",
+                "rolling_window": 1,
+                "rolling_method": "sum",
+                "daily_rolling": true,
+                "timeframe": "5Min"
             },
             "params": {
-            "n_bars": 5,
-            "lower_thres": 1,
-            "upper_thres": 999,
-            "use_as_lookback_cond": False,
-            "lookback_cond_nbar": 5
+                "lower_thres": 100,
+                "upper_thres": 999,
+                "use_as_lookback_cond": false,
+                "lookback_cond_nbar": 5
             }
         }
     ]
+
+    LOAD_PROCESS_DAILY_DATA = [
+        {
+            "function": "percent_change_in_range",
+            "inputs": {
+                "src": "F1Close",
+                "rolling_window": 1,
+                "rolling_method": "sum",
+                "daily_rolling": true,
+                "timeframe": "30S"
+            },
+            "params": {
+                "n_bars": 1,
+                "lower_thres": 3,
+                "upper_thres": 100,
+                "use_as_lookback_cond": false,
+                "lookback_cond_nbar": 5
+            }
+        }
+    ]
+
 
     LOAD_PROCESS_STOCKS_DATA = [
         {
@@ -65,7 +171,7 @@ class TestSets:
                 "daily_rolling": False
             },
             "params": {
-                "direction", "crossover"
+                "direction": "crossover"
             }
         }
     ]
@@ -76,7 +182,6 @@ class TestSets:
             'function': "is_in_top_bot_percentile",
             'inputs': {
                 'src': 'bu2',
-                'stocks': ['VN30', 'Super High Beta'],
                 'rolling_window': 20,
                 'rolling_method': 'sum',
                 'daily_rolling': False
@@ -89,24 +194,11 @@ class TestSets:
                 'lookback_cond_nbar': 5
             }
         },
-        # {
-        #     'function': 'gap_trend',
-        #     'inputs': {
-        #         'src1': 'bid',
-        #         'src2': 'ask',
-        #         'stocks': ['HPG', 'SSI', 'NVL']
-        #     },
-        #     'params': {
-        #         'trend_direction': 'increase',
-        #         'trend_bars': 5
-        #     }
-        # },
         {
             'function': 'two_line_pos',
             'inputs': {
                 'src1': 'bu2',
                 'src2': 'sd2',
-                'stocks': ['VN30', 'Super High Beta'],
                 'rolling_window': 20,
                 'daily_rolling': False
             },
@@ -118,117 +210,32 @@ class TestSets:
 
 
     LOAD_DATA = {
-        "group_params": [
+        "group_params": [],
+        "other_params": [
             {
                 "function": "MA",
                 "inputs": {
-                    "src": "ask",
-                    "rolling_window": 5,
+                    "src": "F1Value",
+                    "rolling_window": 1,
                     "rolling_method": "sum",
-                    "timeframe": "30Min",
-                    "stocks": [
-                        "Super High Beta"
-                    ]
+                    "daily_rolling": true,
+                    "timeframe": "30S"
                 },
                 "outputs": {
                     "output": {
                         "type": "line",
                         "mapping": "MA",
                         "value": "MA",
-                        "color": "#f88962"
+                        "color": "#f5a35e"
                     }
                 },
                 "params": {
-                    "window": 10,
+                    "window": 1,
                     "ma_type": "SMA"
                 }
-            },
-            {
-                "function": "bbwp",
-                "inputs": {
-                    "src": "fBuyVal",
-                    "rolling_window": 1,
-                    "rolling_method": "sum",
-                    "timeframe": "30Min",
-                    "stocks": [
-                        "High Beta"
-                    ]
-                },
-                "outputs": {
-                    "output": {
-                        "type": "line",
-                        "mapping": "bbwp",
-                        "value": "bbwp",
-                        "color": "#048ae0"
-                    }
-                },
-                "params": {
-                    "basic_type": "SMA",
-                    "bbwp_len": 13,
-                    "bbwp_lkbk": 128
-                }
             }
         ],
-        "other_params": [
-            {
-                "function": "ursi",
-                "inputs": {
-                    "src": "Arbit",
-                    "rolling_window": 1,
-                    "rolling_method": "sum",
-                    "timeframe": "30Min"
-                },
-                "outputs": {
-                    "output1": {
-                        "type": "line",
-                        "mapping": "arsi",
-                        "value": "ursi",
-                        "color": "#8c6794"
-                    },
-                    "output2": {
-                        "type": "line",
-                        "mapping": "arsi_signal",
-                        "value": "ursi_signal",
-                        "color": "#5e65a7"
-                    }
-                },
-                "params": {
-                    "length": 14,
-                    "smo_type1": "RMA",
-                    "smooth": 14,
-                    "smo_type2": "EMA"
-                }
-            }
-        ],
-        "dailyindex_params": [
-            {
-                "function": "macd",
-                "inputs": {
-                    "src": "F1Close",
-                    "timeframe": "30Min"
-                },
-                "outputs": {
-                    "output1": {
-                        "type": "line",
-                        "mapping": "macd",
-                        "value": "macd",
-                        "color": "#34d18b"
-                    },
-                    "output2": {
-                        "type": "line",
-                        "mapping": "macd_signal",
-                        "value": "macd_signal",
-                        "color": "#1746dd"
-                    }
-                },
-                "params": {
-                    "r2_period": 20,
-                    "fast": 10,
-                    "slow": 20,
-                    "signal_length": 9
-                }
-            }
-        ],
-        "start_day": "2025_01_28",
-        "end_day": "2025_02_04"
+        "dailyindex_params": [],
+        "start_day": "2025_03_12",
+        "end_day": "2025_03_19"
     }

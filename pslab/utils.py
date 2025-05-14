@@ -7,6 +7,10 @@ from redis import StrictRedis
 from datetime import timedelta
 import hashlib
 import random
+from functools import reduce
+import json
+import numpy as np
+from pandas import Interval
 
 class RedisHandler:
     def __init__(self, host='localhost', port=6379, db=0):
@@ -91,29 +95,47 @@ class RedisHandler:
 
 class Utils:
     @staticmethod
-    def and_conditions(conditions: list[pd.DataFrame]):
-        """Calculate condition from orther conditions"""
-        res = None
-        for cond in conditions:
-            if cond is not None:
-                if res is None:
-                    res = cond
-                else:
-                    res = res & cond 
-        return res
+    def connect_to_mongo(host, port, db_name):
+        from pymongo import MongoClient
+        client = MongoClient(host=host, port=port)
+        db = client[db_name]
+        return db
+
+    @staticmethod
+    def and_conditions(conditions: list):
+        # Lọc điều kiện None
+        valid_conditions = [cond for cond in conditions if cond is not None]
+        
+        if not valid_conditions:
+            return None
+        
+        if len(valid_conditions) == 1:
+            return valid_conditions[0]
+        
+        # Xử lý cả DataFrame và Series
+        def combine(obj1: pd.DataFrame, obj2: pd.DataFrame):
+            obj1_aligned, obj2_aligned = obj1.align(obj2, fill_value=False)
+            return obj1_aligned & obj2_aligned
+        
+        return reduce(combine, valid_conditions)
     
     @staticmethod
     def or_conditions(conditions: list[pd.DataFrame]):
-        """Calculate condition from orther conditions"""
-        res = None
-        for cond in conditions:
-            if cond is not None:
-                if res is None:
-                    res = cond
-                else:
-                    res = res | cond 
-        return res
-
+        #Lọc điều kiện None
+        valid_conditions = [cond for cond in conditions if cond is not None]
+        
+        if not valid_conditions:
+            return None
+        
+        if len(valid_conditions) == 1:
+            return valid_conditions[0]
+        
+        # Xử lý cả DataFrame và Series
+        def combine(obj1, obj2):
+            obj1_aligned, obj2_aligned = obj1.align(obj2, fill_value=False)
+            return obj1_aligned | obj2_aligned
+        
+        return reduce(combine, valid_conditions)
     
     @staticmethod
     def day_to_timestamp(day: str, is_end_day = False):
@@ -247,9 +269,80 @@ class Utils:
     def random_color():
         """Trả về một màu ngẫu nhiên dưới dạng mã hex"""
         return '#{:06x}'.format(random.randint(0, 0xFFFFFF))
+    
+    @staticmethod
+    def slice_df_with_timestamp_index(df: pd.DataFrame, start_day: str = None, end_day: str = None) -> pd.DataFrame:
+        """
+        Slice DataFrame theo khoảng thời gian cho trước.
+        
+        Parameters:
+        df (pd.DataFrame): DataFrame cần slice
+        start (str): Thời gian bắt đầu (format: 'YYYY_MM_DD')
+        end (str): Thời gian kết thúc (format: 'YYYY_MM_DD')
+        
+        Returns:
+        pd.DataFrame: DataFrame đã được slice
+        """
+        if start_day is not None:
+            start_stamp = day_to_timestamp(start_day)
+            df = df[df.index >= start_stamp]
+        
+        if end_day is not None:
+            end_stamp = day_to_timestamp(end_day, is_end_day=True)
+            df = df[df.index < end_stamp]
+        
+        return df
+
+
+
 
 
 class FileHandler:
+
+    class CustomJSONEncoder(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, Interval):
+                return str(obj)
+            if isinstance(obj, np.integer):
+                return int(obj)
+            if isinstance(obj, np.floating):
+                return float(obj)
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, np.bool_):  # Handle numpy boolean specifically
+                return bool(obj)
+            return super().default(obj)
+
+    @staticmethod
+    def get_file_size_mb(file_path):
+        """
+        Hàm kiểm tra kích thước của file và trả về kết quả bằng MB
+        
+        Tham số:
+            file_path (str): Đường dẫn đến file cần kiểm tra
+            
+        Trả về:
+            float: Kích thước của file tính bằng MB
+            None: Nếu file không tồn tại hoặc có lỗi
+        """
+        try:
+            # Kiểm tra xem file có tồn tại không
+            if not os.path.isfile(file_path):
+                print(f"Lỗi: File '{file_path}' không tồn tại")
+                return None
+                
+            # Lấy kích thước file bằng byte
+            file_size_bytes = os.path.getsize(file_path)
+            
+            # Chuyển đổi sang MB (1 MB = 1024 * 1024 bytes)
+            file_size_mb = file_size_bytes / (1024 * 1024)
+            
+            return file_size_mb
+            
+        except Exception as e:
+            print(f"Lỗi khi kiểm tra kích thước file: {e}")
+            return None
+
     @staticmethod
     def isExists(file_path):
         return Path(file_path).is_file()
@@ -315,6 +408,32 @@ class FileHandler:
         if isinstance(substrs, str):
             substrs = [substrs]
         return [col for col in all_columns if any(substr in col for substr in substrs)]
+    
+    @staticmethod
+    def read_json(path):
+        with open(path, 'r') as file:
+            data = json.load(file)
+        return data
+    
+    @staticmethod
+    def write_json(path, data, use_custom_encoder=False):
+        custom_encoder = FileHandler.CustomJSONEncoder if use_custom_encoder else None
+        with open(path, 'w') as file:
+            json.dump(data, file, cls=custom_encoder, indent=4)
+            
+    @staticmethod
+    def read_jsonl(path):
+        with open(path, 'r') as file:
+            data = [json.loads(line) for line in file]
+        return data
+    
+    @staticmethod
+    def write_jsonl(path, data, use_custom_encoder=False):
+        custom_encoder = FileHandler.CustomJSONEncoder if use_custom_encoder else None
+
+        with open(path, 'w') as file:
+            for item in data:
+                file.write(json.dumps(item, cls=custom_encoder) + '\n')
 
 
 def day_to_timestamp(day: str, is_end_day = False):
@@ -380,3 +499,57 @@ def hash_sha256(value):
     # Tính hash bằng SHA-256
     hash_object = hashlib.sha256(value_bytes)
     return hash_object.hexdigest()  # Trả về dạng chuỗi hex
+
+
+def generate_candle_times(timeframe: str, day: str=None, start_time='09:15:00', end_time='14:45:00', to_timestamp=False, unit='ns'):
+    """
+    Tạo ra Series các mốc thời gian cho nến dựa trên timeframe
+    
+    Parameters:
+    timeframe (str): Khung thời gian ('1s', '5s', '15s', '30s', '1min', '5min', '15min', '30min', '1h', '4h', '1d')
+    day (str): Ngày (format: 'YYYY_MM_DD')
+    start_time (str): Thời gian bắt đầu (format: 'HH:MM:SS'), mặc định '09:15:00'
+    end_time (str): Thời gian kết thúc (format: 'HH:MM:SS'), mặc định '14:45:00'
+    
+    Returns:
+    pd.Series: Series chứa các mốc thời gian cho nến
+    """
+    timeframe = timeframe.replace('S', 's')
+    start_time_full = day.replace('_', '-') + ' ' + start_time
+    lunch_time = day.replace('_', '-') + ' ' + '11:30:00'
+    
+    afternoon_time = day.replace('_', '-') + ' ' + '13:00:00'
+    atc_time = day.replace('_', '-') + ' ' + '14:30:00'
+    end_time_full = day.replace('_', '-') + ' ' + end_time
+    
+    start_dt = pd.to_datetime(start_time_full)
+    end_dt = pd.to_datetime(end_time_full)
+    
+    candle_times = pd.Series(pd.date_range(start=start_dt, end=end_dt, freq=timeframe))
+    
+    # Morning session: 9:15:00 - 11:30:00
+    filter_morning = (candle_times < lunch_time)
+    
+    # Afternoon session: 13:00:00 - 14:30:00
+    filter_afternoon = (candle_times >= afternoon_time) & (candle_times < atc_time)
+
+    # ATC
+    filter_atc = (candle_times == end_dt)
+
+    candle_times = candle_times[filter_morning|filter_afternoon|filter_atc]
+    if to_timestamp:
+        candle_times = candle_times.astype(int)
+
+        if unit=='s':
+            candle_times = candle_times // 1e9
+        elif unit=='ms':
+            candle_times = candle_times // 1e6
+
+        candle_times = candle_times.astype(int)
+
+    return candle_times.reset_index(drop=True)
+
+def totime(stamp, unit='s'):
+    return pd.to_datetime(stamp, unit=unit)
+
+
