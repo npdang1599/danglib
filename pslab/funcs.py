@@ -1821,10 +1821,11 @@ class Conds:
             use_as_lookback_cond: bool = False,
             lookback_cond_nbar = 5,
         ):
+            if not use_direction and not use_range:
+                return None
+            
             macd, signal = Indicators.macd(src, r2_period, fast, slow, signal_length)
 
-            result = pd.Series(True, index=src.index)
-    
             if use_direction:
                 pos_cond = Conds.two_line_pos(macd, signal, direction, equal)
                 result = pos_cond
@@ -2475,7 +2476,7 @@ class CombiConds:
                 # Apply condition function
                 signal = func(**func_inputs, **condition['params'])
 
-            if not isinstance(signal.index[0], str):
+            if signal is not None and not isinstance(signal.index[0], str):
                 # Check if signal time is ATC (14:45:00)
                 timestamp_seconds = signal.index // 1_000_000_000  # Convert ns to seconds
                 seconds_in_day = timestamp_seconds % 86400  # Seconds since start of day

@@ -173,9 +173,9 @@ class FileHandler:
         df.to_parquet(file_path, compression='snappy')
 
     @staticmethod
-    def read_parquet(file_path):
+    def read_parquet(file_path, columns=None):
         """Read data from parquet file using pandas"""
-        df = pd.read_parquet(file_path)
+        df = pd.read_parquet(file_path, columns=columns)
         return df
     
     @staticmethod
