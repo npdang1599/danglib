@@ -68,8 +68,10 @@ class TaskName:
     COMPUTE_MULTI_STRATEGIES_OS = 'compute_multi_strategies_os'
     COMPUTE_MULTI_STRATEGIES_LABEL = 'compute_multi_strategies_label'
     COMPUTE_MULTI_STRATEGIES_NEW_COND = 'compute_multi_strategies_new_cond'
-
-
+    COMPUTE_MULTI_STRATEGIES_NEW_COMBI = 'compute_multi_strategies_new_combi'
+    COMPUTE_MULTI_STRATEGIES_NEW_COMBI_OS = 'compute_multi_strategies_new_combi_os'
+    COMPUTE_MULTI_STRATEGIES_NEW_COMBI2 = 'compute_multi_strategies_new_combi2'
+    COMPUTE_MULTI_STRATEGIES_NEW_COMBI2_DAYLIST = 'compute_multi_strategies_new_combi2_daylist'
 @app.task(name=TaskName.COMPUTE_SIGNAL2)
 def compute_signal2(idx, params: dict):
 
@@ -130,6 +132,193 @@ def compute_multi_strategies_cfm(i, folder):
 
     with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
         pickle.dump((nt_arr, re_arr, wt_arr), f)
+
+
+
+
+@app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_NEW_COMBI)
+def compute_multi_strategies_new_combi(i, folder):
+
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+    array_env = pload("sig_3d_array_env")
+    array_trigger = pload("sig_3d_array_trigger")
+    # array_cfm = pload("sig_array_cfm")
+
+    re_2d = pload("return_array")
+
+    array_env = array_env[:,:1665, :]
+    array_trigger = array_trigger[:,:1665, :]
+    re_2d = re_2d[:1665]
+
+    df1 = array_env[i]
+
+    nt_ls=[]
+    re_ls=[]
+    wt_ls=[]
+    for j in range(len(array_trigger)):
+        df2 = array_trigger[j]
+
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
+
+        cond = df1 * df2
+        num_trade = np.sum(cond, axis=0)
+        re = np.nan_to_num(re_2d * cond, 0.0)
+        total_re = np.sum(re, axis=0)
+        num_win = np.sum(re > 0, axis=0)
+
+        nt_ls.append(num_trade)
+        re_ls.append(total_re)
+        wt_ls.append(num_win)
+
+    disconnect()
+
+    nt_arr = np.vstack(nt_ls)
+    re_arr = np.vstack(re_ls)
+    wt_arr = np.vstack(wt_ls)
+
+    with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
+        pickle.dump((nt_arr, re_arr, wt_arr), f)
+
+@app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_NEW_COMBI2)
+def compute_multi_strategies_new_combi2(i, folder):
+
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+    array_env = pload("sig_3d_array_2envs")
+    array_trigger = pload("sig_3d_array_trigger_chosen")
+    # array_cfm = pload("sig_array_cfm")
+
+    re_2d = pload("return_array")
+
+    array_env = array_env[:,:1665, :]
+    array_trigger = array_trigger[:,:1665, :]
+    re_2d = re_2d[:1665]
+
+    df1 = array_env[i]
+
+    nt_ls=[]
+    re_ls=[]
+    wt_ls=[]
+    for j in range(len(array_trigger)):
+        df2 = array_trigger[j]
+
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
+
+        cond = df1 * df2
+        num_trade = np.sum(cond, axis=0)
+        re = np.nan_to_num(re_2d * cond, 0.0)
+        total_re = np.sum(re, axis=0)
+        num_win = np.sum(re > 0, axis=0)
+
+        nt_ls.append(num_trade)
+        re_ls.append(total_re)
+        wt_ls.append(num_win)
+
+    disconnect()
+
+    nt_arr = np.vstack(nt_ls)
+    re_arr = np.vstack(re_ls)
+    wt_arr = np.vstack(wt_ls)
+
+    with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
+        pickle.dump((nt_arr, re_arr, wt_arr), f)
+
+@app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_NEW_COMBI2_DAYLIST)
+def compute_multi_strategies_new_combi2_daylist(i, lst_idx, folder):
+
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+    array_env = pload("sig_3d_array_2envs")
+    array_trigger = pload("sig_3d_array_trigger_chosen")
+    # array_cfm = pload("sig_array_cfm")
+
+    re_2d = pload("return_array")
+    lst_idx = [i for i in lst_idx if i < 1665] 
+    array_env = array_env[:, lst_idx, :]
+    array_trigger = array_trigger[:, lst_idx, :]
+    re_2d = re_2d[lst_idx]
+
+
+
+    df1 = array_env[i]
+
+    nt_ls=[]
+    re_ls=[]
+    wt_ls=[]
+    for j in range(len(array_trigger)):
+        df2 = array_trigger[j]
+
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
+
+        cond = df1 * df2
+        num_trade = np.sum(cond, axis=0)
+        re = np.nan_to_num(re_2d * cond, 0.0)
+        total_re = np.sum(re, axis=0)
+        num_win = np.sum(re > 0, axis=0)
+
+        nt_ls.append(num_trade)
+        re_ls.append(total_re)
+        wt_ls.append(num_win)
+
+    disconnect()
+
+    nt_arr = np.vstack(nt_ls)
+    re_arr = np.vstack(re_ls)
+    wt_arr = np.vstack(wt_ls)
+
+    with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
+        pickle.dump((nt_arr, re_arr, wt_arr), f)
+
+
+@app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_NEW_COMBI_OS)
+def compute_multi_strategies_new_combi_os(i, folder):
+
+    _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+    array_env = pload("sig_3d_array_env")
+    array_trigger = pload("sig_3d_array_trigger")
+    # array_cfm = pload("sig_array_cfm")
+
+    re_2d = pload("return_array")
+
+    array_env = array_env[:,1665:, :]
+    array_trigger = array_trigger[:,1665:, :]
+    re_2d = re_2d[1665:]
+
+    df1 = array_env[i]
+
+    nt_ls=[]
+    re_ls=[]
+    wt_ls=[]
+    for j in range(len(array_trigger)):
+        df2 = array_trigger[j]
+
+        if len(df2) == 0:  # Break the loop if there are no more pairs to process
+            break
+
+        cond = df1 * df2
+        num_trade = np.sum(cond, axis=0)
+        re = np.nan_to_num(re_2d * cond, 0.0)
+        total_re = np.sum(re, axis=0)
+        num_win = np.sum(re > 0, axis=0)
+
+        nt_ls.append(num_trade)
+        re_ls.append(total_re)
+        wt_ls.append(num_win)
+
+    disconnect()
+
+    nt_arr = np.vstack(nt_ls)
+    re_arr = np.vstack(re_ls)
+    wt_arr = np.vstack(wt_ls)
+
+    with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
+        pickle.dump((nt_arr, re_arr, wt_arr), f)
+
 
 @app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_NEW_COND)
 def compute_multi_strategies_new_cond(i, folder):
@@ -492,6 +681,7 @@ def compute_multi_strategies_utdt(i, folder):
 
     with open(f"{folder}/combo_{i}.pkl", 'wb') as f:
         pickle.dump((ut_arr, ld_arr, pb_arr, rc_arr, ed_arr, bt_arr, at_arr, bp_arr, ap_arr), f)
+
 
 
 @app.task(name=TaskName.COMPUTE_MULTI_STRATEGIES_2)

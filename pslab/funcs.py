@@ -2111,7 +2111,8 @@ class CombiConds:
             allow_remove_atc = True
             is_multiIndex_data = True
 
-
+        print(data.columns)
+        print(col_name)
         data_processed = data[col_name].copy() 
         data_processed = data_processed / scale
         resampling_method = Resampler.get_agg_dict([col_name])[col_name]
@@ -2198,6 +2199,8 @@ class CombiConds:
             provided_data = None
             realtime = False
             stocks = None
+            start_day: str = None
+            end_day: str = None
 
         valid_sources = CombiConds.VALID_SOURCES
         if data_source not in valid_sources:
@@ -3052,30 +3055,99 @@ class ReturnStats:
         Returns:
             Dictionary containing key performance metrics with date suffix if from_day provided
         """
+        if suffix is None:
+            suffix = f"_{datetime.strptime(from_day, '%Y_%m_%d').strftime('%d%m%y')}" if from_day else ''
+        
+        if len(df) > 0:
+            df = df.copy()
+            # Filter and prepare data
+            signals = df[df['matched']]
+            if from_day:
+                signals = signals[signals['day'] >= from_day]
+            else:
+                from_day = Globs.DATA_FROM_DAY
+                
+            rets = signals['c_o'].dropna()
+            if not len(rets):
+                metric_keys = ['trades', 'days', 'winrate', 'avgret', 'avghigh', 
+                            'avglow', 'maxret', 'minret', 'pf', 'avgwin', 'avgloss']
+                return {k: 0 for k in metric_keys}
+
+            # Calculate win/loss data
+            wins = rets[rets > 0]
+            losses = rets[rets < 0]
+
+            
+            # Generate date suffix if needed
+
+            # Return metrics with appropriate suffix
+            return {
+                f'trades{suffix}': len(rets),
+                f'days{suffix}': signals['day'].nunique(),
+                f'winrate{suffix}': (rets > 0).mean() * 100,
+                f'avgret{suffix}': rets.mean(),
+                f'avghigh{suffix}': signals['h_o'].dropna().mean(),
+                f'avglow{suffix}': signals['l_o'].dropna().mean(),
+                f'maxret{suffix}': rets.max(),
+                f'minret{suffix}': rets.min(),
+                f'pf{suffix}': abs(wins.sum() / losses.sum()) if len(losses) else float('inf'),
+                f'avgwin{suffix}': wins.mean() if len(wins) else 0,
+                f'avgloss{suffix}': losses.mean() if len(losses) else 0
+            }
+        else:
+            # If no data, return default values
+            metric_keys = ['trades', 'days', 'winrate', 'avgret', 'avghigh', 
+                        'avglow', 'maxret', 'minret', 'pf', 'avgwin', 'avgloss']
+            return {f"{k}{suffix}": 0 for k in metric_keys}
+    
+    @staticmethod
+    def get_trade_summary_in_range(
+        df: pd.DataFrame,
+        from_day: str = None,
+        end_day: str = None,
+        suffix: str = None
+    ) -> Dict[str, float]:
+        """
+        Generate a summary of trading performance metrics.
+        
+        Args:
+            df: DataFrame with calculated returns
+            from_day: Optional start date in format 'YYYY_MM_DD'
+            end_day: Optional end date in format 'YYYY_MM_DD'
+            suffix: Optional suffix to append to metric names
+
+        Returns:
+            Dictionary containing key performance metrics with date suffix
+        """
         df = df.copy()
-        # Filter and prepare data
         signals = df[df['matched']]
+
         if from_day:
             signals = signals[signals['day'] >= from_day]
         else:
             from_day = Globs.DATA_FROM_DAY
-            
+
+        if end_day:
+            signals = signals[signals['day'] <= end_day]
+
         rets = signals['c_o'].dropna()
         if not len(rets):
             metric_keys = ['trades', 'days', 'winrate', 'avgret', 'avghigh', 
-                         'avglow', 'maxret', 'minret', 'pf', 'avgwin', 'avgloss']
-            return {k: 0 for k in metric_keys}
+                        'avglow', 'maxret', 'minret', 'pf', 'avgwin', 'avgloss']
+            return {f"{k}{suffix or ''}": 0 for k in metric_keys}
 
-        # Calculate win/loss data
         wins = rets[rets > 0]
         losses = rets[rets < 0]
 
-        
-        # Generate date suffix if needed
+        # Generate suffix if not provided
         if suffix is None:
-            suffix = f"_{datetime.strptime(from_day, '%Y_%m_%d').strftime('%d%m%y')}" if from_day else ''
-        
-        # Return metrics with appropriate suffix
+            suffix_parts = []
+            if from_day:
+                suffix_parts.append(datetime.strptime(from_day, '%Y_%m_%d').strftime('%d%m%y'))
+            if end_day:
+                suffix_parts.append(datetime.strptime(end_day, '%Y_%m_%d').strftime('%d%m%y'))
+            suffix = '_' + '_'.join(suffix_parts) if suffix_parts else ''
+
         return {
             f'trades{suffix}': len(rets),
             f'days{suffix}': signals['day'].nunique(),
@@ -3089,7 +3161,103 @@ class ReturnStats:
             f'avgwin{suffix}': wins.mean() if len(wins) else 0,
             f'avgloss{suffix}': losses.mean() if len(losses) else 0
         }
-        
+
+    @staticmethod
+    def get_trade_summary_flex(
+        df: pd.DataFrame,
+        start_date: str = None,
+        end_date: str = None,
+        suffix: str = None,
+        short_keys: bool = False,
+        exclude_22: bool = False
+    ) -> Dict[str, float]:
+        """
+        Tổng hợp các chỉ số giao dịch linh hoạt, thay thế mọi hàm tổng hợp cũ.
+        Args:
+            df: DataFrame với kết quả giao dịch
+            start_date: ngày bắt đầu (YYYY_MM_DD)
+            end_date: ngày kết thúc (YYYY_MM_DD)
+            suffix: hậu tố key (nếu None sẽ tự động sinh)
+            short_keys: True = key ngắn, False = key đầy đủ
+            exclude_22: True = loại bỏ năm 2022 khi tính winrate
+        Returns:
+            Dict các chỉ số giao dịch, key có thể có hậu tố
+        """
+        import re
+        from datetime import datetime
+        df = df.copy()
+        signals = df[df['matched']]
+        if start_date:
+            signals = signals[signals['day'] >= start_date]
+        if end_date:
+            signals = signals[signals['day'] <= end_date]
+        rets = signals['c_o'].dropna()
+        wins = rets[rets > 0]
+        losses = rets[rets < 0]
+        num_entry_days = signals['day'].nunique()
+        # Tạo suffix nếu cần
+        if suffix is None:
+            suffix_parts = []
+            if start_date:
+                suffix_parts.append(datetime.strptime(start_date, '%Y_%m_%d').strftime('%d%m%y'))
+            if end_date:
+                suffix_parts.append(datetime.strptime(end_date, '%Y_%m_%d').strftime('%d%m%y'))
+            suffix = '_' + '_'.join(suffix_parts) if suffix_parts else ''
+        # Key mapping
+        if short_keys:
+            keys = {
+                'trades': len(rets),
+                'days': num_entry_days,
+                'winrate': (rets > 0).mean() * 100 if len(rets) else 0,
+                'avgret': rets.mean() if len(rets) else 0,
+                'avghigh': signals['h_o'].dropna().mean() if len(signals) else 0,
+                'avglow': signals['l_o'].dropna().mean() if len(signals) else 0,
+                'maxret': rets.max() if len(rets) else 0,
+                'minret': rets.min() if len(rets) else 0,
+                'pf': abs(wins.sum() / losses.sum()) if len(losses) else float('inf'),
+                'avgwin': wins.mean() if len(wins) else 0,
+                'avgloss': losses.mean() if len(losses) else 0
+            }
+            # Thêm hậu tố
+            keys = {f"{k}{suffix}": v for k, v in keys.items()}
+        else:
+            keys = {
+                'Number of Trades': len(rets),
+                'Number Entry Days': num_entry_days,
+                'Win Rate (%)': (rets > 0).mean() * 100 if len(rets) else 0,
+                'Average Return': rets.mean() if len(rets) else 0,
+                'Average High Return': signals['h_o'].dropna().mean() if len(signals) else 0,
+                'Average Low Return': signals['l_o'].dropna().mean() if len(signals) else 0,
+                'Max Return': rets.max() if len(rets) else 0,
+                'Min Return': rets.min() if len(rets) else 0,
+                'Profit Factor': abs(wins.sum() / losses.sum()) if len(losses) else float('inf'),
+                'Average Win': wins.mean() if len(wins) else 0,
+                'Average Loss': losses.mean() if len(wins) else 0
+            }
+            # Không thêm hậu tố với key dài
+        # Winrate not 22 nếu cần
+        if exclude_22:
+            signals_2023 = signals[signals['day'] >= '2023_01_01']
+            rets_2023 = signals_2023['c_o'].dropna()
+            winrate_not_22 = (rets_2023 > 0).mean() * 100 if len(rets_2023) else 0
+            if short_keys:
+                keys[f'winrate_not22{suffix}'] = winrate_not_22
+            else:
+                keys['Win Rate Not 22 (%)'] = winrate_not_22
+        # Nếu không có giao dịch, trả về 0 hết
+        if not len(rets):
+            if short_keys:
+                metric_keys = ['trades','days','winrate','avgret','avghigh','avglow','maxret','minret','pf','avgwin','avgloss']
+                keys = {f"{k}{suffix}": 0 for k in metric_keys}
+                if exclude_22:
+                    keys[f'winrate_not22{suffix}'] = 0
+            else:
+                metric_keys = ['Number of Trades','Number Entry Days','Win Rate (%)','Average Return','Average High Return','Average Low Return','Max Return','Min Return','Profit Factor','Average Win','Average Loss']
+                keys = {k: 0 for k in metric_keys}
+                if exclude_22:
+                    keys['Win Rate Not 22 (%)'] = 0
+        return keys
+
 def remove_redis():
     redis_handler = RedisHandler()
     redis_handler.delete_keys_by_pattern('pslab/stockcount/*')

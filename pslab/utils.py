@@ -299,6 +299,85 @@ class Utils:
 
 class FileHandler:
 
+    @staticmethod
+    def write_excel(file_path, data, sheet_name='Sheet1', mode='w'):
+        """
+        Ghi dữ liệu vào file Excel.
+        
+        Parameters:
+            file_path (str): Đường dẫn đến file Excel cần ghi.
+            data (pd.DataFrame): Dữ liệu cần ghi vào file.
+            sheet_name (str): Tên sheet trong file Excel. Mặc định là 'Sheet1'.
+            mode (str): 'w' để ghi đè file, 'a' để append/update sheet.
+        """
+        # Kiểm tra nếu file chưa tồn tại và mode='a', thì chuyển sang mode='w'
+        if mode == 'a' and not os.path.exists(file_path):
+            mode = 'w'
+        
+        # Chỉ sử dụng if_sheet_exists khi mode='a'
+        if mode == 'a':
+            with pd.ExcelWriter(file_path, engine='openpyxl', mode=mode, if_sheet_exists='replace') as writer:
+                data.to_excel(writer, sheet_name=sheet_name, index=False)
+        else:
+            with pd.ExcelWriter(file_path, engine='openpyxl', mode=mode) as writer:
+                data.to_excel(writer, sheet_name=sheet_name, index=False)
+
+    @staticmethod
+    def read_excel(file_path, sheet_name='Sheet1'):
+        """
+        Đọc dữ liệu từ file Excel.
+        
+        Parameters:
+            file_path (str): Đường dẫn đến file Excel cần đọc.
+            sheet_name (str): Tên sheet trong file Excel. Mặc định là 'Sheet1'.
+        
+        Returns:
+            pd.DataFrame: Dữ liệu được đọc từ file Excel.
+        """
+        return pd.read_excel(file_path, sheet_name=sheet_name)
+    
+    @staticmethod
+    def delete_sheet(file_path, sheet_name):
+        """
+        Xóa một sheet trong file Excel. Nếu file chỉ có 1 sheet thì xóa luôn file.
+        
+        Parameters:
+            file_path (str): Đường dẫn đến file Excel.
+            sheet_name (str): Tên sheet cần xóa.
+        """
+        from openpyxl import load_workbook
+        
+        if not os.path.exists(file_path):
+            print(f"File {file_path} không tồn tại.")
+            return
+        
+        try:
+            # Load workbook
+            workbook = load_workbook(file_path)
+            
+            # Kiểm tra xem sheet có tồn tại không
+            if sheet_name not in workbook.sheetnames:
+                print(f"Sheet '{sheet_name}' không tồn tại trong file {file_path}")
+                return
+            
+            # Nếu chỉ có 1 sheet thì xóa luôn file
+            if len(workbook.sheetnames) == 1:
+                workbook.close()
+                os.remove(file_path)
+                print(f"File {file_path} đã được xóa (chỉ có 1 sheet)")
+                return
+            
+            # Xóa sheet
+            del workbook[sheet_name]
+            
+            # Lưu lại file
+            workbook.save(file_path)
+            workbook.close()
+            print(f"Sheet '{sheet_name}' đã được xóa từ file {file_path}")
+            
+        except Exception as e:
+            print(f"Lỗi khi xóa sheet: {e}")
+
     class CustomJSONEncoder(json.JSONEncoder):
         def default(self, obj):
             if isinstance(obj, Interval):
@@ -348,12 +427,22 @@ class FileHandler:
         return Path(file_path).is_file()
     
     @staticmethod
-    def walk_through_files(TARGET, ext="*"):
+    def walk_through_files(TARGET, ext="*", recursive=True):
         lst = []
-        for root, dirs, files in os.walk(TARGET):
-            for file in files:
-                if ext == "*" or file.endswith(ext):
-                    lst.append(os.path.join(root, file))
+        if recursive:
+            # Tìm kiếm đệ quy qua tất cả thư mục con
+            for root, dirs, files in os.walk(TARGET):
+                for file in files:
+                    if ext == "*" or file.endswith(ext):
+                        lst.append(os.path.join(root, file))
+        else:
+            # Chỉ tìm kiếm trong thư mục hiện tại, không đệ quy
+            if os.path.isdir(TARGET):
+                for file in os.listdir(TARGET):
+                    file_path = os.path.join(TARGET, file)
+                    if os.path.isfile(file_path):
+                        if ext == "*" or file.endswith(ext):
+                            lst.append(file_path)
 
         return lst
     
@@ -369,6 +458,34 @@ class FileHandler:
             print("Permission denied to delete the file.")
         except Exception as e:
             print(f"An error occurred: {e}")
+
+    @staticmethod
+    def delete_dir(path, force=False):
+        """
+        Xoá thư mục và tất cả các file bên trong.
+        Parameters:
+            path (str): Đường dẫn đến thư mục cần xoá.
+            force (bool): Nếu True, sẽ xoá thư mục ngay cả khi nó không rỗng.
+        """
+        path = Path(path)
+        if not path.exists():
+            print(f"Directory {path} does not exist.")
+            return
+        
+        if not force and any(path.iterdir()):
+            print(f"Directory {path} is not empty. Use force=True to delete non-empty directories.")
+            return
+        
+        try:
+            for item in path.iterdir():
+                if item.is_file():
+                    item.unlink()
+                elif item.is_dir():
+                    FileHandler.delete_dir(item, force=True)
+            path.rmdir()  # Xoá thư mục sau khi đã xoá tất cả file bên trong
+            print(f"Deleted directory: {path}")
+        except Exception as e:
+            print(f"An error occurred while deleting directory {path}: {e}")
 
     @staticmethod
     def maybe_create_dir(path, verbose=0):
@@ -553,3 +670,12 @@ def totime(stamp, unit='s'):
     return pd.to_datetime(stamp, unit=unit)
 
 
+import pandas as pd
+import numpy as np
+
+# Tạo dữ liệu mẫu
+data = pd.Series([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30])
+
+# Chia thành 4 nhóm bằng nhau
+result = pd.qcut(data, q=2)
+print(result)

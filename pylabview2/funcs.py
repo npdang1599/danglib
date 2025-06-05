@@ -13,6 +13,8 @@ from tqdm import tqdm
 from dc_server.lazy_core import gen_plasma_functions, maybe_create_dir
 import ast
 
+from danglib.utils import FileHandler
+
 pd.options.mode.chained_assignment = None
 
 # Tắt tất cả các FutureWarning
@@ -2372,7 +2374,7 @@ class Vectorized:
                 'params': {
                     'ma_len1':[50],
                     'ma_len2':[200],
-                    'ma_dir': ['above', 'below'],
+                    'ma_dir': ['crossover', 'crossunder'],
                 },
                 'type':'trigger'
             },
@@ -2599,14 +2601,23 @@ class Vectorized:
                 },
                 'type': 'trigger'
             },
-            'index1': {
+            'index1_env': {
                 'function': 'index_cond',
                 'params': {
                     'function2': ['s_price_comp_ma'],
                     ('ma_len1', 'ma_len2'): [(1,5), (1, 10), (1, 15), (1, 20), (1, 50), (1, 200), (5, 15), (5, 20), (10, 30), (20, 50), (20, 100), (50, 200)],
-                    'ma_dir': ['above', 'below', 'crossover', 'crossunder']
+                    'ma_dir': ['above', 'below']
                 },
                 'type': 'env'
+            },
+            'index1_trigger': {
+                'function': 'index_cond',
+                'params': {
+                    'function2': ['s_price_comp_ma'],
+                    ('ma_len1', 'ma_len2'): [(1,5), (1, 10), (1, 15), (1, 20), (1, 50), (1, 200), (5, 15), (5, 20), (10, 30), (20, 50), (20, 100), (50, 200)],
+                    'ma_dir': ['crossover', 'crossunder']
+                },
+                'type': 'trigger'
             },
             # 'index2': {
             #     'function': 'index_cond',
@@ -2669,15 +2680,25 @@ class Vectorized:
             #         ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
             #     }
             # },
-            'index6': {
+            'index6_env': {
                 'function': 'index_cond', 
                 'params': {
                     'function2': ['s_ursi'], 
-                    'direction': ['crossover', 'crossunder', 'above', 'below'],
+                    'direction': ['above', 'below'],
                     ('use_vs_signal','use_range'): [(True, False), (False,True), (True, True)],
                     ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
                 },
                 'type': 'env'
+            },
+            'index6_trigger': {
+                'function': 'index_cond', 
+                'params': {
+                    'function2': ['s_ursi'], 
+                    'direction': ['crossover', 'crossunder'],
+                    ('use_vs_signal','use_range'): [(True, False), (True, True)],
+                    ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
+                },
+                'type': 'trigger'
             },
             'lkbk1':{
                 'function': 'lookback_cond',
@@ -2722,55 +2743,112 @@ class Vectorized:
                 },
                 'type': 'trigger'
             },
-            'lkbk5':{
+            'lkbk5_env':{
                 'function': 'lookback_cond',
                 
                 'params': {
                     'function2': ['price_comp_ma'],
                     'ma_len1':[1],
                     'ma_len2':[5,10,15,20,50,200],
-                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
-                }
+                    'ma_dir': ['above', 'below'],
+                },
+                'type': 'env'
             },
-            'lkbk6':{
+            'lkbk5_trigger':{
                 'function': 'lookback_cond',
                 
                 'params': {
                     'function2': ['price_comp_ma'],
+                    'ma_len1':[1],
+                    'ma_len2':[5,10,15,20,50,200],
+                    'ma_dir': ['crossover', 'crossunder'],
+                },
+                'type': 'trigger'
+            },
+            'lkbk6_env':{
+                'function': 'lookback_cond',
+                'params': {
+                    'function2': ['price_comp_ma'],
                     'ma_len1':[5],
                     'ma_len2':[15,20],
-                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
-                }
+                    'ma_dir': ['above', 'below'],
+                },
+                'type':'env'
             },
-            'lkbk7':{
+            'lkbk6_trigger':{
+                'function': 'lookback_cond',
+                'params': {
+                    'function2': ['price_comp_ma'],
+                    'ma_len1':[5],
+                    'ma_len2':[15,20],
+                    'ma_dir': ['crossover', 'crossunder'],
+                },
+                'type':'trigger'
+            },
+            'lkbk7_env':{
                 'function': 'lookback_cond',
                 
                 'params': {
                     'function2': ['price_comp_ma'],
                     'ma_len1':[10],
                     'ma_len2':[30],
-                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
-                }
+                    'ma_dir': ['above', 'below'],
+                },
+                'type':'env'
             },
-            'lkbk8':{
+            'lkbk7_trigger':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['price_comp_ma'],
+                    'ma_len1':[10],
+                    'ma_len2':[30],
+                    'ma_dir': ['crossover', 'crossunder'],
+                },
+                'type':'trigger'
+            },
+            'lkbk8_env':{
                 'function': 'lookback_cond',
                 
                 'params': {
                     'function2': ['price_comp_ma'],
                     'ma_len1':[20],
                     'ma_len2':[50, 100],
-                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
+                    'ma_dir': ['above', 'below'],
                 }
             },
-            'lkbk9':{
+            'lkbk8_trigger':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['price_comp_ma'],
+                    'ma_len1':[20],
+                    'ma_len2':[50, 100],
+                    'ma_dir': [ 'crossover', 'crossunder'],
+                },
+                'type':'trigger'
+            },
+            'lkbk9_env':{
                 'function': 'lookback_cond',
                 
                 'params': {
                     'function2': ['price_comp_ma'],
                     'ma_len1':[50],
                     'ma_len2':[200],
-                    'ma_dir': ['above', 'below', 'crossover', 'crossunder'],
-                }
+                    'ma_dir': ['above', 'below'],
+                },
+                'type':'env'
+            },
+            'lkbk9_trigger':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['price_comp_ma'],
+                    'ma_len1':[50],
+                    'ma_len2':[200],
+                    'ma_dir': ['crossover', 'crossunder'],
+                },
+                'type':'trigger'
             },
             'lkbk10':{
                 'function': 'lookback_cond',
@@ -2780,7 +2858,8 @@ class Vectorized:
                     'direction': ['Increase','Decrease'],
                     'nbars': [5, 10, 15, 20, 30],
                     'low_range': [10, 15, 20, 25]
-                }
+                },
+                'type': 'env'
             },
             'lkbk11':{
                 'function': 'lookback_cond',
@@ -2788,16 +2867,17 @@ class Vectorized:
                 'params':{
                     'function2': ['price_gap'],
                     'gap_dir': ['Use Gap Up', 'Use Gap Down']
-                }
+                },
+                'type':'trigger'
             },
             'lkbk12':{
                 'function': 'lookback_cond',
-                
                 'params': {
                     'function2': ['price_highest_lowest'],
                     'method': ['Highest', 'Lowest'],
                     'num_bars': [5, 10, 15, 20, 50, 200]
-                }
+                },
+                'type':'trigger'
             },
             'lkbk13':{
                 'function': 'lookback_cond',
@@ -2807,7 +2887,8 @@ class Vectorized:
                     ('src1_name', 'src2_name'): [('close', 'close'), ('high', 'low'), ('low', 'low'), ('high', 'high'), ('high', 'close'), ('low', 'close')],
                     'direction': ['Increase', 'Decrease'],
                     ('num_bars', 'num_matched'): [(2,2), (3,3), (4,4), (5,5), (6,6), (7,7), (8,8)]
-                }
+                },
+                'type':'trigger'
             },
             'lkbk14':{
                 'function': 'lookback_cond',
@@ -2817,7 +2898,8 @@ class Vectorized:
                     ("n_bars", "ma_len") : [(1, 20), (1, 10), (1, 6), (2, 20), (3, 15)],
                     "comp_ma_dir": ["higher", "lower"],
                     "comp_ma_perc": [0, 25, 50, 75, 100, 150]
-                }
+                },
+                'type':'trigger'
             },
             # 'lkbk15':{
             #     'function': 'lookback_cond',
@@ -2830,7 +2912,7 @@ class Vectorized:
             #         'high_range': [80, 90, 95, 98]
             #     }
             # },
-            'lkbk151':{
+            'lkbk151_env':{
                 'function': 'lookback_cond',
                 
                 'params': {
@@ -2838,19 +2920,45 @@ class Vectorized:
                     'ma_length': [1,3,5,10],
                     'ranking_window': [64, 128, 256],
                     'low_range': [0],
-                    'high_range': [2,5, 10, 15, 20]
-                }
+                    'high_range': [10, 15, 20]
+                },
+                'type':'env'
             },
-            'lkbk152':{
+            'lkbk151_trigger':{
                 'function': 'lookback_cond',
                 
                 'params': {
                     'function2': ['vol_percentile'],
                     'ma_length': [1,3,5,10],
                     'ranking_window': [64, 128, 256],
-                    'low_range': [80, 90, 95, 98],
+                    'low_range': [0],
+                    'high_range': [2,5]
+                },
+                'type':'trigger'
+            },
+            'lkbk152_env':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['vol_percentile'],
+                    'ma_length': [1,3,5,10],
+                    'ranking_window': [64, 128, 256],
+                    'low_range': [80, 90],
                     'high_range': [100]
-                }
+                },
+                'type':'env'
+            },
+            'lkbk152_trigger':{
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['vol_percentile'],
+                    'ma_length': [1,3,5,10],
+                    'ranking_window': [64, 128, 256],
+                    'low_range': [95, 98],
+                    'high_range': [100]
+                },
+                'type':'trigger'
             },
             'lkbk16':{
                 'function': 'lookback_cond',
@@ -2858,7 +2966,8 @@ class Vectorized:
                 'params': {
                     'function2': ['consecutive_squeezes'], 
                     'use_no_sqz': [True]
-                }
+                },
+                'type':'env'
             },
             'lkbk17':{
                 'function': 'lookback_cond',
@@ -2866,9 +2975,10 @@ class Vectorized:
                 'params': {
                     'function2': ['consecutive_squeezes'], 
                     'num_bars': [3, 5, 10, 15, 20]
-                }
+                },
+                'type':'env'
             },
-            'lkbk18' : {
+            'lkbk18_env' : {
                 'function': 'lookback_cond',
                 
                 'params': {
@@ -2876,11 +2986,25 @@ class Vectorized:
                     ('use_low_thres', 'use_high_thres'):[(True, False)],
                     'bbwp_len': [13, 30, 50],
                     'bbwp_lkbk': [64, 128, 256],
-                    'low_thres': [2,5,10,20],
+                    'low_thres': [10,20],
                     'high_thres': [100]
-                }
+                },
+                'type':'env'
             },
-            'lkbk181' : {
+            'lkbk18_trigger' : {
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['bbwp'],
+                    ('use_low_thres', 'use_high_thres'):[(True, False)],
+                    'bbwp_len': [13, 30, 50],
+                    'bbwp_lkbk': [64, 128, 256],
+                    'low_thres': [2,5],
+                    'high_thres': [100]
+                },
+                'type':'trigger'
+            },
+            'lkbk181_env' : {
                 'function': 'lookback_cond',
                 
                 'params': {
@@ -2889,8 +3013,22 @@ class Vectorized:
                     'bbwp_len': [13, 30, 50],
                     'bbwp_lkbk': [64, 128, 256],
                     'low_thres': [0],
-                    'high_thres': [80, 90, 95, 98]
-                }
+                    'high_thres': [80, 90]
+                },
+                'type':'env'
+            },
+            'lkbk181_trigger' : {
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['bbwp'],
+                    ('use_low_thres', 'use_high_thres'):[(False, True)],
+                    'bbwp_len': [13, 30, 50],
+                    'bbwp_lkbk': [64, 128, 256],
+                    'low_thres': [0],
+                    'high_thres': [95, 98]
+                },
+                'type':'trigger'
             },
             'lkbk19':{
                 'function': 'lookback_cond',
@@ -2901,7 +3039,8 @@ class Vectorized:
                     'mult': [1.5, 2, 2.5, 3],
                     'direction' : ['crossover', 'crossunder'],
                     'cross_line': ['Upper band', 'Lower band']
-                }
+                },
+                'type':'trigger'
             },
             # 'lkbk20': {
             #     'function': 'lookback_cond',
@@ -2914,15 +3053,27 @@ class Vectorized:
             #         ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
             #     }
             # },
-            'lkbk201': {
+            'lkbk201_env': {
                 'function': 'lookback_cond',
                 
                 'params': {
                     'function2': ['ursi'],
-                    'direction': ['crossover', 'crossunder', 'above', 'below'],
+                    'direction': ['above', 'below'],
                     ('use_vs_signal','use_range'): [(True, False), (False,True), (True, True)],
                     ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
-                }
+                },
+                'type': 'env'
+            },
+            'lkbk201_trigger': {
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['ursi'],
+                    'direction': ['crossover', 'crossunder'],
+                    ('use_vs_signal','use_range'): [(True, False), (True, True)],
+                    ('lower_thres', 'upper_thres'): [(0, 10), (0, 20), (10, 20), (20, 30), (80, 90), (90, 100), (80, 100)]
+                },
+                'type':'trigger'
             },
             # 'lkbk21': {
             #     'function': 'lookback_cond',
@@ -2935,15 +3086,27 @@ class Vectorized:
             #         ('lower_thres','upper_thres'):[(-9999,0), (0, 9999)]
             #     }
             # },
-            'lkbk211': {
+            'lkbk211_env': {
                 'function': 'lookback_cond',
                 
                 'params': {
                     'function2': ['macd'],
-                    ('use_vs_signal','use_range'): [(True, False), (False,True), (True, True)],
+                    ('use_vs_signal','use_range'): [ (False,True)],
                     'direction': ['crossover', 'crossunder'],
                     ('lower_thres','upper_thres'):[(-9999,0), (0, 9999)]
-                }
+                },
+                'type':'env'
+            },
+            'lkbk211_trigger': {
+                'function': 'lookback_cond',
+                
+                'params': {
+                    'function2': ['macd'],
+                    ('use_vs_signal','use_range'): [(True, False),  (True, True)],
+                    'direction': ['crossover', 'crossunder'],
+                    ('lower_thres','upper_thres'):[(-9999,0), (0, 9999)]
+                },
+                'type':'trigger'
             },
         }
         
@@ -3034,7 +3197,7 @@ class Vectorized:
                         'params': {
                             'src_name': ['netBUSD', 'netBUSD/Value', 'netForeign', 'netForeign/Value'],
                             'smoothing': [1,5, 10, 15],
-                            'position': ['crossover', 'crossunder', 'above', 'below'],
+                            'position': ['above', 'below'],
                             'threshold': [0]
                         },
                         'type': 'env'
@@ -3044,7 +3207,7 @@ class Vectorized:
                         'params': {
                             'src_name': ['netBUSD', 'netBUSD/Value', 'netForeign', 'netForeign/Value'],
                             'smoothing': [1,5, 10, 15],
-                            'position': ['above', 'below'],
+                            'position': ['crossover', 'crossunder'],
                             'threshold': [0]
                         },
                         'type': 'trigger'
@@ -3176,7 +3339,7 @@ class Vectorized:
                             'num_return_bars': [1, 3, 5, 10],
                             'ma_use_flag': [True],
                             ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
-                            'ma_position': ['above', 'below'],
+                            'ma_position': ['crossover', 'crossunder'],
                         },
                         'type': 'trigger'
                     },
@@ -3242,7 +3405,7 @@ class Vectorized:
                             'num_return_bars': [1, 3, 5, 10],
                             'ma_use_flag': [True],
                             ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
-                            'ma_position': ['above', 'below'],
+                            'ma_position': ['crossover', 'crossunder'],
                         },
                         'type': 'trigger'
                     },
@@ -3317,7 +3480,7 @@ class Vectorized:
                             'smoothing': [1, 5, 10, 15],
                             'ma_use_flag': [True],
                             ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
-                            'ma_position': ['above', 'below'],
+                            'ma_position': ['crossover', 'crossunder'],
                         },
                         'type': 'trigger'
                     },
@@ -3383,7 +3546,7 @@ class Vectorized:
                             'smoothing': [1, 5, 10, 15],
                             'ma_use_flag': [True],
                             ('ma_len1', 'ma_len2'): [(1,10), (5, 15), (10, 30), (20, 50), (20, 100)],
-                            'ma_position': ['above', 'below'],
+                            'ma_position': ['crossover', 'crossunder'],
                         },
                         'type' : 'trigger'
                     },
@@ -3773,6 +3936,45 @@ class Vectorized:
     
     class MultiProcess:
         @staticmethod
+        def compute_signals_general(recompute = True, params_df: pd.DataFrame = None, plasma_name: str = "sig_3d_array_general"):
+            from danglib.pylabview2.celery_worker import compute_signal, clean_redis
+            
+            n_strats = len(params_df)
+
+            if recompute:
+                _, client_disconnect, psave, pload = gen_plasma_functions(db=5)
+                df_tmp = df['close']
+                df_tmp = df_tmp[df_tmp.index >= '2018_01_01']
+                n_rows, n_cols = df_tmp.shape
+
+                # Khởi tạo một mảng NumPy 3 chiều với kích thước (2000, 2000, 200)
+                array_3d = np.empty((n_strats, n_rows, n_cols))
+
+                task_dic = {}
+                print("Computing signals:")
+                for idx, params in tqdm(params_df.iterrows(), total=params_df.shape[0]):    
+                    params = params.dropna().to_dict()
+                    params.pop('type',None)
+                    task_dic[idx] = compute_signal.delay(idx, params)
+
+                while any(t.status!='SUCCESS' for t in task_dic.values()):
+                    pass
+                
+                for idx, v in task_dic.items():
+                    res: pd.DataFrame = v.result
+                    if res is not None:
+                        array_3d[idx, :, :] = res
+
+                    else:
+                        print(f"{idx} error")
+                array_3d = array_3d.astype(bool)
+                psave(plasma_name,array_3d)
+
+                clean_redis()
+                client_disconnect()
+
+            return n_strats
+        @staticmethod
         def compute_signals_env(recompute = True):
             from danglib.pylabview2.celery_worker import compute_signal, clean_redis
 
@@ -3823,7 +4025,7 @@ class Vectorized:
             params_df_old: pd.DataFrame = Vectorized.create_params_sets()
             params_df_new: pd.DataFrame = Vectorized.create_params_sets2()
             params_df = pd.concat([params_df_old, params_df_new], ignore_index=True)
-            params_df = params_df[params_df['type'] == 'trigger']
+            params_df = params_df[params_df['type'] == 'trigger'].reset_index(drop=True)
             n_strats = len(params_df)
 
             if recompute:
@@ -3946,6 +4148,58 @@ class Vectorized:
             print("Computing stats")
             for i in tqdm(range(0, n_solo_strats)):
                 task_dic[i] = compute_multi_strategies_cfm.delay(i, folder)
+
+            while any(t.status!='SUCCESS' for t in task_dic.values()):
+                pass
+
+            clean_redis()
+        @staticmethod
+        def compute_wr_re_nt_new_combination2_daylist(n_solo_strats, lst_idx, folder):
+            from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_new_combi2_daylist
+            clean_redis()
+            task_dic = {}
+            print("Computing stats")
+            for i in tqdm(range(0, n_solo_strats)):
+                task_dic[i] = compute_multi_strategies_new_combi2_daylist.delay(i, lst_idx, folder)
+
+            while any(t.status!='SUCCESS' for t in task_dic.values()):
+                pass
+
+            clean_redis()
+        @staticmethod
+        def compute_wr_re_nt_new_combination2(n_solo_strats, folder):
+            from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_new_combi2
+            clean_redis()
+            task_dic = {}
+            print("Computing stats")
+            for i in tqdm(range(0, n_solo_strats)):
+                task_dic[i] = compute_multi_strategies_new_combi2.delay(i, folder)
+
+            while any(t.status!='SUCCESS' for t in task_dic.values()):
+                pass
+
+            clean_redis()
+        @staticmethod
+        def compute_wr_re_nt_new_combination(n_solo_strats, folder):
+            from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_new_combi
+            clean_redis()
+            task_dic = {}
+            print("Computing stats")
+            for i in tqdm(range(0, n_solo_strats)):
+                task_dic[i] = compute_multi_strategies_new_combi.delay(i, folder)
+
+            while any(t.status!='SUCCESS' for t in task_dic.values()):
+                pass
+
+            clean_redis()
+        @staticmethod
+        def compute_wr_re_nt_new_combination_os(n_solo_strats, folder):
+            from danglib.pylabview2.celery_worker import clean_redis, compute_multi_strategies_new_combi_os
+            clean_redis()
+            task_dic = {}
+            print("Computing stats")
+            for i in tqdm(range(0, n_solo_strats)):
+                task_dic[i] = compute_multi_strategies_new_combi_os.delay(i, folder)
 
             while any(t.status!='SUCCESS' for t in task_dic.values()):
                 pass
@@ -4235,8 +4489,111 @@ class Vectorized:
             join_one_stats('nt')
             join_one_stats('wt')
             join_one_stats('re')
+        # @staticmethod
+        # def join_wr_re_nt_data_cfm(stocks_map, src_folder, des_folder):
+        #     fns = walk_through_files(src_folder)
+
+        #     def join_one_stats(name):
+
+        #         # df_res: pd.DataFrame = None
+        #         # res = []
+        #         res = pd.DataFrame()
+        #         print(f"Join {name} stats: ")
+        #         for f in tqdm(fns):
+        #             f: str
+        #             i = int(f.split('/')[-1].split(".")[0].split("_")[1])
+        #             if i < 10000:
+        #                 nt_raw, re_raw, wt_raw = pd.read_pickle(f)
+        #                 src = None
+        #                 if name == 'nt':
+        #                     src = nt_raw
+        #                     del re_raw
+        #                     del wt_raw
+        #                 if name == 're':
+        #                     src = re_raw
+        #                 if name == 'wt':
+        #                     src = wt_raw
+
+        #                 tmp = pd.DataFrame(src)
+        #                 tmp[-1] = i 
+        #                 # res.append(tmp)
+        #                 res = pd.concat([res, tmp], axis=0)
+        #                 del tmp
+                    
+        #         # res: pd.DataFrame = pd.concat(res)
+                
+        #         res = res.reset_index(names=-2)
+        #         cols_map = stocks_map.copy()
+        #         cols_map[-1] = 'i'
+        #         cols_map[-2] = 'j'
+
+        #         res = res.rename(columns = cols_map)
+        #         res = res.set_index(['i', 'j'])
+        #         dir = f"{des_folder}/df_{name}.pkl"
+        #         write_pickle(dir, res)
+        #         # import pyarrow 
+        #         # res.to_parquet(f"{dir}", engine='pyarrow')
+
+        #         print(dir)
+
+        #     join_one_stats('nt')
+        #     # join_one_stats('wt')
+        #     # join_one_stats('re')
         @staticmethod
-        def join_wr_re_nt_data_cfm(stocks_map, src_folder, des_folder):
+        def join_wr_re_nt_data_cfm(stocks_map, src_folder, des_folder, name = 'nt'):
+   
+
+            lsf = FileHandler.walk_through_files(src_folder)
+            ls_nt = []
+            # for i in tqdm(range(0, 100)):
+            for i in tqdm(range(0, len(lsf))):
+                idx = int(lsf[i].split('/')[-1].split(".")[0].split("_")[1])
+
+                if name == 'nt':
+                    nt, _, _ = FileHandler.read_pickle(lsf[i])
+                    new_column = np.full((nt.shape[0], 1), idx)
+                    nt = np.column_stack((nt, new_column))
+                    row_indices = np.arange(nt.shape[0]).reshape(-1, 1)
+                    nt = np.column_stack((nt, row_indices))
+                    nt = nt.astype(np.int32)
+                    ls_nt.append(nt)
+                    del nt, _, new_column
+                elif name == 're':
+                    _, re, _ = FileHandler.read_pickle(lsf[i])
+                    new_column = np.full((re.shape[0], 1), idx)
+                    re = np.column_stack((re, new_column))
+                    row_indices = np.arange(re.shape[0]).reshape(-1, 1)
+                    re = np.column_stack((re, row_indices))
+                    re = re.astype(np.float32)
+                    ls_nt.append(re)
+                    del re, _, new_column
+                elif name == 'wt':
+                    _, _, wt = FileHandler.read_pickle(lsf[i])
+                    new_column = np.full((wt.shape[0], 1), idx)
+                    wt = np.column_stack((wt, new_column))
+                    row_indices = np.arange(wt.shape[0]).reshape(-1, 1)
+                    wt = np.column_stack((wt, row_indices))
+                    wt = wt.astype(np.int32)
+                    ls_nt.append(wt)
+                    del wt, _, new_column
+
+            big_arr = np.concatenate(ls_nt, axis=0)
+            res = pd.DataFrame(big_arr)
+            res = res.rename(columns = {195:-1, 196:-2})
+            # res = res.reset_index(names=-2)
+            cols_map = stocks_map.copy()
+            cols_map[-1] = 'i'
+            cols_map[-2] = 'j'
+
+            res = res.rename(columns = cols_map)
+            res = res.set_index(['i', 'j'])
+
+            dir = f"{des_folder}/df_{name}.pkl"
+            write_pickle(dir, res)
+            print(dir)
+
+        @staticmethod
+        def join_wr_re_nt_data_new_combination(stocks_map, src_folder, des_folder):
             fns = walk_through_files(src_folder)
 
             def join_one_stats(name):
@@ -4247,7 +4604,7 @@ class Vectorized:
                 for f in tqdm(fns):
                     f: str
                     i = int(f.split('/')[-1].split(".")[0].split("_")[1])
-                    if i < 2013:
+                    if i < 10000:
                         nt_raw, re_raw, wt_raw = pd.read_pickle(f)
                         src = None
                         if name == 'nt':
@@ -4655,8 +5012,177 @@ class Vectorized:
 
     class Runs:
         @staticmethod
+        def compute_nt_re_wr_new_combination2_daylist():
+            name = 'new_combination4_yearly'
+            store_folder = f"/data/Tai/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/data/Tai/pickles/{name}"
+            maybe_create_dir(result_folder)
+            
+            recompute_signals = True
+            ## CALC  -------------------------------------------------------------------
+            
+            stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+                                                push_return_numpy=True, 
+                                                push_stocks_numpy=True
+                                            )
+            params_df_old: pd.DataFrame = Vectorized.create_params_sets()
+            params_df_new: pd.DataFrame = Vectorized.create_params_sets2()
+            params_df = pd.concat([params_df_old, params_df_new], ignore_index=True)
+            params_df_env = params_df[params_df['type'] == 'env'].reset_index(drop=True)
+            params_df_trigger = params_df[params_df['type'] == 'trigger'].reset_index(drop=True)
+
+            import pickle
+            # with open('/home/ubuntu/Tai/classify/new_indicators/chosen_env.pickle', 'rb') as f:
+            #     dic_chosen_env = pickle.load(f)
+            # with open('/home/ubuntu/Tai/classify/new_indicators/chosen_trigger.pickle', 'rb') as f:
+            #     dic_chosen_trigger = pickle.load(f)
+            # chosen_params_df_env = params_df_env[params_df_env.index.isin(dic_chosen_env.values())].reset_index(drop=True)
+
+            with open('/home/ubuntu/Tai/classify/new_indicators/lst_chosen_env.pickle', 'rb') as f:
+                lst_chosen_env = pickle.load(f)
+            with open('/home/ubuntu/Tai/classify/new_indicators/lst_chosen_trigger.pickle', 'rb') as f:
+                lst_chosen_trigger = pickle.load(f)
+            chosen_params_df_env = params_df_env[params_df_env.index.isin(lst_chosen_env)].reset_index(drop=True)
+            chosen_params_df_trigger = params_df_trigger[params_df_trigger.index.isin(lst_chosen_trigger)].reset_index(drop=True)
+            n_strats_env = Vectorized.MultiProcess.compute_signals_general(recompute_signals, params_df =chosen_params_df_env, plasma_name = 'sig_3d_array_env_chosen') 
+            n_strats_trigger = Vectorized.MultiProcess.compute_signals_general(recompute_signals, params_df = chosen_params_df_trigger, plasma_name = 'sig_3d_array_trigger_chosen')
+
+            _, disconnect, psave, pload = gen_plasma_functions(db=5)
+            array_3d = pload("sig_3d_array_env_chosen")
+            array_3d = array_3d[:,:1665, :]
+
+            # Store all pairwise AND operations
+            from itertools import combinations
+            pairwise_and_results = []
+            pair_indices = []
+
+            for i, j in combinations(range(array_3d.shape[0]), 2):
+                result = np.logical_and(array_3d[i], array_3d[j])
+                pairwise_and_results.append(result)
+                pair_indices.append((i, j))
+                
+            with open('/home/ubuntu/Tai/classify/new_indicators/pair_indices.pickle', 'wb') as f:
+                pickle.dump(pair_indices, f)
+            pairwise_and_array = np.array(pairwise_and_results)
+            psave("sig_3d_array_2envs",pairwise_and_array)
+
+            year_map = {}
+            year = None
+            for idx, d in enumerate(day_ls):
+                curr_year = int(d[0:4])
+                if curr_year != year:
+                    year_map[curr_year] = [idx]
+                    if idx != 0:
+                        year_map[year].append(idx)
+                    year = curr_year
+            year_map[year].append(idx+1)
+            
+
+            for year, idxs in year_map.items():
+                start_idx, end_idx = idxs
+                lst_idx = list(range(start_idx, end_idx))
+                sub_store_folder = f"{store_folder}/{year}"
+                maybe_create_dir(sub_store_folder)
+
+                sub_res_folder = f"{result_folder}/{year}"
+                maybe_create_dir(sub_res_folder)
+
+                print(f"Computing stats for {year} ... ", end = ' ')
+                Vectorized.MultiProcess.compute_wr_re_nt_new_combination2_daylist(pairwise_and_array.shape[0], lst_idx, folder=sub_store_folder)
+                print(f"Joining files ... ", end = ' ')
+                # Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=sub_store_folder, des_folder=sub_res_folder, name ='nt')
+                # Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=sub_store_folder, des_folder=sub_res_folder, name ='re')
+                # Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=sub_store_folder, des_folder=sub_res_folder, name ='wt')
+                print(f"Finished!")
+            print("---------------------------------------------------------")
+            print('Done!')
+
+            for year, idxs in year_map.items():
+                start_idx, end_idx = idxs
+                lst_idx = list(range(start_idx, end_idx))
+                sub_store_folder = f"{store_folder}/{year}"
+                maybe_create_dir(sub_store_folder)
+
+                sub_res_folder = f"{result_folder}/{year}"
+                maybe_create_dir(sub_res_folder)
+
+                # print(f"Computing stats for {year} ... ", end = ' ')
+                # Vectorized.MultiProcess.compute_wr_re_nt_new_combination2_daylist(pairwise_and_array.shape[0], lst_idx, folder=sub_store_folder)
+                print(f"Joining files ... ", end = ' ')
+                Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=sub_store_folder, des_folder=sub_res_folder, name ='nt')
+                Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=sub_store_folder, des_folder=sub_res_folder, name ='re')
+                Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=sub_store_folder, des_folder=sub_res_folder, name ='wt')
+                print(f"Finished!")
+            print("---------------------------------------------------------")
+            print('Done!')
+
+        @staticmethod
+        def compute_nt_re_wr_new_combination2():
+            name = 'new_combination4'
+            store_folder = f"/data/Tai/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/data/Tai/pickles/{name}"
+            maybe_create_dir(result_folder)
+            
+            recompute_signals = True
+            ## CALC  -------------------------------------------------------------------
+            
+            stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+                                                push_return_numpy=True, 
+                                                push_stocks_numpy=True
+                                            )
+            params_df_old: pd.DataFrame = Vectorized.create_params_sets()
+            params_df_new: pd.DataFrame = Vectorized.create_params_sets2()
+            params_df = pd.concat([params_df_old, params_df_new], ignore_index=True)
+            params_df_env = params_df[params_df['type'] == 'env'].reset_index(drop=True)
+            params_df_trigger = params_df[params_df['type'] == 'trigger'].reset_index(drop=True)
+
+            import pickle
+            # with open('/home/ubuntu/Tai/classify/new_indicators/chosen_env.pickle', 'rb') as f:
+            #     dic_chosen_env = pickle.load(f)
+            # with open('/home/ubuntu/Tai/classify/new_indicators/chosen_trigger.pickle', 'rb') as f:
+            #     dic_chosen_trigger = pickle.load(f)
+            # chosen_params_df_env = params_df_env[params_df_env.index.isin(dic_chosen_env.values())].reset_index(drop=True)
+
+            with open('/home/ubuntu/Tai/classify/new_indicators/lst_chosen_env.pickle', 'rb') as f:
+                lst_chosen_env = pickle.load(f)
+            with open('/home/ubuntu/Tai/classify/new_indicators/lst_chosen_trigger.pickle', 'rb') as f:
+                lst_chosen_trigger = pickle.load(f)
+            chosen_params_df_env = params_df_env[params_df_env.index.isin(lst_chosen_env)].reset_index(drop=True)
+            chosen_params_df_trigger = params_df_trigger[params_df_trigger.index.isin(lst_chosen_trigger)].reset_index(drop=True)
+            n_strats_env = Vectorized.MultiProcess.compute_signals_general(recompute_signals, params_df =chosen_params_df_env, plasma_name = 'sig_3d_array_env_chosen') 
+            n_strats_trigger = Vectorized.MultiProcess.compute_signals_general(recompute_signals, params_df = chosen_params_df_trigger, plasma_name = 'sig_3d_array_trigger_chosen')
+
+            _, disconnect, psave, pload = gen_plasma_functions(db=5)
+            array_3d = pload("sig_3d_array_env_chosen")
+            array_3d = array_3d[:,:1665, :]
+
+            # Store all pairwise AND operations
+            from itertools import combinations
+            pairwise_and_results = []
+            pair_indices = []
+
+            for i, j in combinations(range(array_3d.shape[0]), 2):
+                result = np.logical_and(array_3d[i], array_3d[j])
+                pairwise_and_results.append(result)
+                pair_indices.append((i, j))
+                
+            with open('/home/ubuntu/Tai/classify/new_indicators/pair_indices.pickle', 'wb') as f:
+                pickle.dump(pair_indices, f)
+            pairwise_and_array = np.array(pairwise_and_results)
+            psave("sig_3d_array_2envs",pairwise_and_array)
+
+            Vectorized.MultiProcess.compute_wr_re_nt_new_combination2(pairwise_and_array.shape[0], folder=store_folder)
+            Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=store_folder, des_folder=result_folder, name ='nt')
+            Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=store_folder, des_folder=result_folder, name ='re')
+            Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=store_folder, des_folder=result_folder, name ='wt')
+
+        @staticmethod
         def compute_nt_re_wr_new_combination():
-            name = 'new_combination'
+            name = 'new_combination2'
             store_folder = f"/data/Tai/{name}_tmp"
             maybe_create_dir(store_folder)
 
@@ -4673,10 +5199,31 @@ class Vectorized:
             
             n_strats_env = Vectorized.MultiProcess.compute_signals_env(recompute_signals)
             n_strats_trigger = Vectorized.MultiProcess.compute_signals_trigger(recompute_signals)
-            # n_strats = 1418
 
-            Vectorized.MultiProcess.compute_wr_re_nt_new_combination(n_strats, folder=store_folder)
-            Vectorized.JoinResults.join_wr_re_nt_data_new_combination(n_strats, stocks_map, src_folder=store_folder, des_folder=result_folder)
+            Vectorized.MultiProcess.compute_wr_re_nt_new_combination(n_strats_env, folder=store_folder)
+            Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=store_folder, des_folder=result_folder, name = 'nt')
+        @staticmethod
+        def compute_nt_re_wr_new_combination_os():
+            name = 'new_combination_os'
+            store_folder = f"/data/Tai/{name}"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/data/Tai/pickles/{name}"
+            maybe_create_dir(result_folder)
+            
+            recompute_signals = True
+            ## CALC  -------------------------------------------------------------------
+            
+            stocks_map, day_ls = Vectorized.calc_and_push_data_to_plasma(
+                                                push_return_numpy=True, 
+                                                push_stocks_numpy=True
+                                            )
+            
+            n_strats_env = Vectorized.MultiProcess.compute_signals_env(recompute_signals)
+            n_strats_trigger = Vectorized.MultiProcess.compute_signals_trigger(recompute_signals)
+
+            Vectorized.MultiProcess.compute_wr_re_nt_new_combination_os(n_strats_env, folder=store_folder)
+            Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=store_folder, des_folder=result_folder)
         @staticmethod
         def compute_nt_re_wr_new_cond2():
             name = 'new_cond_test'

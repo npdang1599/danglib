@@ -60,7 +60,6 @@ class TaskName:
     COMPUTE_SIGNALS = 'compute_signals'
     RUN_ANY_FUNCIONS = 'run_any_functions'
 
-
 def fix_conditions_params(conditions_params):
     map = {
         'F1': 'F1',
@@ -142,12 +141,10 @@ def other_conditions(conditions_params: dict, realtime=True, data = None):
     
     return signals
 
-
 def calculate_current_candletime(timestamps: float, timeframe: str, unit='s') -> float:
     """Calculate base candle times"""
     tf_seconds = Globs.TF_TO_MIN.get(timeframe) * 60
     return (timestamps // tf_seconds) * tf_seconds
-
 
 def calculate_finished_candletime(timestamps:float,  timeframe: str, unit='s'):
     """Calculate finished candle times"""
@@ -206,6 +203,7 @@ def compute_signals(
         df['num_entry_days'] = strategy['Number Entry Days']
         df['avg_return'] = strategy['Average Return']
         df['holding_periods'] = strategy['holding_periods']
+        df['rolling_window'] = strategy['rolling_window']
         df = df.dropna(subset=['entry_stamp'])
 
         return df
@@ -286,6 +284,7 @@ def compute_signals_no_catch_error(
     df['num_entry_days'] = strategy['Number Entry Days']
     df['avg_return'] = strategy['Average Return']
     df['holding_periods'] = strategy['holding_periods']
+    df['rolling_window'] = strategy['rolling_window']
     df = df.dropna(subset=['entry_stamp'])
 
     return df
@@ -314,7 +313,123 @@ def run_dynamic_function(function_path: str, *args, **kwargs):
     # Chạy hàm với các tham số được cung cấp
     return func(*args, **kwargs)
 
+@app.task()
+def compute_signals_general(
+    strategy: Dict[str, Any],
+    realtime: bool = True,
+    group_data: pd.DataFrame = None,
+    market_data: pd.DataFrame = None
+) -> Dict[str, Any]:
+    """Hàm mới: xử lý cả chiến thuật 1 điều kiện và 2 điều kiện (combine) cho signals."""
+    try:
+        # Nếu có 2 điều kiện và có group1, group2 thì xử lý riêng biệt và kết hợp bằng AND
+        if 'group1' in strategy and 'group2' in strategy and len(strategy.get('conditions', [])) == 2:
+            cond1 = [strategy['conditions'][0]]
+            cond2 = [strategy['conditions'][1]]
+            group1 = strategy['group1']
+            group2 = strategy['group2']
+            if group1 in group_conds:
+                signals1 = group_conditions(cond1, realtime, data=group_data)
+            else:
+                signals1 = other_conditions(cond1, realtime, data=market_data)
+            if group2 in group_conds:
+                signals2 = group_conditions(cond2, realtime, data=group_data)
+            else:
+                signals2 = other_conditions(cond2, realtime, data=market_data)
+            # Kết hợp tín hiệu (AND logic)
+            signals = Utils.and_conditions([signals1, signals2])
+        else:
+            # Trường hợp 1 điều kiện hoặc không có group1/group2
+            group = strategy['group']
+            if group in group_conds:
+                signals = group_conditions(strategy['conditions'], realtime, data=group_data)
+            else:
+                signals = other_conditions(strategy['conditions'], realtime, data=market_data)
+        signals.name = 'signals'
+        df = signals.to_frame().reset_index()
+        df['candleTime'] = df['candleTime'] // 1e9
+        df['exit_stamp'] = df['candleTime'].shift(-strategy['holding_periods']-1)
+        df = df.rename(columns={'candleTime': 'entry_stamp'})
+        df['entry_stamp'] = df['entry_stamp'].shift(-1)
+        df = df[df['signals']].copy()
+        df = df.drop(columns=['signals'])
 
-    
-    
+        df['name'] = strategy['name']
+        df['group'] = strategy.get('group', None)
+        df['group1'] = strategy.get('group1', None)
+        df['group2'] = strategy.get('group2', None)
+        df['type'] = strategy['type']
+        df['ftype'] = strategy['ftype']
+        df['Winrate'] = strategy.get('Win Rate', None)
+        df['num_trades'] = strategy.get('Number of Trades', None)
+        df['num_entry_days'] = strategy.get('Number Entry Days', None)
+        df['avg_return'] = strategy.get('Average Return', None)
+        df['holding_periods'] = strategy['holding_periods']
+        df['rolling_window'] = strategy.get('rolling_window', None)
+        df = df.dropna(subset=['entry_stamp'])
+        return df
+    except Exception as e:
+        logging.error(f"Error in compute_signals_general: {e} {strategy}")
+        logging.error(traceback.format_exc())
+        return {}
+
+
+def compute_signals_no_catch_error_general(
+    strategy: Dict[str, Any],
+    realtime: bool = True,
+    group_data: pd.DataFrame = None,
+    market_data: pd.DataFrame = None
+) -> Dict[str, Any]:
+    """Hàm mới: xử lý cả chiến thuật 1 điều kiện và 2 điều kiện (combine) cho signals."""
+
+    if 'group1' in strategy and 'group2' in strategy and len(strategy.get('conditions', [])) == 2:
+            cond1 = [strategy['conditions'][0]]
+            cond2 = [strategy['conditions'][1]]
+            group1 = strategy['group1']
+            group2 = strategy['group2']
+            if group1 in group_conds:
+                signals1 = group_conditions(cond1, realtime, data=group_data)
+            else:
+                signals1 = other_conditions(cond1, realtime, data=market_data)
+            if group2 in group_conds:
+                signals2 = group_conditions(cond2, realtime, data=group_data)
+            else:
+                signals2 = other_conditions(cond2, realtime, data=market_data)
+            # Kết hợp tín hiệu (AND logic)
+            signals = Utils.and_conditions([signals1, signals2])
+    else:
+        # Trường hợp 1 điều kiện hoặc không có group1/group2
+        group = strategy['group']
+        if group in group_conds:
+            signals = group_conditions(strategy['conditions'], realtime, data=group_data)
+        else:
+            signals = other_conditions(strategy['conditions'], realtime, data=market_data)
+
+    signals.name = 'signals'
+    df = signals.to_frame().reset_index()
+    df['candleTime'] = df['candleTime'] // 1e9
+    df['exit_stamp'] = df['candleTime'].shift(-strategy['holding_periods']-1)
+    df = df.rename(columns={'candleTime': 'entry_stamp'})
+    df['entry_stamp'] = df['entry_stamp'].shift(-1)
+    df = df[df['signals']].copy()
+    df = df.drop(columns=['signals'])
+
+    df['name'] = strategy['name']
+    df['group'] = strategy.get('group', None)
+    df['group1'] = strategy.get('group1', None)
+    df['group2'] = strategy.get('group2', None)
+    df['type'] = strategy['type']
+    df['ftype'] = strategy['ftype']
+    df['Winrate'] = strategy.get('Win Rate', None)
+    df['num_trades'] = strategy.get('Number of Trades', None)
+    df['num_entry_days'] = strategy.get('Number Entry Days', None)
+    df['avg_return'] = strategy.get('Average Return', None)
+    df['holding_periods'] = strategy['holding_periods']
+    df['rolling_window'] = strategy.get('rolling_window', None)
+    df = df.dropna(subset=['entry_stamp'])
+
+    return df
+
+
+
 # celery -A pslab_worker worker --concurrency=20 --loglevel=INFO -n celery_worker@pslab
