@@ -231,6 +231,11 @@ logging.basicConfig(
 
 
 class Adapters:
+    def load_arbit_unwind_data(day):
+        db = MongoDBs.cmc_curated()
+        data_dict = list(db.get_collection(f"{day}_arbit").find({},{'_id':0}))
+        df = pd.DataFrame(data_dict)
+        return df
 
     def load_vn30_weights_from_db(day=None):
         db = MongoClient('ws', 27021)['weights']
