@@ -670,12 +670,3 @@ def totime(stamp, unit='s'):
     return pd.to_datetime(stamp, unit=unit)
 
 
-import pandas as pd
-import numpy as np
-
-# Tạo dữ liệu mẫu
-data = pd.Series([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30])
-
-# Chia thành 4 nhóm bằng nhau
-result = pd.qcut(data, q=2)
-print(result)

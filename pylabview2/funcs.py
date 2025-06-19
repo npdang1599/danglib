@@ -2021,41 +2021,7 @@ class Conds:
                                                                 pct_hline=pct_hline,
                                                                 pct_hline_position=pct_hline_position
                 )
-                # if ma_use_flag:
-                #     df_ma1 = Ta.ma(df_relative_volume, ma_type = 'SMA', length = ma_len1)
-                #     df_ma2 = Ta.ma(df_relative_volume, ma_type = 'SMA', length = ma_len2)
-                #     res = Conds.Standards.two_line_pos(
-                #         line1=df_ma1,
-                #         line2=df_ma2,
-                #         direction=ma_position,
-                #         use_flag=ma_use_flag
-                #     )
-                # elif bb_use_flag:
-                #     df_bb_basis = Ta.sma(df_relative_volume, bb_length)
-                #     df_bb_stdev = Ta.stdev(df_relative_volume, bb_length)
-                #     df_bb_upper = df_bb_basis + bb_mult * df_bb_stdev
-                #     df_bb_lower = df_bb_basis - bb_mult * df_bb_stdev
-                #     if bb_cross_line == 'upper':
-                #         df_bb_cross_line = df_bb_upper
-                #     elif bb_cross_line == 'lower':
-                #         df_bb_cross_line = df_bb_lower 
-
-                #     res = Conds.Standards.two_line_pos(
-                #         line1=df_relative_volume,
-                #         line2=df_bb_cross_line,
-                #         direction=bb_position,
-                #         use_flag=bb_use_flag
-                #     )
-                # elif pct_use_flag:
-                #     df_pct = df_relative_volume.rolling(pct_lookback).rank()
-                #     df_pct = (df_pct - 1) / (pct_lookback - 1) * 100
-                #     hline = pd.DataFrame(pct_hline, index=df_pct.index, columns=df_pct.columns)
-                #     res = Conds.Standards.two_line_pos(
-                #         line1=df_pct,
-                #         line2=hline,
-                #         direction= pct_hline_position,
-                #         use_flag=pct_use_flag
-                #     )
+               
             return res
         @staticmethod
         def volume_cluster_vs_cluster_consecutive(
@@ -5013,7 +4979,8 @@ class Vectorized:
     class Runs:
         @staticmethod
         def compute_nt_re_wr_new_combination2_daylist():
-            name = 'new_combination4_yearly'
+            # name = 'new_combination4_yearly'
+            name = 'new_combination2_regime_duy'
             store_folder = f"/data/Tai/{name}_tmp"
             maybe_create_dir(store_folder)
 
@@ -5092,13 +5059,10 @@ class Vectorized:
                 print(f"Computing stats for {year} ... ", end = ' ')
                 Vectorized.MultiProcess.compute_wr_re_nt_new_combination2_daylist(pairwise_and_array.shape[0], lst_idx, folder=sub_store_folder)
                 print(f"Joining files ... ", end = ' ')
-                # Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=sub_store_folder, des_folder=sub_res_folder, name ='nt')
-                # Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=sub_store_folder, des_folder=sub_res_folder, name ='re')
-                # Vectorized.JoinResults.join_wr_re_nt_data_cfm(stocks_map, src_folder=sub_store_folder, des_folder=sub_res_folder, name ='wt')
                 print(f"Finished!")
             print("---------------------------------------------------------")
             print('Done!')
-
+            del year_map[2025]
             for year, idxs in year_map.items():
                 start_idx, end_idx = idxs
                 lst_idx = list(range(start_idx, end_idx))
@@ -5117,6 +5081,20 @@ class Vectorized:
                 print(f"Finished!")
             print("---------------------------------------------------------")
             print('Done!')
+
+            df_regime_duy = pd.read_pickle('/home/ubuntu/Tai/classify/new_indicators/resources/df_regime_label.pkl')
+            df_regime_duy = df_regime_duy.reset_index(drop=True)
+            # for regime in df_regime_duy['regime_label'].unique():
+            for regime in ['ACCUMULATION', 'UNKNOWN_SIDEWAYS', 'DISTRIBUTION']:
+                sub_store_folder = f"{store_folder}/{regime}"
+                maybe_create_dir(sub_store_folder)
+
+                sub_res_folder = f"{result_folder}/{regime}"
+                maybe_create_dir(sub_res_folder)
+                lst_idx = df_regime_duy[df_regime_duy['regime_label'] == regime].index.tolist()
+                print(f"Computing stats for {regime} ... ", end = ' ')
+                Vectorized.MultiProcess.compute_wr_re_nt_new_combination2_daylist(pairwise_and_array.shape[0], lst_idx, folder=sub_store_folder)
+
 
         @staticmethod
         def compute_nt_re_wr_new_combination2():

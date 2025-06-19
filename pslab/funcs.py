@@ -1030,8 +1030,14 @@ class Ta:
         
         # Xử lý theo ngày
         timestamp = data.index
-        date_groups = pd.to_datetime(timestamp, unit='ns').date
+        # date_groups = pd.to_datetime(timestamp, unit='ns').date
         
+        # Nếu là chuỗi ngày tháng, dùng format, nếu là số thì dùng unit
+        if isinstance(timestamp[0], str) and "_" in timestamp[0]:
+            date_groups = pd.to_datetime(timestamp, format="%Y_%m_%d").date
+        else:
+            date_groups = pd.to_datetime(timestamp, unit='ns').date
+
         # Tạo một MultiIndex DataFrame với date và timestamp gốc
         if isinstance(data, pd.Series):
             # Xử lý cho Series
@@ -2112,8 +2118,6 @@ class CombiConds:
             allow_remove_atc = True
             is_multiIndex_data = True
 
-        print(data.columns)
-        print(col_name)
         data_processed = data[col_name].copy() 
         data_processed = data_processed / scale
         resampling_method = Resampler.get_agg_dict([col_name])[col_name]
@@ -2348,7 +2352,13 @@ class CombiConds:
 
                 # Chuyển timestamp sang datetime và nhóm theo ngày
                 sample_series = next(iter(func_inputs.values()))
-                datetime_index = pd.to_datetime(sample_series.index, unit='ns')
+                # datetime_index = pd.to_datetime(sample_series.index, unit='ns')
+
+                idx = sample_series.index
+                if isinstance(idx[0], str) and "_" in idx[0]:
+                    datetime_index = pd.to_datetime(idx, format="%Y_%m_%d")
+                else:
+                    datetime_index = pd.to_datetime(idx, unit='ns')
 
                 # Tạo DataFrame tạm để nhóm dữ liệu
                 temp_df = pd.DataFrame(index=sample_series.index)
@@ -3211,6 +3221,7 @@ class ReturnStats:
                 'days': num_entry_days,
                 'winrate': (rets > 0).mean() * 100 if len(rets) else 0,
                 'avgret': rets.mean() if len(rets) else 0,
+                'stdret': rets.std() if len(rets) else 0,
                 'avghigh': signals['h_o'].dropna().mean() if len(signals) else 0,
                 'avglow': signals['l_o'].dropna().mean() if len(signals) else 0,
                 'maxret': rets.max() if len(rets) else 0,
@@ -3227,6 +3238,7 @@ class ReturnStats:
                 'Number Entry Days': num_entry_days,
                 'Win Rate (%)': (rets > 0).mean() * 100 if len(rets) else 0,
                 'Average Return': rets.mean() if len(rets) else 0,
+                'Std Return': rets.std() if len(rets) else 0,
                 'Average High Return': signals['h_o'].dropna().mean() if len(signals) else 0,
                 'Average Low Return': signals['l_o'].dropna().mean() if len(signals) else 0,
                 'Max Return': rets.max() if len(rets) else 0,
@@ -3236,27 +3248,38 @@ class ReturnStats:
                 'Average Loss': losses.mean() if len(wins) else 0
             }
             # Không thêm hậu tố với key dài
-        # Winrate not 22 nếu cần
+        # Winrate not 22 and 25 nếu cần
         if exclude_22:
-            signals_2023 = signals[signals['day'] >= '2023_01_01']
-            rets_2023 = signals_2023['c_o'].dropna()
-            winrate_not_22 = (rets_2023 > 0).mean() * 100 if len(rets_2023) else 0
+            signals_2023_2024 = signals[(signals['day'] >= '2023_01_01') & (signals['day'] <= '2024_12_31')]
+            rets_2023_2024 = signals_2023_2024['c_o'].dropna()
+            winrate_not_22_25 = (rets_2023_2024 > 0).mean() * 100 if len(rets_2023_2024) else 0
+            wins_2023_2024 = rets_2023_2024[rets_2023_2024 > 0]
+            losses_2023_2024 = rets_2023_2024[rets_2023_2024 < 0]
             if short_keys:
-                keys[f'winrate_not22{suffix}'] = winrate_not_22
+                keys[f'winrate_not22_25{suffix}'] = winrate_not_22_25
+                keys['Average Return Not 22 and 25'] = rets_2023_2024.mean() if len(rets_2023_2024) else 0
+                keys['Std Return Not 22 and 25'] = rets_2023_2024.std() if len(rets_2023_2024) else 0
+                keys['Profit Factor Not 22 and 25'] = abs(wins_2023_2024.sum() / losses_2023_2024.sum()) if len(losses_2023_2024) else float('inf')
             else:
-                keys['Win Rate Not 22 (%)'] = winrate_not_22
+                keys['Win Rate Not 22 and 25 (%)'] = winrate_not_22_25
+                keys['Average Return Not 22 and 25'] = rets_2023_2024.mean() if len(rets_2023_2024) else 0
+                keys['Std Return Not 22 and 25'] = rets_2023_2024.std() if len(rets_2023_2024) else 0
+                keys['Profit Factor Not 22 and 25'] = abs(wins_2023_2024.sum() / losses_2023_2024.sum()) if len(losses_2023_2024) else float('inf')
         # Nếu không có giao dịch, trả về 0 hết
         if not len(rets):
             if short_keys:
-                metric_keys = ['trades','days','winrate','avgret','avghigh','avglow','maxret','minret','pf','avgwin','avgloss']
+                metric_keys = ['trades','days','winrate','avgret','stdret','avghigh','avglow','maxret','minret','pf','avgwin','avgloss']
                 keys = {f"{k}{suffix}": 0 for k in metric_keys}
                 if exclude_22:
-                    keys[f'winrate_not22{suffix}'] = 0
+                    keys[f'winrate_not_22_25{suffix}'] = 0
             else:
-                metric_keys = ['Number of Trades','Number Entry Days','Win Rate (%)','Average Return','Average High Return','Average Low Return','Max Return','Min Return','Profit Factor','Average Win','Average Loss']
+                metric_keys = ['Number of Trades','Number Entry Days','Win Rate (%)','Average Return','Std Return','Average High Return','Average Low Return','Max Return','Min Return','Profit Factor','Average Win','Average Loss']
                 keys = {k: 0 for k in metric_keys}
                 if exclude_22:
-                    keys['Win Rate Not 22 (%)'] = 0
+                    keys['Win Rate Not 22 and 25 (%)'] = 0
+                    keys['Average Return Not 22 and 25'] = 0
+                    keys['Std Return Not 22 and 25'] = 0
+                    keys['Profit Factor Not 22 and 25'] = 0
         return keys
 
 def remove_redis():

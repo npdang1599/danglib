@@ -366,6 +366,7 @@ def compute_signals_general(
         df['avg_return'] = strategy.get('Average Return', None)
         df['holding_periods'] = strategy['holding_periods']
         df['rolling_window'] = strategy.get('rolling_window', None)
+        df['id'] = strategy.get('id', None)
         df = df.dropna(subset=['entry_stamp'])
         return df
     except Exception as e:
@@ -426,6 +427,7 @@ def compute_signals_no_catch_error_general(
     df['avg_return'] = strategy.get('Average Return', None)
     df['holding_periods'] = strategy['holding_periods']
     df['rolling_window'] = strategy.get('rolling_window', None)
+    df['id'] = strategy.get('id', None)
     df = df.dropna(subset=['entry_stamp'])
 
     return df
