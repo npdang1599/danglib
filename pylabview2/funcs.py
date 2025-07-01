@@ -5001,12 +5001,7 @@ class Vectorized:
             params_df_trigger = params_df[params_df['type'] == 'trigger'].reset_index(drop=True)
 
             import pickle
-            # with open('/home/ubuntu/Tai/classify/new_indicators/chosen_env.pickle', 'rb') as f:
-            #     dic_chosen_env = pickle.load(f)
-            # with open('/home/ubuntu/Tai/classify/new_indicators/chosen_trigger.pickle', 'rb') as f:
-            #     dic_chosen_trigger = pickle.load(f)
-            # chosen_params_df_env = params_df_env[params_df_env.index.isin(dic_chosen_env.values())].reset_index(drop=True)
-
+   
             with open('/home/ubuntu/Tai/classify/new_indicators/lst_chosen_env.pickle', 'rb') as f:
                 lst_chosen_env = pickle.load(f)
             with open('/home/ubuntu/Tai/classify/new_indicators/lst_chosen_trigger.pickle', 'rb') as f:
@@ -5291,6 +5286,113 @@ class Vectorized:
             df_gd_os.to_pickle(f"{result_folder}/df_gd_os.pkl")
             df_bd_os.to_pickle(f"{result_folder}/df_bd_os.pkl")
             df_nd_os.to_pickle(f"{result_folder}/df_nd_os.pkl")
+
+        @staticmethod
+        def compute_nt_re_wr_new_cond2_clustered():
+            name = 'new_cond_clustered'
+            store_folder = f"/data/Tai/{name}_tmp"
+            maybe_create_dir(store_folder)
+
+            result_folder = f"/data/Tai/pickles/{name}"
+            maybe_create_dir(result_folder)
+            
+            recompute_signals = True
+            
+            params_df_old: pd.DataFrame = Vectorized.create_params_sets()
+            params_df_new: pd.DataFrame = Vectorized.create_params_sets2()
+            params_df = pd.concat([params_df_old, params_df_new], ignore_index=True)
+            params_df_env = params_df[params_df['type'] == 'env'].reset_index(drop=True)
+            params_df_trigger = params_df[params_df['type'] == 'trigger'].reset_index(drop=True)
+
+            import pickle
+   
+            with open('/home/ubuntu/Tai/classify/new_indicators/lst_chosen_env.pickle', 'rb') as f:
+                lst_chosen_env = pickle.load(f)
+            with open('/home/ubuntu/Tai/classify/new_indicators/lst_chosen_trigger.pickle', 'rb') as f:
+                lst_chosen_trigger = pickle.load(f)
+            chosen_params_df_env = params_df_env[params_df_env.index.isin(lst_chosen_env)].reset_index(drop=True)
+            chosen_params_df_trigger = params_df_trigger[params_df_trigger.index.isin(lst_chosen_trigger)].reset_index(drop=True)
+            n_strats_env = Vectorized.MultiProcess.compute_signals_general(recompute_signals, params_df =chosen_params_df_env, plasma_name = 'sig_3d_array_env_chosen') 
+            n_strats_trigger = Vectorized.MultiProcess.compute_signals_general(recompute_signals, params_df = chosen_params_df_trigger, plasma_name = 'sig_3d_array_trigger_chosen')
+
+            _, disconnect, psave, pload = gen_plasma_functions(db=5)
+            array_3d_env = pload("sig_3d_array_env_chosen")
+            array_3d_trigger = pload("sig_3d_array_trigger_chosen")
+
+            array_3d = np.concatenate((array_3d_env, array_3d_trigger), axis=0)
+
+
+
+            _, disconnect, psave, pload = gen_plasma_functions(db=5)
+
+            array_3d = pload("sig_3d_array_new_cond")
+            array_3d_os = array_3d[:,1665:1803, :]
+            array_3d = array_3d[:,:1665, :]
+
+            re_2d = pload("return_array")
+            re_2d_os = re_2d[1665:1803]
+            re_2d = re_2d[:1665]
+
+            label_rudd_2d = pload("label_rudd")
+            label_rudd_2d_os = label_rudd_2d[1665:1803]
+            label_rudd_2d = label_rudd_2d[:1665]
+
+            num_trade = np.sum(array_3d, axis=1)
+            arr_return_3d = array_3d * re_2d
+            arr_return_3d = np.nan_to_num(arr_return_3d, 0.0)
+            arr_total_return = np.sum(arr_return_3d, axis=1)
+            arr_num_win = np.sum(arr_return_3d > 0, axis=1)
+
+            df_nt = pd.DataFrame(num_trade, columns = stocks_map.values())
+            df_re = pd.DataFrame(arr_total_return, columns = stocks_map.values())
+            df_wt = pd.DataFrame(arr_num_win, columns = stocks_map.values())
+            
+            df_nt.to_pickle(f"{result_folder}/df_nt.pkl")
+            df_re.to_pickle(f"{result_folder}/df_re.pkl")
+            df_wt.to_pickle(f"{result_folder}/df_wt.pkl")
+
+            # label
+            good_days = (array_3d * (label_rudd_2d==1)).sum(axis =1)
+            bad_days = (array_3d * (label_rudd_2d==-1)).sum(axis =1)
+            neutral_days = (array_3d * (label_rudd_2d==0)).sum(axis =1)
+
+            df_gd = pd.DataFrame(good_days, columns = stocks_map.values())
+            df_bd = pd.DataFrame(bad_days, columns = stocks_map.values())
+            df_nd = pd.DataFrame(neutral_days, columns = stocks_map.values())
+
+            df_gd.to_pickle(f"{result_folder}/df_gd.pkl")
+            df_bd.to_pickle(f"{result_folder}/df_bd.pkl")
+            df_nd.to_pickle(f"{result_folder}/df_nd.pkl")
+
+            ### os 
+            def calculate_stats(array_3d, re_2d, label_rudd_2d, stocks_map):
+                num_trade = np.sum(array_3d, axis=1)
+                arr_return_3d = array_3d * re_2d
+                arr_return_3d = np.nan_to_num(arr_return_3d, 0.0)
+                arr_total_return = np.sum(arr_return_3d, axis=1)
+                arr_num_win = np.sum(arr_return_3d > 0, axis=1)
+
+                df_nt = pd.DataFrame(num_trade, columns = stocks_map.values())
+                df_re = pd.DataFrame(arr_total_return, columns = stocks_map.values())
+                df_wt = pd.DataFrame(arr_num_win, columns = stocks_map.values())
+                
+                good_days = (array_3d * (label_rudd_2d==1)).sum(axis =1)
+                bad_days = (array_3d * (label_rudd_2d==-1)).sum(axis =1)
+                neutral_days = (array_3d * (label_rudd_2d==0)).sum(axis =1)
+
+                df_gd = pd.DataFrame(good_days, columns = stocks_map.values())
+                df_bd = pd.DataFrame(bad_days, columns = stocks_map.values())
+                df_nd = pd.DataFrame(neutral_days, columns = stocks_map.values())
+
+                return df_nt, df_re, df_wt, df_gd, df_bd, df_nd
+            df_nt_os, df_re_os, df_wt_os, df_gd_os, df_bd_os, df_nd_os = calculate_stats(array_3d_os, re_2d_os, label_rudd_2d_os, stocks_map)
+            df_nt_os.to_pickle(f"{result_folder}/df_nt_os.pkl")
+            df_re_os.to_pickle(f"{result_folder}/df_re_os.pkl")
+            df_wt_os.to_pickle(f"{result_folder}/df_wt_os.pkl")
+            df_gd_os.to_pickle(f"{result_folder}/df_gd_os.pkl")
+            df_bd_os.to_pickle(f"{result_folder}/df_bd_os.pkl")
+            df_nd_os.to_pickle(f"{result_folder}/df_nd_os.pkl")
+
 
         @staticmethod
         def compute_nt_re_wr_os():

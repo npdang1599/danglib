@@ -950,8 +950,10 @@ class Ta:
     #     else:
     #         raise ValueError(f"Invalid rolling method: {method}. Must be one of: sum, median, mean, rank")
 
+
+        
     @staticmethod
-    def apply_rolling_old(data: PandasObject, window: int, method: str = 'sum', daily_rolling: bool = True):
+    def apply_rolling(data: PandasObject, window: int, method: str = 'sum', daily_rolling: bool = True):
         """Apply rolling operation based on specified method
         Args:
             data: Input series/dataframe
@@ -961,46 +963,50 @@ class Ta:
             Rolled data with specified method
         """
         def rolling_data(data_input, window_size, method_name):
-
-
             window_size = int(window_size)
             rolling = data_input.rolling(window_size)
-            if method_name == 'sum':
-                return rolling.sum()
-            elif method_name == 'median':
-                return rolling.median()
-            elif method_name == 'mean':
-                return rolling.mean()
-            elif method_name == 'rank':
-                return (rolling.rank() - 1) / (window_size - 1) * 100
-            else:
-                raise ValueError(f"Invalid rolling method: {method_name}. Must be one of: sum, median, mean, rank")
+            if method_name == 'sum': return rolling.sum()
+            elif method_name == 'median': return rolling.median()
+            elif method_name == 'mean': return rolling.mean()
+            elif method_name == 'rank': return (rolling.rank() - 1) / (window_size - 1) * 100
+            else: raise ValueError(f"Invalid method: {method_name}. Use: sum, median, mean, rank")
         
+        
+        def test():
+            data: pd.DataFrame = pd.read_pickle("/home/ubuntu/Dang/pslab_realtime_be/cache/fix_apply_rolling_for_stock_count.pkl")
+            data = data['VIX']
+            window = 10
+            method = 'mean'
+            daily_rolling = False
+            # data['date'] = pd.to_datetime(data.index, unit='ns').date
+            # data['dgroups'] = data.index // 86400000000000
+            # data.groupby(['date'])['dgroups'].unique()
+            day_groups = data.index // 86400000000000
+            data = data.groupby(day_groups).transform(lambda x: x.rolling(window).mean())
+
+            # from danglib.utils import check_column_sorted
+            # check_column_sorted(data.index, ascending=True)
+
+
         if daily_rolling:
             return rolling_data(data, window, method)
         
+        # Xử lý theo ngày
         timestamp = data.index
-        datetime_index = pd.to_datetime(timestamp, unit='ns')
+        # date_groups = pd.to_datetime(timestamp, unit='ns').date
         
-        # Tạo DataFrame tạm để nhóm dữ liệu
-        temp_df = pd.DataFrame(index=timestamp)
-        temp_df['date'] = datetime_index.date
-        temp_df['data'] = data.values  # Lưu giá trị của data vào temp_df
-        
-        # Định nghĩa function cho apply
-        def apply_rolling_to_group(group):
-            group_data = pd.Series(group['data'].values, index=group.index)
-            return rolling_data(group_data, window, method)
-        
-        # Nhóm các index theo ngày và áp dụng rolling
-        result = temp_df.groupby('date').apply(apply_rolling_to_group)
-        
-        
-        # Hoặc sắp xếp lại kết quả theo timestamp gốc
-        return pd.Series(result.values.tolist(), index=timestamp).sort_index()
+        # Nếu là chuỗi ngày tháng, dùng format, nếu là số thì dùng unit
+        if isinstance(timestamp[0], str) and "_" in timestamp[0]:
+            date_groups = pd.to_datetime(timestamp, format="%Y_%m_%d").date
+        else:
+            date_groups = timestamp // 86400000000000  # Chia theo ngày (1 ngày = 86400000000000 ns)
+
+        return data.groupby(date_groups).transform(
+            lambda x: rolling_data(x, window, method)
+        )
     
     @staticmethod
-    def apply_rolling(data: PandasObject, window: int, method: str = 'sum', daily_rolling: bool = True):
+    def apply_rolling_old(data: PandasObject, window: int, method: str = 'sum', daily_rolling: bool = True):
         """Apply rolling operation based on specified method
         Args:
             data: Input series/dataframe
@@ -1050,7 +1056,7 @@ class Ta:
                     window, method
                 )
             )
-            return pd.Series(result.values, index=timestamp).sort_index()
+            return pd.Series(result.values.flatten(), index=timestamp).sort_index()
         else:
             # Xử lý cho DataFrame
             multi_idx_data = data.copy()
@@ -2240,7 +2246,8 @@ class CombiConds:
                 else:
                     data = provided_data
                 data = Utils.slice_df_with_timestamp_index(data, start_day=start_day, end_day=end_day)
-                data = data.groupby(level=0, axis=1).sum()
+                if filtered_stocks != ['All'] or realtime:
+                    data = data.groupby(level=0, axis=1).sum()
                 for data_key, params in required_cols.items():
                     if params['stocks_key'] == stocks_key and data_key not in required_data:
                         required_data[data_key] = CombiConds._process_data_series(data, **params)
@@ -2262,7 +2269,16 @@ class CombiConds:
                     data = Adapters.load_stock_data_from_plasma(list(unique_cols), stocks=stocks)
             else:
                 data = provided_data[list(unique_cols)]
-
+            # a = data.copy()
+            # a.index = a.index / 1e9  # Convert index to nanoseconds if needed
+            # a['time_str'] = pd.to_datetime(a.index, unit='s')
+            # print('hehe', a)
+            # if realtime:
+            #     name = 'realtime'
+            # else:
+            #     name = 'backtest'
+            # filename = f'/home/ubuntu/hip/{name}_{a.columns[0]}.xlsx'
+            # a.to_excel(filename, index=True)
             data = Utils.slice_df_with_timestamp_index(data, start_day=start_day, end_day=end_day)
 
 
@@ -2928,6 +2944,7 @@ class ReturnStats:
             'monthly': ReturnStats._calculate_monthly_stats(df),
             'daily': ReturnStats._calculate_daily_stats(df)
         }
+
 
     @staticmethod
     def _calculate_yearly_stats(df: pd.DataFrame) -> pd.DataFrame:

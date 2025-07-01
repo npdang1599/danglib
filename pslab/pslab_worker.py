@@ -135,7 +135,16 @@ def other_conditions(conditions_params: dict, realtime=True, data = None):
         
     # Load one series data
     required_data, updated_params = CombiConds.load_and_process_one_series_data(conditions_params, realtime=realtime, data=data)
-    
+    # print('required_data', required_data)
+    # a = pd.DataFrame(required_data)
+    # a.index = pd.to_datetime(a.index / 1e9 , unit='s') 
+    # if realtime:
+    #     name = 'realtime'
+    # else:
+    #     name = 'backtest'
+    # filename = f'/home/ubuntu/hip/{name}_{a.columns[0]}.xlsx'
+    # a.to_excel(filename, index=True)
+    # print('updated_params', updated_params)
     # Generate signals
     signals = CombiConds.combine_conditions(required_data, updated_params)
     
