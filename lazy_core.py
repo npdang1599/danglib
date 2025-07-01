@@ -839,7 +839,7 @@ def  gen_plasma_functions(db=0):
 
     class Closure:
         pclient = get_plasma_client(db=db)
-        rb = StrictRedis()
+        rb = StrictRedis(host='localhost')
 
     def time_stamp():
         return str.encode(str(int(dt.now().timestamp() * 1000_000)))

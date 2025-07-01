@@ -17,7 +17,7 @@ if "ACCEPT_TC" not in os.environ:
     os.environ["ACCEPT_TC"] = "tôi đồng ý"
 
 HOST = "localhost"
-r = StrictRedis()
+r = StrictRedis(host="localhost")
 today = dt.now().strftime(format="%Y-%m-%d")
 
 class Adapters:

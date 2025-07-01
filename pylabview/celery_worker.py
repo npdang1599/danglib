@@ -309,3 +309,4 @@ def scan_one_stock_v5(
 
 
 # celery -A celery_worker worker --concurrency=30 --loglevel=INFO -n celery_worker@pylabview
+# pm2 start --name pylabview_celery_worker "celery -A celery_worker worker --concurrency=30 --loglevel=INFO -n celery_worker@pylabview"
