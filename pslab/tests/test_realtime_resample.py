@@ -345,7 +345,7 @@ fig.show()
 
 from danglib.pslab.resources import Adapters
 from redis import StrictRedis
-r = StrictRedis(host='ws2', decode_responses=True)
+r = StrictRedis(host='localhost', decode_responses=True)
 df =Adapters.RedisAdapters.load_realtime_PS_data_from_redis(r, '2025_03_04')
 
 import plotly.express as px
