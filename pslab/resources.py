@@ -683,19 +683,22 @@ class Adapters:
 
             key = Resources.PlasmaKeys.GROUP_STATS
 
-            ls = []
-            for g in Globs.SECTOR_DIC.keys():
-                path = Resources.get_group_stats_aggregated('30S', group=g)
-                df_tmp: pd.DataFrame = pd.read_pickle(path)
-                df_tmp = df_tmp.rename(columns={c:f"{c}_{g}" for c in df_tmp.columns})
+            df = Adapters.load_stock_data_from_plasma()
+            df = df.groupby(level=0, axis=1).sum()
 
-                ls.append(df_tmp)
+            # ls = []
+            # for g in Globs.SECTOR_DIC.keys():
+            #     path = Resources.get_group_stats_aggregated('30S', group=g)
+            #     df_tmp: pd.DataFrame = pd.read_pickle(path)
+            #     df_tmp = df_tmp.rename(columns={c:f"{c}_{g}" for c in df_tmp.columns})
+
+            #     ls.append(df_tmp)
             
-            df = pd.concat(ls, axis=1).sort_index()
+            # df = pd.concat(ls, axis=1).sort_index()
 
-            df = unflatten_columns(df)
-            df = df.sort_index(axis=1)
-            df = df.rename(columns={'fBuyVol': 'fBuyVal', 'fSellVol': 'fSellVal', 'matchingValue': 'value'})
+            # df = unflatten_columns(df)
+            # df = df.sort_index(axis=1)
+            # df = df.rename(columns={'fBuyVol': 'fBuyVal', 'fSellVol': 'fSellVal', 'matchingValue': 'value'})
 
             if create_sample:
                 dfs = df[df.index > Globs.get_sample_from_day()]
@@ -782,15 +785,14 @@ class Adapters:
         
         def test(): 
             required_stats = ['bu', 'sd']
-            groups_and_stocks = ['All']
+            groups_and_stocks = ['HPG', 'SSI', 'VPB']
             from_day = '2024_10_01'
             to_day = '2025_10_25'
 
-        if groups_and_stocks is None:
-            return Adapters.load_group_data_from_plasma()
         
         # stocks = [i for i in groups_and_stocks if i in Globs.STOCKS]
-
+        if groups_and_stocks == ['All']:
+            return Adapters.load_group_data_from_plasma(required_stats)
 
         true_stocks = []
         if groups_and_stocks is not None:
@@ -801,13 +803,7 @@ class Adapters:
                     true_stocks.append(s)
 
         true_stocks = [i for i in true_stocks if i in Globs.STOCKS]
-
-        ls = []
-        if len(true_stocks) > 0:
-            ls.append(Adapters.load_stock_data_from_plasma(required_stats, true_stocks, load_sample))
-
-        df = pd.concat(ls, axis=1).sort_index()
-
+        df = Adapters.load_stock_data_from_plasma(required_stats, true_stocks, load_sample)
         return df
 
     @staticmethod

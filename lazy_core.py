@@ -871,6 +871,15 @@ def  gen_plasma_functions(db=0):
             Closure.rb.rpush(f'debug.plasma.{db}.read', message + 'FAILED')
             sleep(0.05)
             return ObjectNotAvailable
+        
+        # try:
+        #     # obj = Closure.pclient.get(plasma_key, timeout_ms=10)
+        #     obj = load_from_plasma(plasma_key)
+        # except ObjectNotAvailable:
+        #     print(f"{dt.now().strftime('%H:%M:%S')}: {Tc.CBLUEBG2}{Tc.CBLACK}{key}{Tc.CEND}", "plasma key not found")
+        #     Closure.rb.rpush(f'debug.plasma.{db}.read', message + 'FAILED')
+        #     sleep(0.05)
+        #     return ObjectNotAvailable
 
         Closure.rb.rpush(f'debug.plasma.{db}.read', message + 'SUCCESS')
         res = [obj]
@@ -924,7 +933,7 @@ def summarize_plasma(db=0):
 
     client = get_plasma_client(db=db)
     lst = vals(client.list())
-    lst = [x for x in lst if x['ref_count'] > 0]
+    # lst = [x for x in lst if x['ref_count'] > 0]
 
     df = pd.DataFrame(lst)
     print('Plasma objects with ref:', df['data_size'].sum()/1000_000_000, 'GB')
