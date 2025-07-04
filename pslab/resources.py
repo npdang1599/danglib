@@ -1159,15 +1159,3 @@ def fix_fBuySell_data():
 
 
 Globs.SECTOR_DIC.update(Adapters.load_sector_stocks_data_from_db())
-
-
-       
-
-
-
-
-    
-
-    
-
-

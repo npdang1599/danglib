@@ -2,8 +2,8 @@
 import traceback
 from celery import Celery
 from redis import Redis
-from funcs import Globs, CombiConds, ReturnStatsConfig, ReturnStats, Adapters, Resampler
-from utils import Utils
+from danglib.pslab.funcs import Globs, CombiConds, ReturnStatsConfig, ReturnStats, Adapters, Resampler
+from danglib.pslab.utils import Utils
 
 
 from typing import List, Dict, Any
