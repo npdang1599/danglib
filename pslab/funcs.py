@@ -1,10 +1,11 @@
+import hashlib
 from typing import Dict, Union
 import pandas as pd
 import numpy as np
 from datetime import datetime
 
 from danglib.pslab.resources import Adapters, Globs, RedisHandler
-from danglib.pslab.utils import Utils
+from danglib.pslab.utils import Utils, RedisHandler, day_to_timestamp
 from danglib.pslab.test_sets import TestSets
 
 from typing import Union, List, Dict
@@ -20,6 +21,47 @@ class InputSourceEmptyError(Exception):
     pass
 
 PandasObject = Union[pd.Series, pd.DataFrame]
+
+def create_condition_hash_key(count_conditions: dict):
+
+    def _hash_sha256(value):
+        # Chuyển thành bytes nếu đầu vào là chuỗi
+        value_bytes = value.encode('utf-8') if isinstance(value, str) else value
+        # Tính hash bằng SHA-256
+        hash_object = hashlib.sha256(value_bytes)
+        return hash_object.hexdigest()  # Trả về dạng chuỗi hex
+
+    def test():
+        count_conditions = [
+            {
+                'function': 'two_line_pos',
+                'inputs': {
+                    'line1': 'bu',
+                    'line2': 'sd',
+                    'rolling_timeframe': '15Min'
+                },
+                'params': {
+                    'direction': 'crossover'
+                }
+            },
+            {
+                'function': "is_in_top_bot_percentile",
+                'inputs': {
+                    'src': 'bu2',
+                    'rolling_timeframe': '15Min'
+                },
+                'params': {
+                    'lookback_period': 1000,
+                    'direction': 'top',
+                    'threshold': 90,
+                    'use_as_lookback_cond': True,
+                    'lookback_cond_nbar': 5
+                }
+            }
+        ]
+
+    hashed_count_conditions = f"pslab/stockcount/{_hash_sha256(str(count_conditions))}"
+    return hashed_count_conditions
 
 def remove_nan_keys(data):
     """Xoá tất cả key có value bằng NaN trong từng object của list"""
@@ -47,6 +89,19 @@ def append_to_file(filename: str, content: str) -> None:
     except IOError as e:
         print(f"Error occurred while writing to file: {e}")
 
+def fix_conditions_params(conditions_params):
+    map = {
+        'F1': 'F1',
+        'VN30': 'Vn30',
+        'VNINDEX': 'Vnindex'
+    }
+
+    for condition in conditions_params:
+        for key, value in condition["inputs"].items():
+            if isinstance(value, str): 
+                for old, new in map.items():
+                    if old in value: 
+                        condition["inputs"][key] = value.replace(old, new)
 
 class Functions:
     def __init__(self):
@@ -513,6 +568,8 @@ def input_source_functions():
         }
     }
 
+
+
 class Resampler:
 
     @staticmethod
@@ -637,7 +694,6 @@ class Resampler:
         grouped = df.groupby('candleTime').agg(agg_dict)
         
         return grouped.sort_index()
-
 
 class Ta:
     """Technical analysis with vectorized operations for both Series and DataFrame"""
@@ -1369,8 +1425,6 @@ class Indicators:
         result.name = 'const'
             
         return result
-
-   
 
 class Conds:
     """Market condition analysis functions with vectorized operations"""
@@ -2292,7 +2346,6 @@ class CombiConds:
 
         return required_data, updated_conditions
 
-
     # Wrapper methods for backward compatibility
     @staticmethod
     def load_and_process_group_data(conditions_params: list[dict],
@@ -2424,6 +2477,288 @@ class CombiConds:
                 result = Utils.and_conditions([result, signal])
             
         return result
+
+    @staticmethod
+    def group_conditions(conditions_params: dict, realtime=True, data=None):
+        """
+            Process strategies that use stock data.
+            Args:
+                conditions_params: List of strategies with stocks
+            Returns:
+                pd.Series of boolean signals
+        """
+        
+        if not conditions_params:
+            return None
+            
+        # Load stock data
+        required_data, updated_params = CombiConds.load_and_process_group_data(conditions_params, realtime=realtime, data=data)
+        # Generate signals
+        signals = CombiConds.combine_conditions(required_data, updated_params)
+        return signals
+
+    @staticmethod
+    def other_conditions(conditions_params: dict, realtime=True, data = None):
+        """
+            Process strategies that use one series data.
+            Args:
+                conditions_params: List of strategies without stocks
+            Returns:
+                pd.Series of boolean signals
+        """
+        if not conditions_params:
+            return None
+        
+        fix_conditions_params(conditions_params)
+        required_data, updated_params = CombiConds.load_and_process_one_series_data(conditions_params, realtime=realtime, data=data)
+        signals = CombiConds.combine_conditions(required_data, updated_params)
+        return signals
+
+    @staticmethod
+    def index_daily_conditions(conditions_params: dict, index=None):
+        """
+            Process strategies that use one series data.
+            Args:
+                conditions_params: List of strategies without stocks
+            Returns:
+                pd.Series of boolean signals
+        """
+
+        if not conditions_params:
+            return None
+
+        fix_conditions_params(conditions_params)
+
+        def test():
+            conditions_params = [
+                {
+                    "function": "absolute_change_in_range",
+                    "inputs": {
+                    "src": "VNINDEXClose",
+                    },
+                    "params": {
+                    "n_bars": 5,
+                    "lower_thres": 1,
+                    "upper_thres": 999,
+                    "use_as_lookback_cond": False,
+                    "lookback_cond_nbar": 5
+                    }
+                }
+            ]
+
+            
+        # Load one series data
+        required_data, updated_params = CombiConds.load_and_process_one_series_data(conditions_params, data_src='daily_index')
+        # Generate signals
+        matched: pd.Series = CombiConds.combine_conditions(required_data, updated_params)
+
+        if matched is None:
+            return matched
+        
+        if isinstance(matched, pd.Series):
+            df = matched.to_frame('signal')
+        else:
+            df = matched.copy()
+            df.columns = ['signal']
+
+        df['signal'] = df['signal'].shift(1).fillna(False)
+        df['datetime'] = pd.to_datetime(df.index + ' ' + '09:15:00', format = '%Y_%m_%d %H:%M:%S')
+        df['timestamp'] = df['datetime'].astype(int)
+
+        signal = df.set_index('timestamp')['signal']
+
+        full_index = pd.DataFrame(index)
+        full_index = full_index.sort_values('candleTime')
+        full_index['signal'] = full_index['candleTime'].map(signal).ffill()
+        full_index['date'] = pd.to_datetime(full_index['candleTime']).dt.date
+        full_index[full_index['signal']]['date'].unique()
+
+        return full_index.set_index('candleTime')['signal']
+    
+    @staticmethod
+    def stockscount_conditions(
+        conditions_params: list[dict], 
+        stocks: list = None,
+        count_smoothlen: int = 5, 
+        count_dups: bool = False, 
+        cons_nbar: int = 10, 
+        percentage_smoothlen: int = 5, 
+        percentile_lookback_nbar: int = 256,
+        line: str = 'count',
+        check_redis: bool = True,
+        redis_handler: RedisHandler = None,
+        redis_key = 'auto'
+    ):
+
+        def stockscount():
+            required_data, updated_params = CombiConds.load_and_process_stock_data(conditions_params, stocks = stocks)
+
+            matched: pd.DataFrame = CombiConds.combine_conditions(required_data, updated_params)
+            if matched is None:
+                df_count = Utils.new_1val_series(0, list(required_data.values())[0]).to_frame("count")
+                return df_count
+            else:
+                assert line in ['count', 'consCount', 'percentage', 'percentile'], "`line` must be one of ['count', 'consCount', 'percentage', 'percentile']"
+                
+                df_count: pd.DataFrame = matched.sum(axis=1)
+
+                if line == 'count':
+                    return Ta.sma(df_count, count_smoothlen).to_frame('count')
+                
+                if line == 'consCount': 
+                    if count_dups:
+                        consCount = df_count.rolling(cons_nbar).sum()
+                    else:
+                        df_lookback = matched.rolling(cons_nbar).max()
+                        consCount = df_lookback.sum(axis=1)
+                    return Ta.sma(consCount, count_smoothlen).to_frame('count')
+
+                if line == 'percentage':
+                    num_stocks = len(matched.columns)
+                    percentage = (df_count / num_stocks) * 100
+                    return Ta.sma(percentage, percentage_smoothlen).to_frame('count')
+
+                if line == 'percentile':
+                    return df_count.rolling(percentile_lookback_nbar).rank(pct=True).to_frame('count')
+                
+        if check_redis:
+            if redis_handler is None:
+                raise ValueError("redis_handler must be provided for stockscount_conditions")
+
+            if redis_key == 'auto':
+                # Calculate stock count based on conditions
+                count_line = {
+                    'count_smoothlen': count_smoothlen, 
+                    'count_dups': count_dups, 
+                    'cons_nbar': cons_nbar, 
+                    'percentage_smoothlen': percentage_smoothlen, 
+                    'percentile_lookback_nbar': percentile_lookback_nbar,
+                    'line': line,
+                    'stocks': stocks,
+                    'conditions_params': conditions_params
+                }
+                
+                # Generate redis key for this condition
+                redis_key = create_condition_hash_key(count_conditions=count_line)
+
+            if not redis_handler.check_exist(redis_key):
+                df_count = stockscount()
+                redis_handler.set_key_with_ttl(redis_key, df_count, pickle_data=True)
+            else:
+                df_count = redis_handler.get_key(redis_key, pickle_data=True)
+
+            return {
+                'data': df_count.to_dict(orient='records'),
+                'redis_key': redis_key
+            }
+
+        else:
+            return stockscount()
+    
+    
+
+    @staticmethod
+    def apply_conditions_on_stockscount(conditions_params: list, redis_handler: RedisHandler=None, realtime: bool = False):
+        if redis_handler is None:
+            redis_handler = RedisHandler()
+
+        def _load_and_process_counted_data(conditions_params: dict):
+            required_data = {}  # Will store all needed data series/frames
+            original_cols = set()  # Track original redis keys
+            rolling_cols = set()  # Track (key, timeframe) combinations needed
+            
+            # First pass: Analyze data requirements and update conditions_params
+            updated_conditions = []
+            for condition in conditions_params:
+                rolling_window = condition['inputs'].get('rolling_window')
+                rolling_tf = condition['inputs'].get('rolling_timeframe')
+                rolling_method = condition['inputs'].get('rolling_method', 'sum')
+              
+                # Create new condition with updated column names
+                new_condition = {'function': condition['function'], 'inputs': {}, 'params': condition['params']}
+                
+                for param_name, value in condition['inputs'].items():
+                    if value == "":
+                        raise InputSourceEmptyError(f"Input {param_name} is empty!")
+                    if param_name not in CombiConds.INPUTS_SIDE_PARAMS:
+                        redis_key = value  # Now expecting redis key instead of full condition params
+                        
+                        if rolling_tf:
+                            rolling_tf_val = rolling_window if rolling_window is not None else Utils.convert_timeframe_to_rolling(rolling_tf)
+                            rolling_cols.add((redis_key, rolling_tf_val, rolling_method))
+                            new_key = f"{redis_key}_{rolling_tf_val}_{rolling_method}"
+                        else:
+                            original_cols.add(redis_key)
+                            new_key = f"{redis_key}_None"
+                        new_condition['inputs'][param_name] = new_key
+                    else:
+                        new_condition['inputs'][param_name] = condition['inputs'][param_name]
+                
+                updated_conditions.append(new_condition)
+
+            def get_redis_source(src: str):
+                key_split = src.split("-")
+                if len(key_split) == 1:
+                    redis_key = key_split[0]
+                    src_name = 'count'
+                else:
+                    redis_key = key_split[0]
+                    src_name = key_split[1]
+
+                if not redis_handler.check_exist(redis_key):
+                    raise NoRedisDataError(f"Data not found in Redis for key: {redis_key}")
+                return redis_handler.get_key(redis_key, pickle_data=True)[src_name]
+            
+             # Add original data
+            for src in original_cols:
+                key = f"{src}_None"
+                required_data[key] = get_redis_source(src)
+            
+            # Add rolled data
+            for src, tf, method in rolling_cols:
+                key = f"{src}_{tf}_{method}"
+                data: pd.DataFrame = get_redis_source(src)
+                required_data[key] = Ta.apply_rolling(data, tf, method)
+
+            return required_data, updated_conditions
+        
+        required_data, updated_conditions = _load_and_process_counted_data(conditions_params)
+
+        if required_data is None:
+            return None
+
+        matched = CombiConds.combine_conditions(required_data, updated_conditions)
+
+        return matched
+    
+    @staticmethod
+    def compute_all_conditions(
+        countline_params: list[dict],
+        group_params: list[dict],
+        other_params: list[dict],
+        dailyindex_params:list[dict],
+        index: str,
+        timeframe: str,
+        realtime: bool = False,
+        *args, **kwargs
+    ):
+        # Get matched signals
+        matched_countline = CombiConds.apply_conditions_on_stockscount(countline_params)
+        matched_group = CombiConds.group_conditions(group_params, realtime=realtime)
+        matched_other = CombiConds.other_conditions(other_params, realtime=realtime)
+
+        if dailyindex_params:
+            df_ohlc = Adapters.load_index_ohlcv_from_plasma(name=index)
+            df_ohlc = Resampler.resample_vn_stock_data(df_ohlc, timeframe=timeframe, agg_dict=Resampler.get_agg_dict(list(df_ohlc.columns)))
+            index_daily_signals = CombiConds.index_daily_conditions(dailyindex_params, index=df_ohlc.index)
+        else:
+            index_daily_signals = None
+
+        signals = Utils.and_conditions([matched_countline, matched_group, matched_other, index_daily_signals])
+
+        return signals
+
+
 
 
 class QuerryData:
