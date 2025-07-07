@@ -4,11 +4,10 @@
 
 <!-- Link your working ticket here: [title](url-to-trello-ticket)-->
 
-<!-- Brief description of what this PR does - type of change, purpose etc. -->
+<!-- Brief description of what this PR does - type of change, purpose, etc. -->
+<!-- List out the changes if needed -->
 
 ## Check list
-
-<!-- Describe how you tested these changes -->
 
 - [ ] The change does not contain sensitive data (secrets, API keys, etc.)
 - [ ] Added new tests for new functionality (if necessary)
@@ -18,7 +17,7 @@
 - [ ] Code comments added/updated
 - [ ] Other documentation updated
 - [ ] No merge conflicts
-- [ ] Typo checks
+- [ ] Typos checked
 
 ## Additional Notes
 
