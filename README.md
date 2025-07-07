@@ -4,7 +4,7 @@ TBA
 
 # READMEs
 
-[Tool for migrating plasma store](./.documents/migration-tool..md)
+[Tool for migrating plasma store](./docs/plasma-data-migration-tool.md)
 
 # CONTRIBUTING
 
