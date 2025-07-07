@@ -1,12 +1,25 @@
-# Description
+# Pull Request
 
-Link your working ticket here:
+## Description
 
-Add a brief or detailed description of your pull request - what problem you are solving?
+<!-- Link your working ticket here: [title](url-to-trello-ticket)-->
 
-# Checklist
+<!-- Brief description of what this PR does - type of change, purpose etc. -->
 
-- [ ] I have self-reviewed my code changes
-- [ ] I have self-tested my new code
+## Check list
+
+<!-- Describe how you tested these changes -->
+
 - [ ] The change does not contain sensitive data (secrets, API keys, etc.)
-- TBA.
+- [ ] Added new tests for new functionality (if necessary)
+- [ ] Manual testing completed
+- [ ] README updated
+- [ ] API documentation updated
+- [ ] Code comments added/updated
+- [ ] Other documentation updated
+- [ ] No merge conflicts
+- [ ] Typo checks
+
+## Additional Notes
+
+<!-- Any additional information for reviewers -->
