@@ -2744,8 +2744,8 @@ class CombiConds:
     ):
         # Get matched signals
         matched_countline = CombiConds.apply_conditions_on_stockscount(countline_params)
-        matched_group = CombiConds.group_conditions(group_params, realtime=realtime)
-        matched_other = CombiConds.other_conditions(other_params, realtime=realtime)
+        matched_group = CombiConds.group_conditions(group_params, realtime=realtime, data=kwargs.get('group_data', None))
+        matched_other = CombiConds.other_conditions(other_params, realtime=realtime, data=kwargs.get('market_data', None))
 
         if dailyindex_params:
             df_ohlc = Adapters.load_index_ohlcv_from_plasma(name=index)

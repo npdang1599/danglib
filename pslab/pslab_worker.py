@@ -65,7 +65,9 @@ class TaskName:
 @app.task(name=TaskName.COMPUTE_SIGNALS)
 def compute_signals(
     strategy: dict,
-    realtime: bool = False
+    realtime: bool = False,
+    group_data: pd.DataFrame = None,
+    market_data: pd.DataFrame = None,
 ) -> Dict[str, Any]:
     """Tính toán tín hiệu giao dịch dựa trên điều kiện và tham số đầu vào.
 
@@ -83,7 +85,7 @@ def compute_signals(
     try:
         conditions = strategy['conditions']
         signals: pd.Series = CombiConds.compute_all_conditions(
-            **conditions, realtime=realtime,
+            **conditions, realtime=realtime, group_data=group_data, market_data=market_data
         )
         
         signals.name = 'signals'
